@@ -152,10 +152,7 @@ fn windows_install_creates_everything_and_is_idempotent() {
         assert!(s.run_as_admin && s.workdir == l.dir && s.icon == r"C:\Program Files\Kora\kora.exe,0");
     }
     let k = f.key.clone().unwrap();
-    assert_eq!(
-        (k.display_name.as_str(), k.display_version.as_str(), k.publisher.as_str(), k.install_location.as_str()),
-        ("Kora", "0.2.0", "Kora", r"C:\Program Files\Kora")
-    );
+    assert_eq!((k.display_name.as_str(), k.display_version.as_str(), k.publisher.as_str(), k.install_location.as_str()), ("Kora", "0.2.0", "Kora", r"C:\Program Files\Kora"));
     assert_eq!(k.uninstall_string, r#""C:\Program Files\Kora\kora.exe" uninstall --app"#, "quoted because of the space");
     // second run: nothing changes
     f.log.borrow_mut().clear();
@@ -176,7 +173,19 @@ fn uninstall_removes_only_what_the_app_made() {
     f.files.insert(PathBuf::from(r"C:\Program Files\Kora\bin\0.2.0-abc\kora.exe"), b"service copy".to_vec());
     f.files.insert(PathBuf::from(r"D:\servers\alpha\server.cfg"), b"cfg".to_vec());
     let other = PathBuf::from(r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Other.lnk");
-    f.shortcuts.insert(other.clone(), ShortcutSpec { path: other.clone(), target: r"C:\other.exe".into(), args: String::new(), workdir: PathBuf::new(), icon: String::new(), description: String::new(), run_as_admin: false, minimized: false });
+    f.shortcuts.insert(
+        other.clone(),
+        ShortcutSpec {
+            path: other.clone(),
+            target: r"C:\other.exe".into(),
+            args: String::new(),
+            workdir: PathBuf::new(),
+            icon: String::new(),
+            description: String::new(),
+            run_as_admin: false,
+            minimized: false,
+        },
+    );
     f.path = Some(format!("{};C:\\Program Files\\Kora Tools", f.path.unwrap()));
 
     let out = uninstall_app_with(&mut f, &l, false).unwrap();
@@ -196,7 +205,19 @@ fn uninstall_leaves_a_foreign_shortcut_named_kora() {
     let l = win_layout();
     let mut f = Fake { path: Some(String::new()), ..Fake::default() };
     let p = l.start_menu.clone().unwrap();
-    f.shortcuts.insert(p.clone(), ShortcutSpec { path: p.clone(), target: r"C:\games\kora-game.exe".into(), args: String::new(), workdir: PathBuf::new(), icon: String::new(), description: String::new(), run_as_admin: false, minimized: false });
+    f.shortcuts.insert(
+        p.clone(),
+        ShortcutSpec {
+            path: p.clone(),
+            target: r"C:\games\kora-game.exe".into(),
+            args: String::new(),
+            workdir: PathBuf::new(),
+            icon: String::new(),
+            description: String::new(),
+            run_as_admin: false,
+            minimized: false,
+        },
+    );
     let out = uninstall_app_with(&mut f, &l, false).unwrap();
     assert!(f.shortcuts.contains_key(&p));
     assert!(out.iter().any(|s| s.contains("left alone")));
@@ -469,6 +490,33 @@ mod per_user {
     }
 
     #[test]
+    fn the_shortcuts_open_the_desktop_app_when_it_is_installed_next_to_kora() {
+        let ul = win_user();
+        let shell = r"C:\Users\Sam\AppData\Local\Kora\bin\kora-desktop.exe";
+        assert_eq!(shell_sibling(Path::new(EXE), true), PathBuf::from(shell));
+        assert_eq!(shell_sibling(Path::new("/home/sam/.local/bin/kora"), false), PathBuf::from("/home/sam/.local/bin/kora-desktop"));
+        let mut f = fake_with(EXE);
+        f.files.insert(PathBuf::from(shell), b"shell".to_vec());
+        let out = install_user_with(&mut f, &ul, Path::new(EXE), None, &UserOptions::default()).unwrap();
+        assert_eq!(out.exe, PathBuf::from(shell));
+        for p in [ul.start_menu.as_ref().unwrap(), ul.desktop.as_ref().unwrap()] {
+            let s = &f.shortcuts[p];
+            assert_eq!(
+                (s.target.as_path(), s.args.as_str(), s.run_as_admin, s.minimized),
+                (Path::new(shell), "", false, false),
+                "the app has no console to hide, and never asks for administrator rights"
+            );
+        }
+        // Still recognised as Kora's own shortcuts (so uninstall removes them).
+        let removed = uninstall_user_with(&mut f, &ul, false).unwrap();
+        assert_eq!(removed.len(), 2, "{removed:?}");
+        // Without the app, a bare `kora` as before.
+        let mut g = fake_with(EXE);
+        install_user_with(&mut g, &ul, Path::new(EXE), None, &UserOptions::default()).unwrap();
+        assert!(g.shortcuts.values().all(|s| s.target.as_path() == Path::new(EXE) && s.minimized));
+    }
+
+    #[test]
     fn no_desktop_shortcut_and_dry_run() {
         let ul = win_user();
         let mut f = fake_with(EXE);
@@ -563,7 +611,16 @@ mod per_user {
         let mut f = fake_with(EXE);
         let (start, desk) = (ul.start_menu.clone().unwrap(), ul.desktop.clone().unwrap());
         // the old machine-wide app's shortcut ran `kora manager` as administrator
-        let old = ShortcutSpec { path: start.clone(), target: r"C:\Program Files\Kora\kora.exe".into(), args: "manager".into(), workdir: PathBuf::new(), icon: String::new(), description: String::new(), run_as_admin: true, minimized: false };
+        let old = ShortcutSpec {
+            path: start.clone(),
+            target: r"C:\Program Files\Kora\kora.exe".into(),
+            args: "manager".into(),
+            workdir: PathBuf::new(),
+            icon: String::new(),
+            description: String::new(),
+            run_as_admin: true,
+            minimized: false,
+        };
         // someone else's program
         let other = ShortcutSpec { path: desk.clone(), target: r"C:\games\other.exe".into(), args: String::new(), ..old.clone() };
         f.shortcuts.insert(start.clone(), old);
@@ -644,7 +701,19 @@ mod per_user {
         let old = win_layout();
         let mut f = Fake::default();
         let p = old.start_menu.clone().unwrap();
-        f.shortcuts.insert(p.clone(), ShortcutSpec { path: p, target: r"C:\games\other.exe".into(), args: String::new(), workdir: PathBuf::new(), icon: String::new(), description: String::new(), run_as_admin: false, minimized: false });
+        f.shortcuts.insert(
+            p.clone(),
+            ShortcutSpec {
+                path: p,
+                target: r"C:\games\other.exe".into(),
+                args: String::new(),
+                workdir: PathBuf::new(),
+                icon: String::new(),
+                description: String::new(),
+                run_as_admin: false,
+                minimized: false,
+            },
+        );
         assert!(!detect_legacy(&f, &old).present());
     }
 

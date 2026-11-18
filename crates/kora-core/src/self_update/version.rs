@@ -73,20 +73,18 @@ fn cmp_id(a: &str, b: &str) -> Ordering {
 
 impl Ord for Version {
     fn cmp(&self, o: &Self) -> Ordering {
-        (self.major, self.minor, self.patch).cmp(&(o.major, o.minor, o.patch)).then_with(|| {
-            match (self.pre.is_empty(), o.pre.is_empty()) {
-                (true, true) => Ordering::Equal,
-                (true, false) => Ordering::Greater,
-                (false, true) => Ordering::Less,
-                (false, false) => {
-                    for (a, b) in self.pre.iter().zip(&o.pre) {
-                        let c = cmp_id(a, b);
-                        if c != Ordering::Equal {
-                            return c;
-                        }
+        (self.major, self.minor, self.patch).cmp(&(o.major, o.minor, o.patch)).then_with(|| match (self.pre.is_empty(), o.pre.is_empty()) {
+            (true, true) => Ordering::Equal,
+            (true, false) => Ordering::Greater,
+            (false, true) => Ordering::Less,
+            (false, false) => {
+                for (a, b) in self.pre.iter().zip(&o.pre) {
+                    let c = cmp_id(a, b);
+                    if c != Ordering::Equal {
+                        return c;
                     }
-                    self.pre.len().cmp(&o.pre.len())
                 }
+                self.pre.len().cmp(&o.pre.len())
             }
         })
     }

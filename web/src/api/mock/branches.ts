@@ -11,6 +11,8 @@ export interface BranchesDeps {
   find: (name: string) => T.ServerSummary
   installed: (server: string) => string[]
   signedIn: () => boolean
+  /** Files of a resource changed (the page's "restart needed" notice). */
+  onChanged?: (server: string, id: string, why: string) => void
 }
 
 interface Res {
@@ -25,9 +27,9 @@ const DEFAULT = 'dev'
 const FORK = ['dev', 'feature/new-ui', 'fix-contacts']
 const UPSTREAM = ['dev', 'feature/new-ui', 'release']
 const PRS: T.PullRequest[] = [
-  { number: 41, title: 'Fix the payroll rounding', author: 'sam-rp', source: 'upstream', repo: 'KoraFiveM/kora_core', branch: 'fix-payroll', from: 'sam-rp/kora_core', draft: false, url: 'https://github.com/KoraFiveM/kora_core/pull/41', updated: '2026-03-02T10:00:00Z' },
-  { number: 38, title: 'New inventory layout', author: 'jo-dev', source: 'upstream', repo: 'KoraFiveM/kora_core', branch: 'new-layout', from: 'jo-dev/kora_core', draft: true, url: 'https://github.com/KoraFiveM/kora_core/pull/38', updated: '2026-02-20T10:00:00Z' },
-  { number: 3, title: 'My experiment', author: 'sam-rp', source: 'fork', repo: 'sam-rp/kora_core', branch: 'experiment', from: 'sam-rp/kora_core', draft: false, url: 'https://github.com/sam-rp/kora_core/pull/3', updated: '2026-03-01T10:00:00Z' },
+  { number: 41, title: 'Fix the payroll rounding', author: 'sam-rp', source: 'upstream', repo: 'KoraFiveM/kora_core', branch: 'fix-payroll', from: 'sam-rp/kora_core', draft: false, url: 'https://github.com/KoraFiveM/kora_core/pull/41', updated: '2026-03-02T10:00:00Z', created: '2026-02-20T10:00:00Z', review: 'CHANGES_REQUESTED', checks: 'failing' },
+  { number: 38, title: 'New inventory layout', author: 'jo-dev', source: 'upstream', repo: 'KoraFiveM/kora_core', branch: 'new-layout', from: 'jo-dev/kora_core', draft: true, url: 'https://github.com/KoraFiveM/kora_core/pull/38', updated: '2026-02-20T10:00:00Z', created: '2026-02-10T10:00:00Z', review: '', checks: 'pending' },
+  { number: 3, title: 'My experiment', author: 'sam-rp', source: 'fork', repo: 'sam-rp/kora_core', branch: 'experiment', from: 'sam-rp/kora_core', draft: false, url: 'https://github.com/sam-rp/kora_core/pull/3', updated: '2026-03-01T10:00:00Z', created: '2026-03-01T09:00:00Z', review: 'APPROVED', checks: 'passing' },
 ]
 const MERGED = 12
 const RESTART = 'The files changed, but a running server still has the old version loaded. Restart the resource (or the server) to load the new one.'
@@ -35,7 +37,7 @@ const RESTART = 'The files changed, but a running server still has the old versi
 const validBranch = (b: string) => /^[A-Za-z0-9._/-]{1,200}$/.test(b) && !b.startsWith('-') && !b.includes('..') && !b.endsWith('/') && !b.endsWith('.lock')
 
 /** Adds the routes; the returned function forgets every switch (a scenario starts from a clean world). */
-export function installBranchesMock(route: Route, startJob: StartJob, Fail: FailCtor, d: BranchesDeps): () => void {
+export function installBranchesMock(route: Route, startJob: StartJob, Fail: FailCtor, d: BranchesDeps): (() => void) & { row: (server: string, id: string) => T.ResourceBranch; offDefault: (server: string, id: string) => string | null } {
   const state = new Map<string, Res>()
   const key = (s: string, r: string) => `${s}/${r}`
   const trackable = (s: string) => d.installed(s).filter((r) => r.startsWith('kora_'))
@@ -51,9 +53,8 @@ export function installBranchesMock(route: Route, startJob: StartJob, Fail: Fail
     return v
   }
   const dev = (name: string): T.ServerSummary => {
-    const s = d.find(name)
-    if (s.mode !== 'development') throw new Fail(409, 'branch.not_development', 'Changing branches is only for Development servers. A Production server stays on its tested releases.')
-    return s
+    // Every server can switch a resource to a branch or a pull request now.
+    return d.find(name)
   }
   const checkName = (s: T.ServerSummary, r: string) => {
     if (!trackable(s.name).includes(r)) throw new Fail(422, 'branch.unsupported', `${r} is not a resource Kora can switch (it is not a fork of yours).`)
@@ -62,7 +63,7 @@ export function installBranchesMock(route: Route, startJob: StartJob, Fail: Fail
   const row = (server: string, id: string): T.ResourceBranch => {
     const v = get(server, id)
     const state: T.BranchState = v.branch === DEFAULT ? 'default' : v.pr !== undefined ? 'pr' : 'branch'
-    return { id, folder: id, state, branch: v.branch, pr: v.pr, default_branch: DEFAULT, label: labelOf(v), changed_count: v.dirty.length, stashes: v.stashes.length }
+    return { id, folder: id, state, branch: v.branch, pr: v.pr, pr_title: v.pr !== undefined ? v.title : undefined, default_branch: DEFAULT, label: v.pr !== undefined && v.title ? `${labelOf(v)}: ${v.title}` : labelOf(v), changed_count: v.dirty.length, stashes: v.stashes.length }
   }
   const where = (v: Res): T.SwitchResult['now'] => ({ kind: v.branch === DEFAULT ? 'default' : v.pr !== undefined ? 'pr' : 'branch', branch: v.branch, pr: v.pr, changed_files: v.dirty, changed_count: v.dirty.length })
   const signedOut = () => new Fail(403, 'github.signed_out', 'You are not signed in to GitHub.', undefined, { actions: [{ kind: 'sign_in_github' }] })
@@ -96,6 +97,7 @@ export function installBranchesMock(route: Route, startJob: StartJob, Fail: Fail
     const left = leave(v, going, changes)
     if (left === 'ask') return result(id, v, 'needs_choice', `${v.dirty.length} file${v.dirty.length === 1 ? ' has' : 's have'} changes of your own that haven't been saved anywhere. Choose what to do with them first.`)
     apply(v)
+    d.onChanged?.(server, id, `moved to ${labelOf(v)}`)
     return result(id, v, 'switched', `Now on ${labelOf(v)}.${left.stashed ? ' Your changes were kept aside: you can bring them back later.' : ''}`, { stashed: left.stashed, title })
   }
 
@@ -164,6 +166,7 @@ export function installBranchesMock(route: Route, startJob: StartJob, Fail: Fail
     const st = v.stashes.find((x) => x.index === Number(b.index))
     if (!st) throw new Fail(422, 'branch.stash_gone', 'Those kept-aside changes are not there any more.')
     v.dirty = ['config.lua']
+    d.onChanged?.(s.name, id, 'kept-aside changes brought back')
     return result(id, v, 'switched', 'Your changes are back (1 file). They also stay in the kept-aside list, so nothing can be lost.', { stashed: st })
   })
 
@@ -212,5 +215,6 @@ export function installBranchesMock(route: Route, startJob: StartJob, Fail: Fail
       return { items, switched, needs_choice: count('needs_choice'), failed: 0, skipped: count('skipped'), needs_restart: switched > 0, restart_note: switched > 0 ? RESTART : undefined } satisfies T.BulkResult
     })
   })
-  return () => state.clear()
+  /** The returned function also says whether a resource was put on another branch or a pull request (updates leave it alone). */
+  return Object.assign(() => state.clear(), { row, offDefault: (server: string, id: string): string | null => { const v = get(server, id); return v.branch === DEFAULT ? null : v.pr !== undefined ? `On pull request #${v.pr}.` : `On branch ${v.branch}.` } })
 }

@@ -1,23 +1,32 @@
 import { describe, expect, it } from 'vitest'
-import { isLoopbackHost, txAdminLink } from './serverLinks'
+import { gatewayPort, isLoopbackHost, txAdminLink } from './serverLinks'
 
 describe('txAdminLink', () => {
-  it('uses localhost when the browser is on the computer that runs Kora', () => {
-    expect(txAdminLink('localhost', 40120, true)).toEqual({ url: 'http://localhost:40120', hint: null })
+  it('uses localhost and txAdmin\'s own port when the browser is on the computer that runs Kora', () => {
+    expect(txAdminLink('localhost', 40120, true)).toEqual({ url: 'http://localhost:40120', viaPanel: false, hint: null })
     expect(txAdminLink('127.0.0.1', 40121, true).url).toBe('http://localhost:40121')
   })
 
-  it('uses the name the panel was reached by when that is another computer (Tailscale, LAN)', () => {
+  it('goes through the panel from another computer (LAN, Tailscale), naming the port to allow', () => {
     const l = txAdminLink('my-server.tail1234.ts.net', 40120, false)
-    expect(l.url).toBe('http://my-server.tail1234.ts.net:40120')
-    expect(l.hint).toContain('ssh -L 40120:localhost:40120')
-    expect(txAdminLink('100.64.0.5', 40125, false).url).toBe('http://100.64.0.5:40125')
+    expect(l.url).toBeNull()
+    expect(l.viaPanel).toBe(true)
+    expect(l.hint).toContain('port 50120')
+    expect(l.hint).toContain('allow TCP port 50120')
+    expect(txAdminLink('100.64.0.5', 40125, false).hint).toContain('port 50125')
   })
 
-  it('tells someone on an SSH tunnel that txAdmin needs its own tunnel', () => {
+  it('tells someone on an SSH tunnel to tunnel the panel-side port, not txAdmin\'s', () => {
     const l = txAdminLink('localhost', 40120, false)
-    expect(l.url).toBe('http://localhost:40120')
-    expect(l.hint).toContain('-L 40120:localhost:40120')
+    expect(l.viaPanel).toBe(true)
+    expect(l.hint).toContain('-L 50120:localhost:50120')
+  })
+
+  it('gives each txAdmin port a panel-side port by a fixed rule', () => {
+    expect(gatewayPort(40120)).toBe(50120)
+    expect(gatewayPort(55535)).toBe(65535)
+    expect(gatewayPort(55536)).toBe(45536)
+    expect(gatewayPort(65535)).toBe(55535)
   })
 
   it('knows loopback names', () => {

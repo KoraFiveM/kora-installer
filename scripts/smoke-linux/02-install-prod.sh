@@ -10,8 +10,8 @@ NAME=smoke
 sql() { docker exec -e MYSQL_PWD=root kora-smoke-db mariadb -h127.0.0.1 -uroot -N -B -e "$1"; }
 jget() { python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$1" "$2"; }
 
-step "1. kora install (production, --db existing)"
-kora install --name $NAME --dir "$D" --game-port $GAME_PORT --txadmin-port $TX_PORT --db existing --db-admin-user root -y
+step "1. kora install (plain clones of released versions, NEW flags, --db existing)"
+kora install --source clone --versions released --name $NAME --dir "$D" --game-port $GAME_PORT --txadmin-port $TX_PORT --db existing --db-admin-user root -y
 assert_eq "install exits 0" 0 "$CODE"
 assert_not_contains "licence key never printed" "$OUT" "$FAKE_KEY"
 assert_contains "finished" "$OUT" "Install finished."
@@ -62,19 +62,82 @@ step "5. registry and status"
 assert "registry lists the server" registry_has $NAME
 kora status
 assert_eq "status exits 0" 0 "$CODE"
-assert_matches "status shows the server as stopped" "$OUT" "$NAME[[:space:]]+prod[[:space:]]+$GAME_PORT[[:space:]]+$TX_PORT[[:space:]]+stopped"
+assert_matches "status shows the server as stopped" "$OUT" "$NAME[[:space:]]+clone, released[[:space:]]+$GAME_PORT[[:space:]]+$TX_PORT[[:space:]]+stopped"
 
 step "6. running the same install again resumes cleanly"
-kora install --name $NAME --dir "$D" --game-port $GAME_PORT --txadmin-port $TX_PORT --db existing --db-admin-user root -y
+kora install --mode prod --name $NAME --dir "$D" --game-port $GAME_PORT --txadmin-port $TX_PORT --db existing --db-admin-user root -y
 assert_eq "second install exits 0" 0 "$CODE"
 assert_eq "still the same database" "$DB" "$(jget "$D/database.json" database)"
+
+step "6b. backup: wipe a table, restore it, the row is back (a real MariaDB)"
+if command -v mariadb-dump >/dev/null 2>&1 || command -v mysqldump >/dev/null 2>&1; then
+  # `--folder` is a one-off copy kept elsewhere: `latest`, `list`, verify and restore look in Kora's own backups folder.
+  BK="$KORA_HOME/server-backups"
+  sql "CREATE TABLE \`$DB\`.players (id INT PRIMARY KEY, name VARCHAR(40))"
+  sql "INSERT INTO \`$DB\`.players VALUES (1,'alice'),(2,'bob')"
+  kora backup create $NAME
+  assert_eq "backup create exits 0" 0 "$CODE"
+  assert_not_contains "the database password is never printed" "$OUT" "$DBPW"
+  ARCHIVE="$(ls "$BK"/*/*.tar.gz | head -n1)"
+  assert "the archive exists" test -f "$ARCHIVE"
+  assert_eq "the archive is private (0600)" 600 "$(perms_of "$ARCHIVE")"
+  assert "the archive holds the database dump and the configuration" bash -c "tar -tzf '$ARCHIVE' | grep -q '^database/dump.sql' && tar -tzf '$ARCHIVE' | grep -q '^server/server.cfg'"
+  assert "the archive holds no FXServer build" bash -c "! tar -tzf '$ARCHIVE' | grep -q '^server/artifacts/'"
+  kora backup verify $NAME latest
+  assert_eq "backup verify exits 0" 0 "$CODE"
+  sql "DELETE FROM \`$DB\`.players"
+  assert_eq "the table is wiped" 0 "$(sql "SELECT COUNT(*) FROM \`$DB\`.players")"
+  kora backup restore $NAME latest --yes
+  assert_eq "backup restore exits 0" 0 "$CODE"
+  assert_eq "both rows are back after the restore" 2 "$(sql "SELECT COUNT(*) FROM \`$DB\`.players")"
+  kora backup list $NAME
+  assert_contains "the restore left a safety copy that can be undone" "$OUT" "kora backup undo"
+  step "6c. a password-protected export for moving the server"
+  MOVE="$KORA_HOME/server-backups"
+  export KORA_BACKUP_PASSWORD='a smoke test passphrase'
+  kora backup create $NAME --for-move
+  assert_eq "backup create --for-move exits 0" 0 "$CODE"
+  MOVEFILE="$(ls "$MOVE"/*/*.tar.gz.age | head -n1)"
+  assert "the export is an age file (encrypted)" test -f "$MOVEFILE"
+  assert_not_contains "the archive's names are not readable without the password" "$(cat "$MOVEFILE" | head -c 4000 | strings)" "database/dump.sql"
+  unset KORA_BACKUP_PASSWORD
+  kora backup verify $NAME latest
+  assert_contains "a password-protected backup asks for its password" "$OUT" "password"
+else
+  note "SKIPPED: neither mariadb-dump nor mysqldump is installed on this runner (the backup tests need one)"
+  MOVEFILE=""
+fi
 
 step "7. kora delete removes db, user, folder, registry entry"
 kora delete $NAME -y
 assert_eq "delete exits 0" 0 "$CODE"
 assert_eq "database and user are gone" 0 "$(sql "SELECT (SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='$DB') + (SELECT COUNT(*) FROM mysql.user WHERE user='$DBUSER')")"
 assert "server folder is gone" test ! -e "$D"
-if [ -f "$KORA_HOME/servers.json" ]; then assert "registry entry is gone" bash -c "! grep -q '\"name\": \"$NAME\"' '$KORA_HOME/servers.json'"; else assert "registry removed" true; fi
+assert "registry entry is gone" registry_lacks "$NAME"
 assert_eq "the database server itself is untouched" 1 "$(sql 'SELECT 1')"
+
+if [ -n "${MOVEFILE:-}" ]; then
+  step "8. import the exported server as a new one (what a move to another computer does)"
+  MOVED="$SMOKE_ROOT/moved"
+  export KORA_BACKUP_PASSWORD='a smoke test passphrase'
+  kora backup import "$MOVEFILE" --name smoke-moved --dir "$MOVED" --game-port 32120 --txadmin-port 42120 --yes
+  assert_eq "backup import exits 0" 0 "$CODE"
+  unset KORA_BACKUP_PASSWORD
+  assert "the settings were placed" test -f "$MOVED/server.cfg"
+  assert "FXServer was downloaded again" bash -c "find '$MOVED/artifacts' -name run.sh | grep -q ."
+  assert "the server is registered" registry_has smoke-moved
+  NEWDB="$(jget "$MOVED/database.json" database)"
+  assert "the import made a NEW database" test "$NEWDB" != "$DB"
+  assert_eq "the row is in the new database" 2 "$(sql "SELECT COUNT(*) FROM \`$NEWDB\`.players")"
+  assert_contains "the licence key moved with the server" "$(cat "$MOVED/secrets.cfg")" "$FAKE_KEY"
+  assert_not_contains "the old database password is not reused" "$(cat "$MOVED/secrets.cfg")" "$DBPW"
+  assert_contains "server.cfg uses the new game port" "$(cat "$MOVED/server.cfg")" "0.0.0.0:32120"
+  # a start needs a real licence key: with the fake one FXServer refuses it, so the check is that the files are complete
+  kora status
+  assert_matches "status lists the imported server" "$OUT" "smoke-moved"
+  kora delete smoke-moved -y
+  assert_eq "delete of the imported server exits 0" 0 "$CODE"
+  assert "imported server folder is gone" test ! -e "$MOVED"
+fi
 
 echo; echo "install-prod: $PASS assertions passed"

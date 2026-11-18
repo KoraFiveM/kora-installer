@@ -63,9 +63,7 @@ fn uploads_dir(e: &ServerEntry) -> PathBuf {
 
 fn local_only(caller: &Caller) -> Result<(), ApiError> {
     if caller.remote {
-        return Err(ApiError::forbidden(
-            "Your Downloads folder can only be used on the computer that runs Kora. Upload the zip instead.",
-        ));
+        return Err(ApiError::forbidden("Your Downloads folder can only be used on the computer that runs Kora. Upload the zip instead."));
     }
     Ok(())
 }
@@ -81,17 +79,10 @@ fn valid_upload_id(id: &str) -> bool {
 /// A safe file name for the upload, from the `X-File-Name` header (URL-encoded). Keeps the name the
 /// zip had, because a zip without a folder is named after it.
 fn upload_name(h: &HeaderMap) -> String {
-    let raw = h
-        .get("x-file-name")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+    let raw = h.get("x-file-name").and_then(|v| v.to_str().ok()).unwrap_or("");
     let decoded = percent_decode(raw);
     let base = decoded.rsplit(['/', '\\']).next().unwrap_or("").trim();
-    let clean: String = base
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ' ' | '(' | ')'))
-        .take(120)
-        .collect();
+    let clean: String = base.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ' ' | '(' | ')')).take(120).collect();
     let clean = clean.trim().trim_start_matches('.').to_string();
     if clean.is_empty() || clean.contains("..") {
         "upload.zip".into()
@@ -125,12 +116,7 @@ fn percent_decode(s: &str) -> String {
 fn prune_uploads(dir: &FsPath) {
     let now = std::time::SystemTime::now();
     for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        let old = e
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| now.duration_since(t).ok())
-            .is_some_and(|d| d.as_secs() > UPLOAD_KEEP_SECS);
+        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| now.duration_since(t).ok()).is_some_and(|d| d.as_secs() > UPLOAD_KEEP_SECS);
         if old {
             let _ = std::fs::remove_dir_all(e.path());
         }
@@ -138,24 +124,18 @@ fn prune_uploads(dir: &FsPath) {
 }
 
 /// Stream `body` into `path` (a new file), at most `limit` bytes. The file is removed on failure.
-async fn save_body(body: Body, path: PathBuf, limit: u64) -> Result<u64, ApiError> {
+pub(crate) async fn save_body(body: Body, path: PathBuf, limit: u64) -> Result<u64, ApiError> {
     use tokio_stream::StreamExt;
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Bytes>(8);
     let p = path.clone();
     let writer = tokio::task::spawn_blocking(move || -> Result<u64, String> {
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&p)
-            .map_err(|e| format!("Can't save the upload: {e}"))?;
+        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&p).map_err(|e| format!("Can't save the upload: {e}"))?;
         let mut n = 0u64;
         while let Some(chunk) = rx.blocking_recv() {
-            f.write_all(&chunk)
-                .map_err(|e| format!("Can't save the upload: {e}"))?;
+            f.write_all(&chunk).map_err(|e| format!("Can't save the upload: {e}"))?;
             n += chunk.len() as u64;
         }
-        f.flush()
-            .map_err(|e| format!("Can't save the upload: {e}"))?;
+        f.flush().map_err(|e| format!("Can't save the upload: {e}"))?;
         Ok(n)
     });
     let mut stream = body.into_data_stream();
@@ -165,22 +145,13 @@ async fn save_body(body: Body, path: PathBuf, limit: u64) -> Result<u64, ApiErro
         let chunk = match chunk {
             Ok(c) => c,
             Err(_) => {
-                failure = Some(ApiError::bad_request(
-                    "The upload was interrupted. Try again.",
-                ));
+                failure = Some(ApiError::bad_request("The upload was interrupted. Try again."));
                 break;
             }
         };
         total += chunk.len() as u64;
         if total > limit {
-            failure = Some(ApiError::new(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "too_large",
-                format!(
-                    "That file is larger than {}, too big for a resource.",
-                    paidassets::human(limit)
-                ),
-            ));
+            failure = Some(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "too_large", format!("That file is larger than {}, too big for a resource.", paidassets::human(limit))));
             break;
         }
         if tx.send(chunk).await.is_err() {
@@ -188,9 +159,7 @@ async fn save_body(body: Body, path: PathBuf, limit: u64) -> Result<u64, ApiErro
         }
     }
     drop(tx);
-    let written = writer
-        .await
-        .map_err(|_| ApiError::internal("saving the upload failed"));
+    let written = writer.await.map_err(|_| ApiError::internal("saving the upload failed"));
     let result = match (failure, written) {
         (Some(f), _) => Err(f),
         (None, Err(e)) => Err(e),
@@ -205,51 +174,31 @@ async fn save_body(body: Body, path: PathBuf, limit: u64) -> Result<u64, ApiErro
 }
 
 fn is_json(h: &HeaderMap) -> bool {
-    h.get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| {
-            v.trim_start()
-                .to_ascii_lowercase()
-                .starts_with("application/json")
-        })
+    h.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).is_some_and(|v| v.trim_start().to_ascii_lowercase().starts_with("application/json"))
 }
 
 /// Where a zip named by a JSON body is: `{"upload": id}` or `{"download": name}`.
 fn zip_from(body: &Value, e: &ServerEntry, caller: &Caller) -> Result<PathBuf, ApiError> {
     if let Some(id) = body.get("upload").and_then(Value::as_str) {
         if !valid_upload_id(id) {
-            return Err(ApiError::bad_request(
-                "That upload is not known. Upload the zip again.",
-            ));
+            return Err(ApiError::bad_request("That upload is not known. Upload the zip again."));
         }
         let dir = uploads_dir(e).join(id);
         let file = std::fs::read_dir(&dir)
             .ok()
             .and_then(|mut d| d.find_map(|x| x.ok().map(|x| x.path()).filter(|p| p.is_file())))
-            .ok_or_else(|| {
-                ApiError::not_found(
-                    "That upload is gone (uploads are kept for a day). Upload the zip again.",
-                )
-            })?;
+            .ok_or_else(|| ApiError::not_found("That upload is gone (uploads are kept for a day). Upload the zip again."))?;
         return Ok(file);
     }
     if let Some(name) = body.get("download").and_then(Value::as_str) {
         local_only(caller)?;
-        let dir = downloads_dir().ok_or_else(|| {
-            ApiError::not_found("No Downloads folder was found on this computer.")
-        })?;
-        return paidassets::resolve_download(&dir, name, now_unix(), RECENT_SECS)
-            .map_err(ApiError::not_found);
+        let dir = downloads_dir().ok_or_else(|| ApiError::not_found("No Downloads folder was found on this computer."))?;
+        return paidassets::resolve_download(&dir, name, now_unix(), RECENT_SECS).map_err(ApiError::not_found);
     }
-    Err(ApiError::bad_request(
-        "Send a zip file, or pick one from your Downloads folder.",
-    ))
+    Err(ApiError::bad_request("Send a zip file, or pick one from your Downloads folder."))
 }
 
-pub async fn assets_list(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn assets_list(State(st): State<AppState>, Path(s): Path<String>) -> Result<Json<Value>, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
         let v = st.backend().assets_list(&e).map_err(ApiError::core)?;
@@ -260,50 +209,26 @@ pub async fn assets_list(
     .await
 }
 
-pub async fn asset_inspect(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    Path(s): Path<String>,
-    headers: HeaderMap,
-    body: Body,
-) -> Result<Json<Value>, ApiError> {
+pub async fn asset_inspect(State(st): State<AppState>, Extension(caller): Extension<Caller>, Path(s): Path<String>, headers: HeaderMap, body: Body) -> Result<Json<Value>, ApiError> {
     let st2 = st.clone();
     let e = blocking(move || st2.entry(&s)).await?;
     if is_json(&headers) {
-        let bytes = axum::body::to_bytes(body, JSON_LIMIT)
-            .await
-            .map_err(|_| ApiError::bad_request("That request is too large."))?;
-        let v: Value = serde_json::from_slice(&bytes)
-            .map_err(|_| ApiError::bad_request("That is not valid JSON."))?;
+        let bytes = axum::body::to_bytes(body, JSON_LIMIT).await.map_err(|_| ApiError::bad_request("That request is too large."))?;
+        let v: Value = serde_json::from_slice(&bytes).map_err(|_| ApiError::bad_request("That is not valid JSON."))?;
         if v.get("upload").is_some() {
-            return Err(ApiError::bad_request(
-                "Send a zip file, or pick one from your Downloads folder.",
-            ));
+            return Err(ApiError::bad_request("Send a zip file, or pick one from your Downloads folder."));
         }
         let zip = zip_from(&v, &e, &caller)?;
         let name = zip.file_name().map(|n| n.to_string_lossy().into_owned());
         return blocking(move || {
-            let plan = st
-                .backend()
-                .asset_inspect(&e, &zip)
-                .map_err(ApiError::core)?;
+            let plan = st.backend().asset_inspect(&e, &zip).map_err(ApiError::core)?;
             Ok(Json(json!({"plan": to_json(&plan)?, "download": name})))
         })
         .await;
     }
-    let declared = headers
-        .get(header::CONTENT_LENGTH)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok());
+    let declared = headers.get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok());
     if declared.is_some_and(|n| n > UPLOAD_LIMIT) {
-        return Err(ApiError::new(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "too_large",
-            format!(
-                "That file is larger than {}, too big for a resource.",
-                paidassets::human(UPLOAD_LIMIT)
-            ),
-        ));
+        return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "too_large", format!("That file is larger than {}, too big for a resource.", paidassets::human(UPLOAD_LIMIT))));
     }
     let id = crate::security::random_hex();
     let root = uploads_dir(&e);
@@ -312,8 +237,7 @@ pub async fn asset_inspect(
     let d2 = dir.clone();
     blocking(move || {
         prune_uploads(&r2);
-        std::fs::create_dir_all(&d2)
-            .map_err(|x| ApiError::internal(format!("Can't save the upload: {x}")))
+        std::fs::create_dir_all(&d2).map_err(|x| ApiError::internal(format!("Can't save the upload: {x}")))
     })
     .await?;
     let path = dir.join(upload_name(&headers));
@@ -328,19 +252,12 @@ pub async fn asset_inspect(
             let _ = std::fs::remove_dir_all(&dir);
         }
         let plan = plan.map_err(ApiError::core)?;
-        Ok(Json(
-            json!({"plan": to_json(&plan)?, "upload": if keep { Some(id) } else { None }}),
-        ))
+        Ok(Json(json!({"plan": to_json(&plan)?, "upload": if keep { Some(id) } else { None }})))
     })
     .await
 }
 
-pub async fn asset_import(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    Path(s): Path<String>,
-    Json(body): Json<Value>,
-) -> Result<Response, ApiError> {
+pub async fn asset_import(State(st): State<AppState>, Extension(caller): Extension<Caller>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Response, ApiError> {
     let replace = body.get("replace").and_then(Value::as_bool).unwrap_or(true);
     let st2 = st.clone();
     let (e, zip) = blocking(move || {
@@ -349,10 +266,7 @@ pub async fn asset_import(
         Ok((e, zip))
     })
     .await?;
-    let upload_dir = zip
-        .parent()
-        .filter(|p| p.parent() == Some(uploads_dir(&e).as_path()))
-        .map(FsPath::to_path_buf);
+    let upload_dir = zip.parent().filter(|p| p.parent() == Some(uploads_dir(&e).as_path())).map(FsPath::to_path_buf);
     let make = st.backend.clone();
     let name = e.name.clone();
     st.spawn_job(Op::AssetImport, Some(name), move |h| {
@@ -365,40 +279,30 @@ pub async fn asset_import(
         if let Some(d) = upload_dir {
             let _ = std::fs::remove_dir_all(d);
         }
-        serde_json::to_value(&out).map_err(|x| x.to_string())
+        Ok(serde_json::to_value(&out)?)
     })
 }
 
-pub async fn asset_remove(
-    State(st): State<AppState>,
-    Path((s, name)): Path<(String, String)>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn asset_remove(State(st): State<AppState>, Path((s, name)): Path<(String, String)>) -> Result<Json<Value>, ApiError> {
     if !paidassets::valid_asset_name(&name) {
         return Err(ApiError::bad_request("That is not a resource name."));
     }
     blocking(move || {
         let e = st.entry(&s)?;
-        let notes = st
-            .backend()
-            .asset_remove(&e, &name)
-            .map_err(ApiError::core)?;
+        let notes = st.backend().asset_remove(&e, &name).map_err(ApiError::core)?;
         Ok(Json(json!({"notes": notes})))
     })
     .await
 }
 
-pub async fn asset_downloads(
-    Extension(caller): Extension<Caller>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn asset_downloads(Extension(caller): Extension<Caller>) -> Result<Json<Value>, ApiError> {
     local_only(&caller)?;
     blocking(|| {
         let Some(dir) = downloads_dir() else {
             return Ok(Json(json!({"found": false, "zips": []})));
         };
         let zips = paidassets::recent_zips(&dir, now_unix(), RECENT_SECS);
-        Ok(Json(
-            json!({"found": true, "folder": dir, "zips": to_json(&zips)?}),
-        ))
+        Ok(Json(json!({"found": true, "folder": dir, "zips": to_json(&zips)?})))
     })
     .await
 }

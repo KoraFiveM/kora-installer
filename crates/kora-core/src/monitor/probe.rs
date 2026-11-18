@@ -48,6 +48,18 @@ pub trait Probe: Send + Sync {
     fn disk(&self, dir: &Path) -> Option<DiskUsage>;
     /// RAM of the whole machine.
     fn memory(&self) -> Option<MemUsage>;
+    /// The scheduled backups of this server are a job of the operating system (`backup::osjob`) and the last run failed: why, in the
+    /// words `kora backup create --scheduled` recorded in the person's store. `Some(None)`: it is an OS job and fine; `None`: not an OS job
+    /// (the panel's own scheduler announces its failures itself).
+    fn os_job_backup_failure(&self, _e: &ServerEntry) -> Option<Option<String>> {
+        None
+    }
+}
+
+/// When the game server of this folder started (seconds since 1970), when it can be told: Linux reads `/proc`, Windows asks
+/// for the creation time of the folder's `FXServer.exe` (`wintime`). `None` when the process cannot be found.
+pub fn server_started_unix(dir: &Path) -> Option<u64> {
+    os::server_started_unix(dir)
 }
 
 // ------------------------------------------------------------------------- local HTTP
@@ -81,18 +93,11 @@ pub(crate) fn http_get_local(port: u16, path: &str) -> Option<String> {
 pub(crate) fn parse_game_info(players_json: &str, info_json: Option<&str>) -> Option<GameInfo> {
     let players = serde_json::from_str::<serde_json::Value>(players_json).ok()?;
     let players = u32::try_from(players.as_array()?.len()).ok()?;
-    let max_players = info_json
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok())
-        .and_then(|v| {
-            let m = &v["vars"]["sv_maxClients"];
-            m.as_u64()
-                .or_else(|| m.as_str().and_then(|s| s.trim().parse().ok()))
-                .and_then(|n| u32::try_from(n).ok())
-        });
-    Some(GameInfo {
-        players,
-        max_players,
-    })
+    let max_players = info_json.and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok()).and_then(|v| {
+        let m = &v["vars"]["sv_maxClients"];
+        m.as_u64().or_else(|| m.as_str().and_then(|s| s.trim().parse().ok())).and_then(|n| u32::try_from(n).ok())
+    });
+    Some(GameInfo { players, max_players })
 }
 
 // ------------------------------------------------------------------------- the real thing
@@ -110,6 +115,11 @@ impl SystemProbe {
 }
 
 impl Probe for SystemProbe {
+    fn os_job_backup_failure(&self, e: &ServerEntry) -> Option<Option<String>> {
+        let st = crate::backup::settings::load_status(&e.name);
+        st.os_job.then(|| st.last_failed_unix.map(|_| st.last_error.unwrap_or_else(|| "it did not finish".into())))
+    }
+
     fn dir_exists(&self, dir: &Path) -> bool {
         dir.is_dir()
     }
@@ -123,23 +133,16 @@ impl Probe for SystemProbe {
     fn process(&self, e: &ServerEntry) -> Option<ProcUsage> {
         let (cpu_secs, rss) = os::process_tree(&e.dir)?;
         let now = Instant::now();
-        let mut last = self
-            .last_cpu
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut last = self.last_cpu.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let cpu_pct = match last.insert(e.name.clone(), (cpu_secs, now)) {
             Some((prev, at)) if cpu_secs >= prev => {
                 let dt = now.duration_since(at).as_secs_f64();
                 let cores = std::thread::available_parallelism().map_or(1, usize::from) as f64;
-                (dt > 0.5)
-                    .then(|| (((cpu_secs - prev) / dt / cores) * 100.0).clamp(0.0, 100.0) as f32)
+                (dt > 0.5).then(|| (((cpu_secs - prev) / dt / cores) * 100.0).clamp(0.0, 100.0) as f32)
             }
             _ => None,
         };
-        Some(ProcUsage {
-            cpu_pct,
-            rss_bytes: rss,
-        })
+        Some(ProcUsage { cpu_pct, rss_bytes: rss })
     }
 
     fn disk(&self, dir: &Path) -> Option<DiskUsage> {
@@ -180,22 +183,8 @@ mod os {
     }
 
     pub fn parse_meminfo(text: &str) -> Option<MemUsage> {
-        let kb = |key: &str| -> Option<u64> {
-            text.lines()
-                .find_map(|l| {
-                    l.strip_prefix(key)?
-                        .trim()
-                        .trim_end_matches("kB")
-                        .trim()
-                        .parse::<u64>()
-                        .ok()
-                })
-                .map(|v| v * 1024)
-        };
-        Some(MemUsage {
-            total: kb("MemTotal:")?,
-            available: kb("MemAvailable:")?,
-        })
+        let kb = |key: &str| -> Option<u64> { text.lines().find_map(|l| l.strip_prefix(key)?.trim().trim_end_matches("kB").trim().parse::<u64>().ok()).map(|v| v * 1024) };
+        Some(MemUsage { total: kb("MemTotal:")?, available: kb("MemAvailable:")? })
     }
 
     /// `(utime + stime in ticks, ppid, rss pages)` from the text of `/proc/<pid>/stat`.
@@ -210,12 +199,7 @@ mod os {
     }
 
     fn pids() -> Vec<u32> {
-        std::fs::read_dir("/proc")
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter_map(|e| e.file_name().to_str()?.parse().ok())
-            .collect()
+        std::fs::read_dir("/proc").into_iter().flatten().flatten().filter_map(|e| e.file_name().to_str()?.parse().ok()).collect()
     }
 
     /// Does this process belong to the server folder? Its program or first argument lives inside it.
@@ -230,33 +214,47 @@ mod os {
         PathBuf::from(String::from_utf8_lossy(first).into_owned()).starts_with(dir)
     }
 
+    /// When the server's own process was started (seconds since 1970): the oldest of the processes of the folder.
+    /// Used to tell that the whole server restarted, whoever restarted it.
+    pub fn server_started_unix(dir: &Path) -> Option<u64> {
+        let btime: u64 = std::fs::read_to_string("/proc/stat").ok()?.lines().find_map(|l| l.strip_prefix("btime ")?.trim().parse().ok())?;
+        let me = std::process::id();
+        let mut pids_of_dir: Vec<u32> = Vec::new();
+        if let Some(p) = std::fs::read_to_string(dir.join(".kora").join("server.pid")).ok().and_then(|t| t.trim().parse::<u32>().ok()) {
+            if std::path::Path::new(&format!("/proc/{p}")).exists() {
+                pids_of_dir.push(p);
+            }
+        }
+        if pids_of_dir.is_empty() {
+            pids_of_dir = pids().into_iter().filter(|p| *p != me && belongs(*p, dir)).collect();
+        }
+        let tick = unsafe { libc::sysconf(libc::_SC_CLK_TCK) }.max(1) as u64;
+        pids_of_dir.iter().filter_map(|p| parse_start_ticks(&std::fs::read_to_string(format!("/proc/{p}/stat")).ok()?)).min().map(|t| btime + t / tick)
+    }
+
+    /// The start time (in ticks after boot) from the text of `/proc/<pid>/stat`.
+    pub fn parse_start_ticks(text: &str) -> Option<u64> {
+        let rest = &text[text.rfind(')')? + 1..];
+        rest.split_whitespace().nth(19)?.parse().ok()
+    }
+
     pub fn process_tree(dir: &Path) -> Option<(f64, u64)> {
         let me = std::process::id();
         let mut table: HashMap<u32, (u64, u32, u64)> = HashMap::new();
         for pid in pids() {
-            if let Some(st) = std::fs::read_to_string(format!("/proc/{pid}/stat"))
-                .ok()
-                .and_then(|t| parse_stat(&t))
-            {
+            if let Some(st) = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok().and_then(|t| parse_stat(&t)) {
                 table.insert(pid, st);
             }
         }
         let mut roots: Vec<u32> = Vec::new();
         // A server Kora started itself keeps its pid in `.kora/server.pid`.
-        if let Some(p) = std::fs::read_to_string(dir.join(".kora").join("server.pid"))
-            .ok()
-            .and_then(|t| t.trim().parse::<u32>().ok())
-        {
+        if let Some(p) = std::fs::read_to_string(dir.join(".kora").join("server.pid")).ok().and_then(|t| t.trim().parse::<u32>().ok()) {
             if table.contains_key(&p) {
                 roots.push(p);
             }
         }
         if roots.is_empty() {
-            roots = table
-                .keys()
-                .copied()
-                .filter(|p| *p != me && belongs(*p, dir))
-                .collect();
+            roots = table.keys().copied().filter(|p| *p != me && belongs(*p, dir)).collect();
         }
         if roots.is_empty() {
             return None;
@@ -276,10 +274,7 @@ mod os {
         }
         let tick = unsafe { libc::sysconf(libc::_SC_CLK_TCK) }.max(1) as f64;
         let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) }.max(1) as u64;
-        let (ticks, rss) = set
-            .iter()
-            .filter_map(|p| table.get(p))
-            .fold((0u64, 0u64), |(t, r), (ti, _, rs)| (t + ti, r + rs));
+        let (ticks, rss) = set.iter().filter_map(|p| table.get(p)).fold((0u64, 0u64), |(t, r), (ti, _, rs)| (t + ti, r + rs));
         Some((ticks as f64 / tick, rss * page))
     }
 
@@ -294,15 +289,15 @@ mod os {
         }
 
         #[test]
+        fn the_start_time_is_the_twentieth_field_after_the_name() {
+            let t = "1234 (FX (server) x) S 77 1 1 0 -1 4194560 100 0 0 0 150 50 0 0 20 0 5 0 99 1000000 2500 18446744073709551615";
+            assert_eq!(parse_start_ticks(t), Some(99));
+        }
+
+        #[test]
         fn meminfo_is_read_in_bytes() {
-            let m = parse_meminfo(
-                "MemTotal:       16000000 kB\nMemFree: 1 kB\nMemAvailable:    4000000 kB\n",
-            )
-            .unwrap();
-            assert_eq!(
-                (m.total, m.available),
-                (16_000_000 * 1024, 4_000_000 * 1024)
-            );
+            let m = parse_meminfo("MemTotal:       16000000 kB\nMemFree: 1 kB\nMemAvailable:    4000000 kB\n").unwrap();
+            assert_eq!((m.total, m.available), (16_000_000 * 1024, 4_000_000 * 1024));
         }
 
         #[test]
@@ -310,9 +305,7 @@ mod os {
             let dir = tempfile::tempdir().unwrap();
             // Named `sleep`: a multi-call coreutils binary decides what to do from its own file name.
             let sleep = dir.path().join("sleep");
-            std::fs::copy("/bin/sleep", &sleep)
-                .or_else(|_| std::fs::copy("/usr/bin/sleep", &sleep))
-                .unwrap();
+            std::fs::copy("/bin/sleep", &sleep).or_else(|_| std::fs::copy("/usr/bin/sleep", &sleep)).unwrap();
             // Another test thread forking at this moment can still hold the copy open for writing
             // ("Text file busy"): try again shortly.
             let mut child = (0..50)
@@ -346,10 +339,7 @@ mod os {
             let _ = child.wait();
             let (cpu, rss) = found.unwrap_or_else(|| panic!("the stand-in belongs to the folder ({why})"));
             assert!(cpu >= 0.0 && rss > 0);
-            assert!(
-                process_tree(dir.path()).is_none(),
-                "nothing left once it is gone"
-            );
+            assert!(process_tree(dir.path()).is_none(), "nothing left once it is gone");
         }
     }
 }
@@ -363,36 +353,89 @@ mod os {
         None
     }
 
+    // The documented Win32 calls (kernel32). The process-list ones are declared once, in `privsvc::winclient`.
+    use crate::privsvc::winclient::{CloseHandle, CreateToolhelp32Snapshot, OpenProcess, Process32FirstW, Process32NextW, ProcessEntry32W};
+    #[repr(C)]
+    #[derive(Default, Clone, Copy)]
+    struct FileTime {
+        low: u32,
+        high: u32,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn QueryFullProcessImageNameW(process: *mut std::ffi::c_void, flags: u32, name: *mut u16, size: *mut u32) -> i32;
+        fn GetProcessTimes(process: *mut std::ffi::c_void, creation: *mut FileTime, exit: *mut FileTime, kernel: *mut FileTime, user: *mut FileTime) -> i32;
+    }
+    const TH32CS_SNAPPROCESS: u32 = 0x2;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const INVALID_HANDLE: isize = -1;
+
+    /// The processes named `FXServer.exe` (their ids).
+    fn fxserver_pids() -> Vec<u32> {
+        let mut out = Vec::new();
+        // SAFETY: a snapshot handle is closed below; `entry` is a correctly laid out PROCESSENTRY32W with `size` set.
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snap == INVALID_HANDLE || snap == 0 {
+                return out;
+            }
+            let mut entry: ProcessEntry32W = std::mem::zeroed();
+            entry.size = std::mem::size_of::<ProcessEntry32W>() as u32;
+            let mut more = Process32FirstW(snap, &mut entry) != 0;
+            while more {
+                let len = entry.exe_file.iter().position(|c| *c == 0).unwrap_or(entry.exe_file.len());
+                if String::from_utf16_lossy(&entry.exe_file[..len]).eq_ignore_ascii_case("fxserver.exe") {
+                    out.push(entry.pid);
+                }
+                more = Process32NextW(snap, &mut entry) != 0;
+            }
+            CloseHandle(snap as *mut std::ffi::c_void);
+        }
+        out
+    }
+
+    /// The program path of a process and when it was created (a FILETIME), when the process can be looked at.
+    fn image_and_creation(pid: u32) -> Option<(String, u64)> {
+        // SAFETY: the handle is closed before returning; the buffers are as long as the sizes we pass say.
+        unsafe {
+            let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if h.is_null() {
+                return None;
+            }
+            let mut buf = [0u16; 1024];
+            let mut size = buf.len() as u32;
+            let named = QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut size) != 0;
+            let (mut c, mut e, mut k, mut u) = (FileTime::default(), FileTime::default(), FileTime::default(), FileTime::default());
+            let timed = GetProcessTimes(h, &mut c, &mut e, &mut k, &mut u) != 0;
+            CloseHandle(h);
+            (named && timed).then(|| (String::from_utf16_lossy(&buf[..size as usize]), (u64::from(c.high) << 32) | u64::from(c.low)))
+        }
+    }
+
+    /// When the folder's game server started: the oldest creation time of its `FXServer.exe` processes (`wintime`).
+    pub fn server_started_unix(dir: &Path) -> Option<u64> {
+        let times = fxserver_pids()
+            .into_iter()
+            .filter_map(image_and_creation)
+            .filter(|(image, _)| crate::monitor::wintime::is_fxserver_of(image, dir))
+            .map(|(_, ft)| crate::monitor::wintime::filetime_to_unix(ft));
+        crate::monitor::wintime::oldest(times)
+    }
+
     pub fn disk_total(p: &Path) -> Option<u64> {
         use std::os::windows::ffi::OsStrExt;
         #[link(name = "kernel32")]
         extern "system" {
-            fn GetDiskFreeSpaceExW(
-                dir: *const u16,
-                available: *mut u64,
-                total: *mut u64,
-                free: *mut u64,
-            ) -> i32;
+            fn GetDiskFreeSpaceExW(dir: *const u16, available: *mut u64, total: *mut u64, free: *mut u64) -> i32;
         }
         let mut p = p.to_path_buf();
         while !p.exists() {
             p = p.parent()?.to_path_buf();
         }
-        let wide: Vec<u16> = p
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
+        let wide: Vec<u16> = p.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
         let mut total = 0u64;
         // SAFETY: `wide` is NUL-terminated; the two optional out-parameters may be null.
-        let ok = unsafe {
-            GetDiskFreeSpaceExW(
-                wide.as_ptr(),
-                std::ptr::null_mut(),
-                &mut total,
-                std::ptr::null_mut(),
-            )
-        };
+        let ok = unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), std::ptr::null_mut(), &mut total, std::ptr::null_mut()) };
         (ok != 0).then_some(total)
     }
 
@@ -426,10 +469,7 @@ mod os {
             avail_extended_virtual: 0,
         };
         // SAFETY: `m` is a correctly laid out MEMORYSTATUSEX with `length` set.
-        (unsafe { GlobalMemoryStatusEx(&mut m) } != 0).then_some(MemUsage {
-            total: m.total_phys,
-            available: m.avail_phys,
-        })
+        (unsafe { GlobalMemoryStatusEx(&mut m) } != 0).then_some(MemUsage { total: m.total_phys, available: m.avail_phys })
     }
 }
 
@@ -446,10 +486,7 @@ mod tests {
                 if let Ok((mut c, _)) = l.accept() {
                     let mut buf = [0u8; 512];
                     let _ = c.read(&mut buf);
-                    let _ = write!(
-                        c,
-                        "HTTP/1.0 {status}\r\nContent-Type: application/json\r\n\r\n{body}"
-                    );
+                    let _ = write!(c, "HTTP/1.0 {status}\r\nContent-Type: application/json\r\n\r\n{body}");
                 }
             }
         });
@@ -460,49 +497,22 @@ mod tests {
     fn local_http_reads_a_200_body() {
         let port = serve_once(r#"[{"id":1},{"id":2}]"#, "200 OK");
         let body = http_get_local(port, "/players.json").unwrap();
-        assert_eq!(
-            parse_game_info(&body, Some(r#"{"vars":{"sv_maxClients":"48"}}"#)),
-            Some(GameInfo {
-                players: 2,
-                max_players: Some(48)
-            })
-        );
+        assert_eq!(parse_game_info(&body, Some(r#"{"vars":{"sv_maxClients":"48"}}"#)), Some(GameInfo { players: 2, max_players: Some(48) }));
     }
 
     #[test]
     fn local_http_ignores_other_statuses_and_closed_ports() {
         let port = serve_once("nope", "404 Not Found");
         assert_eq!(http_get_local(port, "/players.json"), None);
-        let closed = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+        let closed = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
         assert_eq!(http_get_local(closed, "/players.json"), None);
     }
 
     #[test]
     fn game_info_survives_missing_or_odd_info() {
-        assert_eq!(
-            parse_game_info("[]", None),
-            Some(GameInfo {
-                players: 0,
-                max_players: None
-            })
-        );
-        assert_eq!(
-            parse_game_info("[]", Some("{")),
-            Some(GameInfo {
-                players: 0,
-                max_players: None
-            })
-        );
+        assert_eq!(parse_game_info("[]", None), Some(GameInfo { players: 0, max_players: None }));
+        assert_eq!(parse_game_info("[]", Some("{")), Some(GameInfo { players: 0, max_players: None }));
         assert_eq!(parse_game_info(r#"{"not":"a list"}"#, None), None);
-        assert_eq!(
-            parse_game_info("[1]", Some(r#"{"vars":{"sv_maxClients":64}}"#))
-                .unwrap()
-                .max_players,
-            Some(64)
-        );
+        assert_eq!(parse_game_info("[1]", Some(r#"{"vars":{"sv_maxClients":64}}"#)).unwrap().max_players, Some(64));
     }
 }

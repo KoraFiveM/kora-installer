@@ -1,21 +1,36 @@
 // In-app mock backend: replaces window.fetch (for /api/v1) and window.EventSource.
 // Only loaded when VITE_MOCK=1 (or `npm run dev`), see src/main.tsx.
 import type * as T from '../types'
+import type { SavedInstall as GeneratedSavedInstall } from '../generated/types'
 import { installMonitorMock } from './monitor'
 import { installHubMock } from './hub'
-import { installToolchainMock, mockDbStoppedProblem, mockGhInstalled, mockGhMissingProblem, resetToolchainMock, setMockGhInstalled, stopMockDatabase } from './toolchain'
+import { installToolchainMock, mockDbStoppedProblem, mockGhInstalled, mockGhMissingProblem, resetToolchainMock, setMockContainers, setMockGhInstalled, stopMockDatabase } from './toolchain'
 import { installKeysMock } from './keys'
+import { installStoreMock } from './store'
 import { installBranchesMock } from './branches'
+import { installResourceMock } from './resource'
+import { installCollabMock } from './collab'
+import { installReachMock } from './reach'
+import { installBackupsMock } from './backups'
+import { installSupportMock } from './support'
 import { CONSOLE_LINES, INSTALLED, LOG_FILES, fakeLogLines, seedCatalog, seedServers, seedSnapshots } from './data'
 import { behaviourOf, resolveScenario, seeded, type Behaviour, type ScenarioName } from './scenarios'
-import { ADMIN_STEP, adminNeeds, promptAnswer, promptProblem, remoteProblem, withoutAdminReq } from './windowsAdmin'
+import { installAuthMock } from './auth'
+import { adminNeeds, adminWhat, installCommand, withoutAdminReq } from './adminParts'
+import '@/i18n/en/errors/problems'
 
 const BASE = '/api/v1'
+
+/** The old `mode` word for an install request (what older Kora versions read). */
+const compatMode = (req: T.InstallRequest): T.Mode => (req.versions ? (req.versions === 'latest' ? 'development' : 'production') : req.mode ?? 'production')
 
 // ---- state (rebuilt by `init`, so a scenario starts from a clean world) ------------------------
 
 let scenario: ScenarioName = 'default'
 let beh: Behaviour = behaviourOf('default')
+/** The administrator service was installed from the panel ("Install Kora's administrator service"). */
+let serviceInstalled = false
+const svc = (): Behaviour['service'] => (serviceInstalled && beh.service === 'missing' ? 'ready' : beh.service)
 let speed = 1 // multiplier for every wait; 0 in tests of the mock
 let rand = seeded(1)
 let catalog = seedCatalog()
@@ -25,7 +40,7 @@ let snapshots: Record<string, T.SnapshotInfo[]> = {}
 let consoleEnabled: Record<string, boolean> = {}
 let webhooks: Record<string, string> = {}
 let schedules: Record<string, T.ScheduleConfig> = {}
-let prefs = { github: false as boolean, savedInstall: null as T.SavedInstall | null, app: false, shortcuts: true, desktopShortcut: false, version: '0.4.0', signedIn: true }
+let prefs = { github: false as boolean, savedInstall: null as GeneratedSavedInstall | null, app: false, shortcuts: true, desktopShortcut: false, version: '0.4.0', signedIn: true }
 let dirtyPreviewed: Record<string, T.UpdatePreview> = {}
 let paidAssets: Record<string, T.PaidAsset[]> = {}
 let uploads = new Map<string, string>()
@@ -35,6 +50,7 @@ let consoleTick = 0
 function init(name: ScenarioName) {
   scenario = name
   beh = behaviourOf(name)
+  serviceInstalled = false
   speed = beh.jobSlow
   rand = seeded(7)
   catalog = seedCatalog()
@@ -54,14 +70,30 @@ function init(name: ScenarioName) {
   paidAssets = {}
   uploads = new Map()
   for (const s of servers.slice(0, 1)) paidAssets[s.name] = [{ name: 'qs-housing', path: '[paid]/qs-housing', version: '3.2.1', imported_unix: Math.floor(Date.now() / 1000) - 3 * 86400, present: true, has_fxap: true, backups: 1 }]
-  resetBranches?.()
+  branchesMock?.()
+  collabMock?.reset()
+  resourceMock?.reset()
   jobs.clear()
   busy.clear()
   paused.clear()
   keysMock.reset({ trouble: beh.trouble, withKeys: name === 'fleet' })
+  reachMock.reset()
+  backupsMock.reset(name)
+  storeMock.reset(name === 'restarted')
+  if (name === 'restarted') {
+    // The install that was running when the panel stopped, written down with its (saved) licence key by name.
+    paused.set('old-3', {
+      req: { mode: 'production', name: 'Staging', dir: '/srv/fivem/staging', hostname: 'Staging', license_key_name: 'Main', ports: { game: 30122, txadmin: 40122 }, txadmin_public: false, resources: 'all', db: 'install_if_missing', service: false, firewall: false, dry_run: false, start: true } as unknown as T.InstallRequest,
+      failed: '',
+      attempt: 1,
+      done: [],
+      skip: new Set(),
+    })
+  }
   nextId = 1
   consoleTick = 0
   resetToolchainMock(beh.trouble)
+  if (name === 'containers') setMockContainers('ready')
 }
 
 class Fail extends Error {
@@ -84,7 +116,7 @@ const find = (name: string): T.ServerSummary => {
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms * speed))
 const elevate = (what: string, cmd: string[]) =>
   new Fail(403, 'needs_elevation', `${what} needs administrator rights. Run this command as administrator:`, ['kora', ...cmd], {
-    actions: [{ kind: 'request_admin' }, { kind: 'show_command', command: ['kora', ...cmd], elevated: true }],
+    actions: [...(svc() === 'missing' ? [{ kind: 'install_admin_service' } as const] : []), { kind: 'show_command', command: ['kora', ...cmd], elevated: true }],
   })
 
 // ---- buses ----------------------------------------------------------------------------------
@@ -118,6 +150,8 @@ interface MJob {
   events: unknown[]
   result: unknown
   error: T.JobError | null
+  started: number
+  ended: number | null
   subs: Set<Fn>
 }
 const jobs = new Map<string, MJob>()
@@ -128,7 +162,7 @@ function startJob(op: string, server: string | null, run: (emit: (e: unknown) =>
     if (busy.has(server)) throw new Fail(409, 'conflict', `Another job is already running on "${server}". Wait for it to finish and try again.`)
     busy.add(server)
   }
-  const job: MJob = { id: `job-${nextId++}`, op, server, state: 'running', events: [], result: null, error: null, subs: new Set() }
+  const job: MJob = { id: `job-${nextId++}`, op, server, state: 'running', events: [], result: null, error: null, started: Math.floor(Date.now() / 1000), ended: null, subs: new Set() }
   jobs.set(job.id, job)
   const emit = (e: unknown) => {
     job.events.push(e)
@@ -139,8 +173,10 @@ function startJob(op: string, server: string | null, run: (emit: (e: unknown) =>
     try {
       job.result = await run(emit)
       job.state = 'done'
+      job.ended = Math.floor(Date.now() / 1000)
     } catch (e) {
       job.state = 'failed'
+      job.ended = Math.floor(Date.now() / 1000)
       job.error = e instanceof Fail ? { code: e.code, message: e.message, command: e.command, ...e.extra } : { code: 'internal', message: e instanceof Error ? e.message : 'Something went wrong.' }
     }
     if (server) busy.delete(server)
@@ -149,13 +185,14 @@ function startJob(op: string, server: string | null, run: (emit: (e: unknown) =>
   return { job: job.id }
 }
 
-const jobView = (j: MJob): T.Job => ({ id: j.id, op: j.op, server: j.server, state: j.state, events: j.events, result: j.result, error: j.error })
+const jobView = (j: MJob): T.Job => ({ id: j.id, op: j.op, server: j.server, state: j.state, events: j.events, result: j.result, error: j.error, started: j.started, ended: j.ended })
 
 // ---- helpers --------------------------------------------------------------------------------
 
 const detail = (s: T.ServerSummary): T.ServerDetail => ({
   ...s,
   connect: `192.168.1.20:${s.ports.game}`,
+  status_detail: { running: s.status === 'running', game_listening: s.status === 'running', txadmin_up: s.status === 'running' },
   running: s.status === 'running',
   game_listening: s.status === 'running',
   txadmin_up: s.status === 'running',
@@ -273,29 +310,27 @@ interface InstallRun {
   noAdmin?: boolean
 }
 
+/** The steps of this install: a container server swaps the background service for the container steps (the real ids are in `kora_core::installer::plan_steps`). */
+function installSteps(req: T.InstallRequest): [string, string][] {
+  if (req.run_mode !== 'container') return INSTALL_STEPS
+  const out: [string, string][] = []
+  for (const s of INSTALL_STEPS) {
+    if (s[0] === 'build.service') out.push(['container.create', "Creating the server's container"])
+    else if (s[0] === 'build.db') out.push(['container.engine', 'Checking the container engine'], ['container.images', 'Downloading the container images'], req.db === 'container' ? ['build.db', 'Creating the database container'] : s)
+    else out.push(s)
+  }
+  return out
+}
+
 async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, jobId: () => string, run: InstallRun = { attempt: 0, done: [], skip: new Set() }): Promise<T.InstallOutcome> {
+  const INSTALL_STEPS = installSteps(req)
   const lower = req.name.toLowerCase()
   if (run.attempt === 0 && lower.startsWith('nogh')) setMockGhInstalled(false)
   if (run.attempt === 0 && lower.startsWith('nodb')) stopMockDatabase()
   const failAt = lower.startsWith('nogh') && !mockGhInstalled() ? 'prepare.git' : lower.startsWith('nodb') && mockDbStoppedProblem() ? 'build.db' : lower.startsWith('fail') && run.attempt === 0 ? 'build.db' : lower.startsWith('skip') ? 'launch' : lower.startsWith('github') && !prefs.github ? 'prepare.git' : null
-  // Windows: one permission prompt before the first step (see ./windowsAdmin).
-  if (beh.windows && !run.noAdmin && adminNeeds(req).length > 0) {
-    const title = 'Administrator permission'
-    emit({ step: ADMIN_STEP, title, status: 'running', detail: 'Windows is asking for permission on the computer that runs Kora. Choose Yes to carry on. If you do not see the prompt, look for a flashing shield icon in the taskbar.', percent: 0 } satisfies T.ProgressEvent)
-    await sleep(700)
-    const answer = promptAnswer(req.name, run.attempt)
-    if (answer !== 'yes') {
-      const p = promptProblem(req, answer)
-      emit({ step: ADMIN_STEP, title, status: 'failed', detail: p.message, percent: 0 } satisfies T.ProgressEvent)
-      const id = jobId()
-      paused.set(id, { req, failed: '', attempt: run.attempt + 1, done: run.done, skip: run.skip })
-      throw new Fail(403, p.code ?? 'admin.declined', p.message, undefined, { details: p.details, resume: true, kept: [], actions: [...(p.actions ?? []), { kind: 'change_answers' }, { kind: 'open_log', job: id }] })
-    }
-    emit({ step: ADMIN_STEP, title, status: 'done', detail: 'Permission given: Kora does the administrator steps when the install reaches them', percent: 0 } satisfies T.ProgressEvent)
-  }
   const skipped = new Set<string>()
   if (!req.firewall) skipped.add('build.firewall')
-  if (!req.service) skipped.add('build.service')
+  if (!req.service && req.run_mode !== 'container') skipped.add('build.service')
   if (req.db === 'skip') skipped.add('build.db')
   if (!req.start) skipped.add('launch')
   for (let i = 0; i < INSTALL_STEPS.length; i++) {
@@ -313,7 +348,7 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, job
     await sleep(step === 'build.fxserver' ? 1800 : 900)
     if (step === failAt) {
       emit({ step, title, status: 'failed', detail: 'This step did not work', percent: pct } satisfies T.ProgressEvent)
-      prefs.savedInstall = { mode: req.mode, name: req.name, dir: req.dir, hostname: req.hostname, ports: req.ports, db: req.db, resources: req.resources, service: req.service, firewall: req.firewall, cfx_identifier: req.cfx_identifier, license_key_name: req.license_key_name ?? null }
+      prefs.savedInstall = { mode: compatMode(req), source: req.source, versions: req.versions, name: req.name, dir: req.dir, hostname: req.hostname, ports: req.ports, db: req.db, resources: req.resources, service: req.service, firewall: req.firewall, cfx_identifier: req.cfx_identifier, license_key_name: req.license_key_name ?? null, txadmin_public: req.txadmin_public, artifact_url: req.artifact_url, game_build: req.game_build, github_owner: req.github_owner, start: req.start }
       const id = jobId()
       paused.set(id, { req, failed: step, attempt: run.attempt + 1, done: INSTALL_STEPS.slice(0, i).map(([s]) => s), skip: run.skip })
       const common: Partial<T.JobError> = {
@@ -355,7 +390,7 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, job
     emit({ step, title, status: 'done', detail: '', percent: pct } satisfies T.ProgressEvent)
   }
   prefs.savedInstall = null
-  servers.push({ name: req.name, dir: req.dir, mode: req.mode, ports: req.ports, created_unix: Math.floor(Date.now() / 1000), status: req.start ? 'running' : 'stopped', badge: { kind: 'up_to_date' }, managed: true })
+  servers.push({ name: req.name, dir: req.dir, mode: compatMode(req), source: req.source ?? (req.mode === 'development' ? 'fork' : 'clone'), versions: req.versions ?? (req.mode === 'development' ? 'latest' : 'released'), ports: req.ports, created_unix: Math.floor(Date.now() / 1000), status: req.start ? 'running' : 'stopped', badge: { kind: 'up_to_date' }, managed: true, connect: null, ...(req.run_mode === 'container' ? { run_mode: 'container' as const, run_label: 'in a container (podman, rootless)' } : {}) })
   installed[req.name] = ['oxmysql', 'ox_lib', 'kora_core']
   return {
     dir: req.dir,
@@ -379,22 +414,49 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, job
 type Body = Record<string, unknown>
 type Handler = (m: RegExpMatchArray, body: Body, query: URLSearchParams) => unknown | Promise<unknown>
 const routes: [string, RegExp, Handler][] = []
+const routeKeys: string[] = []
+/** `METHOD /path/{param}` of every route the mock answers (the parity test compares them with the generated route map). */
+export const mockRouteKeys = (): readonly string[] => routeKeys
 const route = (method: string, pattern: string, h: Handler) => {
+  routeKeys.push(`${method} ${pattern}`)
   routes.push([method, new RegExp('^' + pattern.replace(/\{(\w+)\}/g, '([^/]+)') + '$'), h])
 }
 const dec = (s: string) => decodeURIComponent(s)
-/** The headers of the request being answered (the mock routes only get the body). */
-let lastHeaders = new Headers()
-/** The person chose "Ask for administrator permission" (`X-Kora-Admin: ask`). */
-const askedAdmin = () => lastHeaders.get('X-Kora-Admin') === 'ask'
 installHubMock(route, startJob, Fail, () => servers)
-const keysMock = installKeysMock(route, Fail, () => servers)
-const resetBranches = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github })
+const keysMock = installKeysMock(route, Fail, () => servers, () => viewer.identity?.role === 'admin')
+const reachMock = installReachMock(route, () => servers)
+installSupportMock(route, Fail)
+const backupsMock = installBackupsMock(route, startJob, Fail, () => servers, sleep, () => svc() === 'ready')
+const storeMock = installStoreMock(route, () => [...jobs.values()].map((j) => ({ id: j.id, op: j.op, server: j.server, state: j.state, events: [], started: j.started, ended: j.ended, result: j.result as T.JobSummary['result'], error: j.error })), () => svc() === 'ready')
+const resourceMock = installResourceMock(route, Fail, {
+  find: (n) => find(n),
+  installed: (n) => installed[n] ?? [],
+  consoleEnabled: (n) => !!consoleEnabled[n],
+  repos: (n, id) => collabMock.repos(id, find(n)),
+  branchRow: (n, id): T.ResourceBranch => (id.startsWith('kora_') ? branchesMock.row(n, id) : { id, folder: id, state: 'pinned', default_branch: 'dev', label: 'fixed version', changed_count: 0, stashes: 0 }),
+})
+const collabMock = installCollabMock(route, startJob, Fail, {
+  find: (n) => find(n),
+  installed: (n) => installed[n] ?? [],
+  signedIn: () => prefs.github,
+  onChanged: (s, id, why) => resourceMock.markChanged(s, [id], why),
+  onServerChanged: (s) => pushServer(s),
+})
+const branchesMock = installBranchesMock(route, startJob, Fail, { find: (n) => find(n), installed: (n) => installed[n] ?? [], signedIn: () => prefs.github, onChanged: (s, id, why) => resourceMock.markChanged(s, [id], why) })
 
-route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? { name: 'local', provider: 'local', role: 'admin' } : null, remote: false, allow_remote_destructive: false }) satisfies T.Meta)
+route('GET', '/meta', () => ({ version: prefs.version, api: 1, platform: beh.windows ? 'windows' : 'linux', ops: [], node: 'Mock node (this is demo data)', identity: prefs.signedIn ? viewer.identity : null, remote: viewer.remote, allow_remote_destructive: viewer.identity?.provider === 'tailscale', auth_upgrade: viewer.identity?.provider === 'token' && !authMock.hasStrong(viewer.identity.name) }) satisfies T.Meta)
 
 // Remote access (demo data: nothing is really opened to the network).
-const remoteState: T.RemoteSettings = { enabled: false, enabled_by_flag: false, bind: '127.0.0.1', port: 47120, tailnet_url: null, tailscale: false, tailscale_users: {}, allowed_hosts: [], allow_remote_destructive: false, users: [], saved_to: '/home/demo/.kora/panel.json' }
+const remoteState: T.RemoteSettings = { enabled: false, enabled_by_flag: false, bind: '127.0.0.1', port: 47120, tailnet_url: null, tailscale: false, tailscale_users: {}, allowed_hosts: [], allow_remote_destructive: false, users: [], saved_to: '/home/demo/.kora/panel.json', require_strong_auth: false }
+const authMock = installAuthMock(route, Fail, {
+  viewer: () => ({ name: viewer.identity?.name ?? 'local', provider: viewer.identity?.provider ?? 'local', remote: viewer.remote }),
+  users: () => remoteState.users,
+  addUser: (name, role) => void remoteState.users.push({ name, role, created: Math.floor(Date.now() / 1000), passkeys: 0, code: false, legacy_token: false }),
+  setSignedIn: (identity) => {
+    prefs.signedIn = true
+    viewer = { identity, remote: true }
+  },
+})
 route('GET', '/remote', () => structuredClone(remoteState))
 route('PUT', '/remote', (_m, b) => {
   const u = b as T.RemoteSettingsUpdate
@@ -408,8 +470,8 @@ route('POST', '/users', (_m, b) => {
   if (!/^[A-Za-z0-9._-]{1,40}$/.test(name)) throw new Fail(400, 'bad_request', 'A user name uses letters, numbers, dots, dashes and underscores, up to 40 characters.')
   if (remoteState.users.some((x) => x.name.toLowerCase() === name.toLowerCase())) throw new Fail(409, 'conflict', `There is already a user named '${name}'.`)
   const role = b.role as T.Role
-  remoteState.users.push({ name, role, created: Math.floor(Date.now() / 1000) })
-  return { name, role, token: 'demo-' + Math.random().toString(16).slice(2).padEnd(56, '0') } satisfies T.NewUser
+  remoteState.users.push({ name, role, created: Math.floor(Date.now() / 1000), passkeys: 0, code: false, legacy_token: false })
+  return { name, role, link: authMock.mintLink(name, role), expires_in: 1800 } satisfies T.NewUser
 })
 route('DELETE', '/users/{name}', (m) => {
   const n = dec(m[1])
@@ -425,15 +487,34 @@ route('POST', '/session/link', () => {
   linkCodes.add(code)
   return { code, expires_in: 600 }
 })
-route('GET', '/system', () => (beh.windows
-  ? { admin: false, elevated: false, platform: 'windows', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: 'C:\\Users\\Sam\\.kora', can_restart: true, admin_prompt: true }
-  : { admin: !beh.trouble, elevated: !beh.trouble, platform: 'linux', helper_installed: false, headless: false, version: prefs.version, local: true, kora_home: '/home/sam/.kora', can_restart: true }) satisfies T.SystemInfo)
+route('GET', '/system', () => {
+  const platform = beh.windows ? 'windows' : 'linux'
+  const home = beh.windows ? 'C:\\Users\\Sam\\.kora' : '/home/sam/.kora'
+  const base = { headless: false, version: prefs.version, local: !viewer.remote, kora_home: home, can_restart: true, platform } as const
+  const state = svc()
+  if (state !== 'none') return { ...base, admin: false, elevated: false, admin_service: { state } } satisfies T.SystemInfo
+  return { ...base, admin: !beh.trouble, elevated: !beh.trouble } satisfies T.SystemInfo
+})
+route('POST', '/system/admin-service/install', () => {
+  if (svc() === 'ready') throw new Fail(409, 'conflict', "Kora's administrator service is already installed and turned on for you.")
+  if (!beh.windows) {
+    throw new Fail(403, 'needs_elevation', "Installing Kora's administrator service needs administrator rights. Run this command as administrator, then come back here:", ['kora', 'service', 'install'], { actions: [{ kind: 'show_command', command: ['kora', 'service', 'install'], elevated: true }] })
+  }
+  return startJob('admin_service_install', null, async (emit) => {
+    emit({ type: 'status', message: 'Downloading the Kora installer' })
+    await sleep(600)
+    emit({ type: 'status', message: 'Windows asks for administrator permission on the computer that runs Kora: choose Yes.' })
+    await sleep(900)
+    serviceInstalled = true
+    return { installed: true }
+  })
+})
 route('GET', '/servers', () => ({ servers: servers.map((s) => ({ ...s, connect: `192.168.1.20:${s.ports.game}` })) }))
 route('POST', '/servers/scan', () =>
   startJob('servers_scan', null, async () => {
     await sleep(1200)
     const have = servers.map((s) => s.dir)
-    return { candidates: [{ name: 'weekend-test', dir: '/srv/fivem/weekend-test', mode: 'development', kind: 'txadmin', ports: { game: 30130, txadmin: 40130 } }, { name: 'friends-rp', dir: '/home/sam/friends-rp', mode: 'production', kind: 'plain', ports: { game: 30131, txadmin: 40131 } }].filter((c) => !have.includes(c.dir)) }
+    return { candidates: [{ name: 'weekend-test', dir: '/srv/fivem/weekend-test', mode: 'development', source: 'fork', versions: 'latest', kind: 'txadmin', ports: { game: 30130, txadmin: 40130 } }, { name: 'friends-rp', dir: '/home/sam/friends-rp', mode: 'production', source: 'clone', versions: 'released', kind: 'plain', ports: { game: 30131, txadmin: 40131 } }].filter((c) => !have.includes(c.dir)) }
   }),
 )
 route('POST', '/servers/adopt', (_m, b) => {
@@ -442,7 +523,7 @@ route('POST', '/servers/adopt', (_m, b) => {
   if (dir.includes('nothing')) throw new Fail(400, 'bad_request', 'That folder does not look like a FiveM server (no server.cfg or resources folder).')
   if (servers.some((s) => s.dir === dir)) throw new Fail(409, 'conflict', 'That server is already in your list.')
   const name = dir.split(/[\\/]/).filter(Boolean).pop() ?? 'adopted'
-  const s: T.ServerSummary = { name, dir, mode: 'production', ports: { game: nextFree(30123, []), txadmin: nextFree(40123, []) }, created_unix: Math.floor(Date.now() / 1000), status: 'stopped', badge: null, managed: false }
+  const s: T.ServerSummary = { name, dir, mode: 'production', source: 'clone', versions: 'released', ports: { game: nextFree(30123, []), txadmin: nextFree(40123, []) }, created_unix: Math.floor(Date.now() / 1000), status: 'stopped', badge: null, managed: false, connect: null }
   servers.push(s)
   installed[name] = ['chat']
   snapshots[name] = []
@@ -463,6 +544,7 @@ route('POST', '/servers/{s}/control', (m, b) => {
       if (clash) throw new Fail(409, 'conflict', `Port ${s.ports.game} is already in use by "${clash.name}". Change the port on the Ports tab first.`)
     }
     s.status = action === 'stop' ? 'stopped' : 'running'
+    if (action !== 'stop') resourceMock.serverRestarted(s.name)
     pushServer(s)
     return { status: s.status }
   })
@@ -536,6 +618,7 @@ route('POST', '/servers/{s}/resources/{name}/control', (m, b) => {
   if (s.status !== 'running') throw new Fail(409, 'conflict', 'The server is not running. Start the server first; its resources start with it.')
   if (!consoleEnabled[s.name]) throw new Fail(409, 'conflict', 'The live console is not switched on for this server yet. Turn it on in the Console tab first (it needs a restart).')
   pushConsole(s.name, `> ${action === 'restart' ? 'ensure' : action} ${name}`)
+  if (action !== 'stop') resourceMock.resourceRestarted(s.name, name)
   return { message: `Asked the server to ${action} ${name}. The Console tab shows what happened.` }
 })
 route('POST', '/servers/{s}/update/preview', (m, b) => {
@@ -554,6 +637,9 @@ route('POST', '/servers/{s}/update/preview', (m, b) => {
   return startJob('update_preview', s.name, async () => {
     await sleep(1500)
     const p = makePreview(s)
+    // A resource switched to another branch or a pull request is left alone by updates.
+    // (The trouble scenario keeps its own examples of resources that need attention.)
+    if (!beh.trouble) p.resources = p.resources.map((r) => { const note = branchesMock.offDefault(s.name, r.id); return note ? { ...r, status: 'other_branch', behind: 0, to: r.from, changelog: [], needs_restart: false, note } : r })
     dirtyPreviewed[s.name] = p
     s.badge = badgeFrom(p)
     pushServer(s)
@@ -585,7 +671,7 @@ route('POST', '/servers/{s}/update/apply', (m, b) => {
     await sleep(1000)
     emit({ type: 'health', message: 'Healthy' })
     emit({ type: 'done' })
-    ;(snapshots[s.name] ??= []).unshift({ id: snap, created_unix: Math.floor(Date.now() / 1000), resources: chosen.map((c) => c.id) })
+    ;(snapshots[s.name] ??= []).unshift({ id: snap, created_unix: Math.floor(Date.now() / 1000), resources: chosen.map((c) => c.id), on_other_branch: [] })
     const report: T.UpdateReport = {
       server: s.name,
       updated: chosen.map((c) => ({ id: c.id, from: c.from, to: c.to })),
@@ -603,6 +689,7 @@ route('POST', '/servers/{s}/update/apply', (m, b) => {
     const left = preview.resources.map((r) => (chosen.includes(r) ? { ...r, status: 'up_to_date' as const, behind: 0, from: r.to } : r))
     dirtyPreviewed[s.name] = { ...preview, resources: left }
     s.badge = badgeFrom(dirtyPreviewed[s.name])
+    resourceMock.markChanged(s.name, chosen.map((c) => c.id), 'updated')
     pushServer(s)
     return report
   })
@@ -624,6 +711,7 @@ route('POST', '/servers/{s}/snapshots/{id}/rollback', (m) => {
       emit({ type: 'resource', id: r, state: 'rolled back' })
       await sleep(600)
     }
+    resourceMock.markChanged(s.name, snap.resources, 'rolled back')
     return {}
   })
 })
@@ -805,10 +893,10 @@ route('POST', '/servers/{s}/issues', (m, b) => {
 })
 route('POST', '/servers/{s}/pr/plan', (m, b) => {
   const s = find(dec(m[1]))
-  if (s.mode !== 'development') throw new Fail(400, 'bad_request', 'Pull requests are only for development servers.')
+  if (s.source !== 'fork') throw new Fail(422, 'collab.needs_fork', 'A pull request is made from your own copy of the resource on GitHub, and this server uses plain copies of the originals. Choose "Make my own copy (fork)" for this resource first.', undefined, { actions: [{ kind: 'make_fork' }] })
   if (!prefs.github) throw new Fail(403, 'github.signed_out', 'Sign in to GitHub first.', undefined, { actions: [{ kind: 'sign_in_github' }] })
   const r = String(b.resource ?? '')
-  if (r !== 'kora_core' && r !== 'kora_inventory') throw new Fail(400, 'bad_request', `"${r}" has no changes of your own to send. Make a commit in its folder first.`)
+  if (!['kora_core', 'kora_inventory', 'kora_jobs'].includes(r)) throw new Fail(400, 'bad_request', `"${r}" has no changes of your own to send. Make a commit in its folder first.`)
   return { resource: r, upstream: `KoraFiveM/${r}`, base: 'dev', head_owner: 'sam-rp', head_branch: 'fix-payroll', ahead: 2, dir: `${s.dir}/resources/[kora]/${r}` } satisfies T.PrPlan
 })
 route('POST', '/servers/{s}/pr', (m, b) => {
@@ -821,15 +909,15 @@ const githubStatus = (): T.GithubStatus => {
   if (!mockGhInstalled()) {
     return {
       signed_in: false, user: null, state: 'gh_missing', missing_scopes: [],
-      problem: { code: 'github.gh_missing', message: 'The GitHub CLI (gh) is not installed. Kora needs it to work with GitHub.', actions: [{ kind: 'install_tool', tool: 'gh' }, { kind: 'open_link', url: 'https://cli.github.com' }] },
+      problem: { code: 'github.gh_missing', message: 'The GitHub CLI (gh) is not installed. Kora needs it to work with GitHub.', i18n: { id: 'errors.problems.ghMissing' }, actions: [{ kind: 'install_tool', tool: 'gh' }, { kind: 'open_link', url: 'https://cli.github.com' }] },
     }
   }
   return prefs.github
     ? { signed_in: true, user: 'sam-rp', state: 'ready', missing_scopes: [], problem: null }
-    : { signed_in: false, user: null, state: 'signed_out', missing_scopes: [], problem: { code: 'github.signed_out', message: 'You are not signed in to GitHub.', actions: [{ kind: 'sign_in_github' }] } }
+    : { signed_in: false, user: null, state: 'signed_out', missing_scopes: [], problem: { code: 'github.signed_out', message: 'You are not signed in to GitHub.', i18n: { id: 'errors.problems.githubSignedOut' }, actions: [{ kind: 'sign_in_github' }] } }
 }
 route('GET', '/github/status', () => githubStatus())
-installToolchainMock({ route, startJob, Fail, sleep, github: githubStatus, trouble: () => beh.trouble, windows: () => beh.windows })
+installToolchainMock({ route, startJob, Fail, sleep, github: githubStatus, trouble: () => beh.trouble })
 route('POST', '/github/login', () => {
   const started = startJob('github_login', null, async () => {
     await sleep(beh.trouble ? 3000 : 6000)
@@ -868,7 +956,7 @@ route('POST', '/checks/disk', (_m, b) => {
 })
 route('POST', '/checks/db-login', (_m, b) => {
   const a = b.admin as T.DbAdmin | null
-  if (beh.trouble || mockDbStoppedProblem() || (a && a.password === 'wrong')) return { ok: false, message: 'The database refused that login. Check the user name and password.', problem: mockDbStoppedProblem() } satisfies T.DbLoginCheck
+  if (beh.trouble || mockDbStoppedProblem() || (a && a.password === 'wrong')) return { ok: false, message: 'The database refused that login. Check the user name and password.', problem: mockDbStoppedProblem() ?? undefined } satisfies T.DbLoginCheck
   return { ok: true, message: a ? 'Logged in to the database.' : 'Kora can log in to the database automatically.' } satisfies T.DbLoginCheck
 })
 route('POST', '/checks/cfx', (_m, b) => {
@@ -880,6 +968,15 @@ route('POST', '/checks/cfx', (_m, b) => {
   if (name.toLowerCase() === 'jsixty') { keysMock.remember({ cfx_username: 'JSixty', cfx_identifier: 'fivem:4465268' }); return { ok: true, id: 4465268, username: 'JSixty', identifier: 'fivem:4465268', message: 'Found JSixty (fivem:4465268). This account will be the txAdmin admin.' } satisfies T.CfxCheck }
   return none(`No Cfx.re account called "${name}" was found. Check the spelling: it is the name on forum.cfx.re.`)
 })
+/** The parts of an install plan that do not depend on the administrator rights. */
+const planBase = (r: T.InstallRequest) => ({
+  summary: `${r.mode === 'production' ? 'Production' : 'Development'} server "${r.name}" in ${r.dir}`,
+  steps: INSTALL_STEPS.map(([id, title]) => ({ id, title })),
+  elevated: false,
+  disk: { ok: true, free_bytes: 148e9, needed_bytes: 6e9, message: '148 GB free, about 6 GB needed.' },
+  warnings: [] as string[],
+  notes: [] as string[],
+})
 route('POST', '/installs/plan', (_m, b) => {
   const r = b as unknown as T.InstallRequest
   const needs: string[] = []
@@ -887,11 +984,8 @@ route('POST', '/installs/plan', (_m, b) => {
   if (r.txadmin_public) needs.push('Open the txAdmin port in the firewall')
   if (r.service) needs.push('Install the background service')
   if (r.db === 'install_if_missing') needs.push('Install the database if it is missing')
-  if (beh.windows) {
-    const w = adminNeeds(r)
-    return { steps: INSTALL_STEPS.map(([id, title]) => ({ id, title })), needs_admin: w, notes: [], admin_prompt: w.length > 0 } satisfies T.InstallPlan
-  }
-  return { steps: INSTALL_STEPS.map(([id, title]) => ({ id, title })), needs_admin: needs, notes: [] } satisfies T.InstallPlan
+  const state = svc()
+  return { ...planBase(r), needs_admin: needs, ...(state !== 'none' ? { admin_service: state } : {}) } satisfies T.InstallPlan
 })
 route('POST', '/installs', (_m, b) => {
   const r = b as unknown as T.InstallRequest
@@ -901,9 +995,16 @@ route('POST', '/installs', (_m, b) => {
   if (servers.some((s) => s.name === r.name)) throw new Fail(409, 'conflict', `A server called "${r.name}" already exists.`)
   const clash = portOwner(r.ports.game) ?? portOwner(r.ports.txadmin)
   if (clash) throw new Fail(409, 'conflict', `A port you chose is already in use by ${clash === 'the database' ? 'the database' : `"${clash}"`}. Go back and pick another.`)
-  if (beh.windows && r.name.toLowerCase().startsWith('remote') && adminNeeds(r).length > 0 && !askedAdmin()) {
-    const p = remoteProblem(r)
-    throw new Fail(403, p.code ?? 'admin.remote', p.message, undefined, { actions: p.actions })
+  // A per-user install without the administrator service: no automatic path, so the choices.
+  if (svc() === 'not_allowed' && adminNeeds(r).length > 0 && !r.name.toLowerCase().startsWith('without')) {
+    throw new Fail(403, 'service.not_allowed', "Kora's administrator service is installed, but it is not turned on for your account, so Kora cannot " + adminWhat(r) + '. An administrator can turn it on for you.', ['kora', 'install'], {
+      actions: [{ kind: 'show_command', command: ['kora', 'service', 'allow', 'sam'], elevated: true }, { kind: 'continue_without_admin' }, { kind: 'show_command', command: installCommand(r), elevated: true }],
+    })
+  }
+  if (svc() === 'missing' && adminNeeds(r).length > 0 && !r.name.toLowerCase().startsWith('without')) {
+    throw new Fail(403, 'needs_elevation', `Kora needs administrator rights to ${adminWhat(r)}, and its administrator service is not installed on this computer. Install it once (one administrator approval) and Kora can do this, and the next time, without asking again. Or run the command yourself as administrator.`, ['kora', 'install'], {
+      actions: [{ kind: 'install_admin_service' }, { kind: 'continue_without_admin' }, { kind: 'show_command', command: installCommand(r), elevated: true }],
+    })
   }
   let id = ''
   const started = startJob('install', null, (emit) => runInstall(r, emit, () => id))
@@ -1015,7 +1116,9 @@ async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Res
   await new Promise<void>((r) => setTimeout(r, wait * (speed === 0 ? 0 : 1)))
   if (beh.auth === 'down') throw new TypeError('Failed to fetch')
   try {
-    if (beh.auth === 'expired') throw new Fail(401, 'unauthorized', 'You are not signed in.')
+    // The sign-in screen asks these before there is a session.
+    const publicPath = (method === 'GET' && (path === '/meta' || path === '/auth/options')) || (method === 'POST' && (path === '/auth/login' || path === '/auth/enrol'))
+    if (beh.auth === 'expired' && !publicPath) throw new Fail(401, 'unauthorized', 'You are not signed in.')
     if (path === '/session' && method === 'POST') {
       // Like the real panel: a pasted token, or the one-time code from a sign-in link (`/#code=...`).
       const b = JSON.parse(String(init?.body ?? '{}')) as { token?: string; code?: string }
@@ -1027,9 +1130,8 @@ async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Res
       prefs.signedIn = true
       return json(200, { ok: true, identity: { name: 'local', provider: 'local', role: 'admin' }, secret: 'mock-session-secret' } satisfies T.SessionCreated)
     }
-    if (!prefs.signedIn) throw new Fail(401, 'unauthorized', 'You are not signed in.')
+    if (!prefs.signedIn && !publicPath) throw new Fail(401, 'unauthorized', 'You are not signed in.')
     const headers = new Headers(init?.headers)
-    lastHeaders = headers
     if (method !== 'GET' && !headers.has('X-Kora')) throw new Fail(403, 'forbidden', 'Missing the X-Kora header.')
     const raw = init?.body
     const body: Body = raw instanceof Blob ? { file: raw, fileName: decodeURIComponent(headers.get('X-File-Name') ?? 'upload.zip') } : raw ? (JSON.parse(String(raw)) as Body) : {}
@@ -1120,6 +1222,7 @@ export function activeScenario(): ScenarioName {
 export function installMock(opts: MockOptions = {}): ScenarioName {
   const name = opts.scenario ?? resolveScenario(window.location.search, safeStorage())
   init(name)
+  viewer = resolveViewer(window.location.search, safeStorage())
   if (opts.speed !== undefined) speed = opts.speed
   startTicker()
   const real = realFetch ?? (realFetch = window.fetch.bind(window))
@@ -1133,6 +1236,37 @@ export function installMock(opts: MockOptions = {}): ScenarioName {
 }
 
 let realFetch: typeof window.fetch | null = null
+
+/**
+ * Who is looking, for the browser tests of what other people see: `?as=operator` (this computer, an operator),
+ * `?as=remote-operator` (another device through Tailscale), `?as=remote-admin` (another device with an admin token), `?as=remote-tailscale-admin` (another device, a Tailscale administrator).
+ * Remembered for the tab like the scenario; `?as=local` goes back to the default.
+ */
+type Viewer = { identity: T.Meta['identity']; remote: boolean }
+const VIEWERS: Record<string, Viewer> = {
+  operator: { identity: { name: 'kim', provider: 'local', role: 'operator' }, remote: false },
+  'remote-operator': { identity: { name: 'kim', provider: 'tailscale', role: 'operator' }, remote: true },
+  'remote-admin': { identity: { name: 'sam', provider: 'token', role: 'admin' }, remote: true },
+  'remote-tailscale-admin': { identity: { name: 'ada', provider: 'tailscale', role: 'admin' }, remote: true },
+  'remote-passkey-admin': { identity: { name: 'sam', provider: 'passkey', role: 'admin' }, remote: true },
+  'remote-code-operator': { identity: { name: 'amy', provider: 'code', role: 'operator' }, remote: true },
+}
+let viewer: Viewer = { identity: { name: 'local', provider: 'local', role: 'admin' }, remote: false }
+function resolveViewer(search: string, storage: Storage | null): Viewer {
+  const key = 'kora-mock-as'
+  try {
+    const q = new URLSearchParams(search).get('as')
+    if (q) {
+      if (VIEWERS[q]) storage?.setItem(key, q)
+      else storage?.removeItem(key)
+    }
+    const saved = storage?.getItem(key)
+    if (saved && VIEWERS[saved]) return VIEWERS[saved]
+  } catch {
+    /* storage blocked: the default viewer */
+  }
+  return { identity: { name: 'local', provider: 'local', role: 'admin' }, remote: false }
+}
 function safeStorage(): Storage | null {
   try {
     return window.sessionStorage

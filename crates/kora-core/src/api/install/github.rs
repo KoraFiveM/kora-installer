@@ -4,14 +4,15 @@
 //! The logic is the same as `kora github owners` (`kora-cli`); it is kept here because that
 //! lives in a front-end crate.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::git::owners::{self, GhAuth, OwnerKind, SystemLogin};
 use crate::git::SystemRunner;
 use crate::problem::{codes, known, Action, Problem};
 
 /// Where GitHub stands for Kora, so the panel can offer the right fix.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum GithubState {
     /// Signed in with every permission Kora needs.
@@ -86,73 +87,57 @@ pub struct LoginFlow {
     pub code: String,
     pub url: String,
     /// Blocks until the sign-in is approved (the user's login name) or fails (a plain message).
-    pub wait: Box<dyn FnOnce() -> Result<Option<String>, String> + Send>,
+    pub wait: Box<dyn FnOnce() -> Result<Option<String>, Problem> + Send>,
 }
 
 /// Everything the panel does with GitHub that touches `gh` or the network.
 pub trait GithubEnv: Send + Sync {
     fn auth(&self) -> GithubUser;
-    fn owners(&self) -> Result<Vec<OwnerChoice>, String>;
-    fn begin_login(&self) -> Result<LoginFlow, String>;
+    fn owners(&self) -> Result<Vec<OwnerChoice>, Problem>;
+    fn begin_login(&self) -> Result<LoginFlow, Problem>;
     /// The fork target for a development install (what `kora install --mode dev` decides):
     /// a named owner is checked (or deferred when `gh` is not ready yet); with none, the personal
     /// account is used only when it is the only usable choice.
-    fn resolve_owner(&self, requested: Option<&str>) -> Result<String, String>;
+    fn resolve_owner(&self, requested: Option<&str>) -> Result<String, Problem>;
 }
 
 /// The real `gh`.
 pub struct SystemGithub;
 
-const GH_HELP: &str =
-    "Is the GitHub CLI (gh) installed? You can also run `gh auth login` yourself.";
+const GH_HELP: &str = "Is the GitHub CLI (gh) installed? You can also run `gh auth login` yourself.";
 
 impl GithubEnv for SystemGithub {
     fn auth(&self) -> GithubUser {
         auth_with(&SystemRunner)
     }
 
-    fn owners(&self) -> Result<Vec<OwnerChoice>, String> {
-        let list = owners::list_owners(&SystemRunner)
-            .map_err(|e| format!("Could not read your GitHub accounts ({e}). {GH_HELP}"))?;
-        Ok(list
-            .into_iter()
-            .map(|o| OwnerChoice {
-                login: o.login,
-                is_org: o.kind == OwnerKind::Org,
-                can_fork: o.can_fork,
-                reason: o.reason,
-            })
-            .collect())
+    fn owners(&self) -> Result<Vec<OwnerChoice>, Problem> {
+        let list = owners::list_owners(&SystemRunner).map_err(|e| Problem::new(codes::GH_UNAVAILABLE, format!("Could not read your GitHub accounts. {GH_HELP}")).with_details(e.to_string()))?;
+        Ok(list.into_iter().map(|o| OwnerChoice { login: o.login, is_org: o.kind == OwnerKind::Org, can_fork: o.can_fork, reason: o.reason }).collect())
     }
 
-    fn begin_login(&self) -> Result<LoginFlow, String> {
+    fn begin_login(&self) -> Result<LoginFlow, Problem> {
         let session = owners::begin_login(&SystemLogin, false).map_err(|e| {
             if owners::gh_auth(&SystemRunner) == GhAuth::Missing {
-                return known::gh_missing().encode();
+                return known::gh_missing();
             }
-            format!("Could not start the GitHub sign-in ({e}). {GH_HELP}")
+            Problem::new(codes::GH_SIGN_IN_INCOMPLETE, format!("Could not start the GitHub sign-in. {GH_HELP}")).with_details(e.to_string())
         })?;
         let (code, url) = (session.code.clone(), session.url.clone());
         Ok(LoginFlow {
             code,
             url,
-            wait: Box::new(move || {
-                match session.wait() {
+            wait: Box::new(move || match session.wait() {
                 Ok(GhAuth::LoggedIn { login }) => Ok(Some(login)),
                 Ok(GhAuth::LoggedOut) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "GitHub did not confirm the sign-in. Start it again and approve it in your browser.")
-                    .with_action(Action::SignInGithub { scopes: vec![] })
-                    .encode()),
-                Ok(GhAuth::Missing) => Err(known::gh_missing().encode()),
-                Err(e) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.")
-                    .with_details(e.to_string())
-                    .with_action(Action::SignInGithub { scopes: vec![] })
-                    .encode()),
-            }
+                    .with_action(Action::SignInGithub { scopes: vec![] })),
+                Ok(GhAuth::Missing) => Err(known::gh_missing()),
+                Err(e) => Err(Problem::new(codes::GH_SIGN_IN_INCOMPLETE, "The GitHub sign-in did not finish.").with_details(e.to_string()).with_action(Action::SignInGithub { scopes: vec![] })),
             }),
         })
     }
 
-    fn resolve_owner(&self, requested: Option<&str>) -> Result<String, String> {
+    fn resolve_owner(&self, requested: Option<&str>) -> Result<String, Problem> {
         resolve_owner_with(&SystemRunner, requested)
     }
 }
@@ -165,9 +150,7 @@ pub fn auth_with(runner: &dyn crate::git::CommandRunner) -> GithubUser {
         GhAuth::LoggedIn { login } => {
             // `gh auth status` answered a moment ago; if it cannot be read now, or lists no scopes at all
             // (a token from GH_TOKEN, a fine-grained token), do not invent a problem.
-            let missing = crate::git::auth_status(runner)
-                .map(|s| if s.scopes.is_empty() { vec![] } else { s.missing_scopes(false) })
-                .unwrap_or_default();
+            let missing = crate::git::auth_status(runner).map(|s| if s.scopes.is_empty() { vec![] } else { s.missing_scopes(false) }).unwrap_or_default();
             if missing.is_empty() {
                 GithubUser::ready(&login)
             } else {
@@ -178,10 +161,7 @@ pub fn auth_with(runner: &dyn crate::git::CommandRunner) -> GithubUser {
 }
 
 /// Same rules as the CLI's `resolve_github_owner_with`.
-pub fn resolve_owner_with(
-    runner: &dyn crate::git::CommandRunner,
-    requested: Option<&str>,
-) -> Result<String, String> {
+pub fn resolve_owner_with(runner: &dyn crate::git::CommandRunner, requested: Option<&str>) -> Result<String, Problem> {
     if let Some(want) = requested {
         return match owners::check_requested_owner(runner, want)? {
             owners::OwnerCheck::Verified(l) | owners::OwnerCheck::Deferred(l) => Ok(l),
@@ -189,13 +169,12 @@ pub fn resolve_owner_with(
     }
     // Nothing named: the accounts must be read, so say exactly what is missing first.
     match owners::gh_auth(runner) {
-        GhAuth::Missing => return Err(known::gh_missing().with_action(Action::change_answers("mode")).encode()),
-        GhAuth::LoggedOut => return Err(known::github_signed_out().encode()),
+        GhAuth::Missing => return Err(known::gh_missing().with_action(Action::change_answers("source"))),
+        GhAuth::LoggedOut => return Err(known::github_signed_out()),
         GhAuth::LoggedIn { .. } => {}
     }
-    let all = owners::list_owners(runner)
-        .map_err(|e| format!("Could not read your GitHub accounts ({e}). {GH_HELP}"))?;
-    owners::choose_owner(&all, requested).map(|o| o.login)
+    let all = owners::list_owners(runner).map_err(|e| Problem::new(codes::GH_UNAVAILABLE, format!("Could not read your GitHub accounts. {GH_HELP}")).with_details(e.to_string()))?;
+    owners::choose_owner(&all, requested).map(|o| o.login).map_err(Problem::from)
 }
 
 #[cfg(test)]
@@ -244,8 +223,8 @@ mod tests {
     #[test]
     fn choosing_a_fork_owner_says_when_gh_is_missing_or_signed_out() {
         let e = resolve_owner_with(&Gh(|_| Err(std::io::Error::new(std::io::ErrorKind::NotFound, "gh"))), None).unwrap_err();
-        assert_eq!(Problem::decode(&e).code, codes::GH_MISSING);
+        assert_eq!(e.code, codes::GH_MISSING);
         let e = resolve_owner_with(&Gh(|_| out(1, "")), None).unwrap_err();
-        assert_eq!(Problem::decode(&e).code, codes::GH_SIGNED_OUT);
+        assert_eq!(e.code, codes::GH_SIGNED_OUT);
     }
 }

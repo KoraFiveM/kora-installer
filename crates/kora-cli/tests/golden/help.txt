@@ -12,14 +12,20 @@ Commands:
   add-asset      Import paid (Cfx.re escrowed) assets from the .zip files you downloaded from the Cfx.re Portal
   status         Show registered servers
   self-update    Update the kora program itself to the newest stable release (checksum-verified)
+  reach          Can players reach a server? A checklist (running, firewall, router, internet) and the fixes
+  backup         Back up a server (database, settings, txAdmin data, resources), restore it, or set a backup schedule
+  support        Make one file to hand to whoever is helping you: your Kora's state with every secret removed
   webhook        Discord notifications for update reports
   delete         Delete a server: removes what the installer created (files, database + user, registry entry)
   schedule       Show or change when a development server updates itself
   app            The Kora shortcuts (Start Menu / desktop launcher) that open the panel, and tidying up the old machine-wide app
+  audit          Who changed what (from the panel and from `kora` commands), newest first
+  store          Kora's own data file: where it is, a backup or restore of it, and the way back to the old JSON files
   keys           Saved Cfx.re licence keys: list, add, rename, replace, remove, and change a server's key
   profile        What Kora remembers between installs (your Cfx.re name and GitHub owner)
   branch         Development servers: see and change which branch each resource is on, and go back to the normal version
   pr             Development servers: list and try pull requests on a resource
+  resource       One resource: what it is, which version it is on, and whether a restart is needed
   github         GitHub helpers for development mode
   tools          Git and the GitHub CLI: which copy Kora uses, and installing its own (no administrator rights needed)
   check          Check this computer: Git, the GitHub CLI, the GitHub sign-in, the database and administrator rights, each with what to do about it
@@ -27,7 +33,8 @@ Commands:
   stop           Stop a server's background service
   restart        Restart a server's background service
   uninstall      Remove the system changes Kora made (services, update timers, firewall rules, service account, server list entry). Asks before each item; server folders and databases are kept unless you say otherwise
-  helper         The optional privileged helper: lets the panel do the few things that need administrator rights
+  service        Kora's administrator service: who may use it, and whether it is running
+  hand-over      Give a restored or imported server's files to the account the server runs as (asks Kora's administrator service; or run as administrator)
 
 Options:
       --no-elevate
@@ -52,9 +59,19 @@ Options:
           Server folder (default: ~/kora/<name> in your home folder, also with sudo; /home/kora/<name> when logged in as root; Windows: C:\Kora\<name>, the same as in the panel)
 
       --mode <MODE>
-          prod = pinned release clones, dev = forks on your GitHub account
+          The old spelling of --source and --versions: prod = clone + released, dev = fork + latest. Still works
           
           [possible values: prod, dev]
+
+      --source <SOURCE>
+          Where the resources come from: clone = plain clones of the originals (no GitHub account needed), fork = your own copies on GitHub
+          
+          [possible values: clone, fork]
+
+      --versions <VERSIONS>
+          Which versions the server follows: released = pinned to released versions (the default for clone), latest = the latest changes of the main branch (the default for fork)
+          
+          [possible values: released, latest]
 
       --license-key <LICENSE_KEY>
           Cfx.re license key (prefer the CFX_LICENSE_KEY environment variable)
@@ -89,9 +106,34 @@ Options:
           `all` or a comma separated list of resource ids (dependencies and core are always included)
 
       --db <DB>
-          existing = use the local MariaDB, install = install it if missing, skip = no database
+          existing = use the local MariaDB, install = install it if missing, skip = no database, container = a MariaDB container next to the server (the default with --run-mode container)
+
+          Possible values:
+          - existing
+          - install
+          - skip
+          - container: Container mode: a MariaDB container next to the server
+
+      --run-mode <RUN_MODE>
+          How the server runs: service = a system service (the default; --service sets it up), container = in a container run by Podman or Docker (Linux; needs no administrator rights with rootless Podman)
+
+          Possible values:
+          - service:   A system service (the default)
+          - container: A container run by Podman or Docker (Linux)
+
+      --engine <ENGINE>
+          With --run-mode container: which engine (default: the best one found, rootless Podman first)
           
-          [possible values: existing, install, skip]
+          [possible values: podman, docker]
+
+      --bind <IP>
+          With --run-mode container: publish the game port on this address only (default: every address)
+
+      --memory-mb <MIB>
+          With --run-mode container: limit the server's memory, in MiB (default: no limit)
+
+      --cpus <CORES>
+          With --run-mode container: limit the server's processors, in cores (for example 2 or 1.5; default: no limit)
 
       --service
           Install and enable the OS service (needs admin)
@@ -99,8 +141,8 @@ Options:
       --firewall
           Open the game port in the OS firewall (needs admin)
 
-      --github-owner <GITHUB_OWNER>
-          Dev mode: GitHub user or organisation to fork into (`list` shows the choices)
+      --fork-owner <LOGIN_OR_ORG>
+          With --source fork: the GitHub user or organisation to fork into (`list` shows the choices; default: your own account). The old name --github-owner still works
 
       --db-admin-user <DB_ADMIN_USER>
           Database admin user used once to create the new database + user (password: KORA_DB_ADMIN_PASSWORD)
@@ -126,20 +168,20 @@ Options:
       --hostname <HOSTNAME>
           Server hostname shown in the server list (default: the server name)
 
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
       --game-build <N>
           Pin the FiveM game build (e.g. 3258); default: the build the server ships with
 
       --fix-permissions
           Linux, with --service: when the server folder is inside a private folder (such as your home folder) that the service's own account cannot enter, let it pass through exactly those folders (`chmod o+x`) instead of stopping
 
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
   -y, --yes
           Do not ask anything (implied by any other option)
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 
 ===== kora manager =====
 Open Kora Panel in your browser (the same as running `kora` with nothing after it)
@@ -161,15 +203,18 @@ Usage: kora panel [OPTIONS] [COMMAND]
 Commands:
   user            Manage the people who may sign in to the panel remotely (each has a token and a role)
   tailscale       Manage who may sign in with their Tailscale account (set it up with `kora panel --tailscale`)
+  tls             HTTPS for the panel: use your own certificate, Tailscale's, or one made on this computer
+  proxy           Trust a reverse proxy (Caddy, nginx) in front of the panel, for a public name with a real certificate
   restart         Restart the background panel (the one that keeps running after you close the window). The sign-in link stays the same; open pages sign in again
   remote-actions  Let people who sign in from another computer with a token do the risky things too: delete and unregister servers, uninstall Kora, send console commands, change schedules and update Kora. Off by default. (Token administrators can already install servers; Tailscale administrators can do all of this without the switch.)
+  remote          Remote sign-in settings that are not about one person
 
 Options:
       --port <PORT>
           Port to listen on. Default: 47120, or the next free one (up to 47140) when something else uses it
 
       --bind <BIND>
-          Address to listen on. The default, 127.0.0.1, is this computer only. Anything else needs remote access (--remote or saved settings) and is plain HTTP: use it only on a private network such as Tailscale or WireGuard
+          Address to listen on. The default, 127.0.0.1, is this computer only. Anything else needs remote access (--remote or saved settings) and uses HTTPS once there is a certificate (`kora panel tls`); without one it is plain HTTP: use it only on a private network such as Tailscale or WireGuard
           
           [default: 127.0.0.1]
 
@@ -183,7 +228,7 @@ Options:
           With --tailscale: the Tailscale account (name@example.com) that becomes the panel's admin. Without it Kora uses the account you are connected from, else the one that added this computer to Tailscale
 
       --allow-public
-          Let --bind be a public address or every interface (0.0.0.0). The panel is plain HTTP, so on the internet sign-in tokens could be read on the way: use --tailscale or an SSH tunnel instead
+          Let --bind be a public address or every interface (0.0.0.0). Needs HTTPS (`kora panel tls`) or a trusted reverse proxy (`kora panel proxy trust`); --tailscale or an SSH tunnel is safer
 
       --new-token
           Make a new sign-in token, so links shown before stop working (restarts the background panel)
@@ -218,9 +263,12 @@ Manage the people who may sign in to the panel remotely (each has a token and a 
 Usage: kora panel user [OPTIONS] <COMMAND>
 
 Commands:
-  add     Add a user and print their token once (it cannot be shown again)
-  list    List the users and their roles
-  remove  Remove a user; their sessions stop working at once
+  invite       Invite a person: makes the user and prints a one-time link (30 minutes, works once) where they set up a passkey or one-time codes. No token is made
+  list         List the users, their roles and how they sign in
+  credentials  Show what one user can sign in with (counts and dates, never a secret)
+  reset        A lost phone or laptop: take credentials away, end the user's sessions and print a new one-time link to set up again
+  remove       Remove a user; their sessions stop working at once
+  api-token    Tokens for scripts (an `Authorization: Bearer` header; never for signing in, never in an address)
 
 Options:
       --no-elevate
@@ -229,10 +277,10 @@ Options:
   -h, --help
           Print help
 
-===== kora panel user add =====
-Add a user and print their token once (it cannot be shown again)
+===== kora panel user invite =====
+Invite a person: makes the user and prints a one-time link (30 minutes, works once) where they set up a passkey or one-time codes. No token is made
 
-Usage: kora panel user add [OPTIONS] --role <ROLE> <NAME>
+Usage: kora panel user invite [OPTIONS] --role <ROLE> <NAME>
 
 Arguments:
   <NAME>
@@ -251,11 +299,49 @@ Options:
           Print help
 
 ===== kora panel user list =====
-List the users and their roles
+List the users, their roles and how they sign in
 
 Usage: kora panel user list [OPTIONS]
 
 Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user credentials =====
+Show what one user can sign in with (counts and dates, never a secret)
+
+Usage: kora panel user credentials [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          The user
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user reset =====
+A lost phone or laptop: take credentials away, end the user's sessions and print a new one-time link to set up again
+
+Usage: kora panel user reset [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          The user
+
+Options:
+      --what <WHAT>
+          What to take away: passkeys, code (password and one-time codes), all (also the old token link) or legacy-token (only the old token link, no new link)
+          
+          [default: all]
+          [possible values: passkeys, code, all, legacy-token]
+
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 
@@ -270,6 +356,75 @@ Usage: kora panel user remove [OPTIONS] <NAME>
 Arguments:
   <NAME>
           The user to remove
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user api-token =====
+Tokens for scripts (an `Authorization: Bearer` header; never for signing in, never in an address)
+
+Usage: kora panel user api-token [OPTIONS] <COMMAND>
+
+Commands:
+  create  Make a token and print it once
+  list    List the tokens (never their secrets)
+  revoke  Revoke a token by its name or number
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user api-token create =====
+Make a token and print it once
+
+Usage: kora panel user api-token create [OPTIONS] --role <ROLE> <NAME>
+
+Arguments:
+  <NAME>
+          A name for the script (backup-script)
+
+Options:
+      --role <ROLE>
+          What it may do: viewer, operator or admin. Deleting and uninstalling still need `kora panel remote-actions on`
+          
+          [possible values: viewer, operator, admin]
+
+      --days <DAYS>
+          Valid for this many days. Without it the token never expires
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user api-token list =====
+List the tokens (never their secrets)
+
+Usage: kora panel user api-token list [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel user api-token revoke =====
+Revoke a token by its name or number
+
+Usage: kora panel user api-token revoke [OPTIONS] <TOKEN>
+
+Arguments:
+  <TOKEN>
+          The token's name or number (see `list`)
 
 Options:
       --no-elevate
@@ -358,6 +513,218 @@ Options:
   -h, --help
           Print help
 
+===== kora panel tls =====
+HTTPS for the panel: use your own certificate, Tailscale's, or one made on this computer
+
+Usage: kora panel tls [OPTIONS] <COMMAND>
+
+Commands:
+  status       Show whether the panel uses HTTPS, which certificate, when it ends, and its fingerprint
+  set          Use a certificate and key you already have (PEM files). The panel re-reads them when they change, so renewing with certbot or a script needs no restart
+  self-signed  Make a certificate on this computer, from a local certificate authority you trust once in your browser. For a panel on your home network, where no public certificate is possible
+  tailscale    Use the certificate Tailscale issues for this computer's tailnet name (needs MagicDNS and HTTPS certificates enabled in the Tailscale admin console)
+  auto         Use whatever is available: your own certificate if one is set, else Tailscale's when the panel listens on Tailscale, else plain HTTP. The default
+  off          Serve plain HTTP even on addresses other computers can reach (not recommended)
+  renew        Fetch or make the certificate again now (Tailscale and self-signed)
+  export-ca    Save the local certificate authority's certificate (public) to a file, to install in a browser or on a phone
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tls status =====
+Show whether the panel uses HTTPS, which certificate, when it ends, and its fingerprint
+
+Usage: kora panel tls status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tls set =====
+Use a certificate and key you already have (PEM files). The panel re-reads them when they change, so renewing with certbot or a script needs no restart
+
+Usage: kora panel tls set [OPTIONS] --cert <CERT> --key <KEY>
+
+Options:
+      --cert <CERT>
+          The certificate file (PEM, with any intermediate certificates after it)
+
+      --key <KEY>
+          The private key file (PEM). Other accounts must not be able to read it (chmod 600)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tls self-signed =====
+Make a certificate on this computer, from a local certificate authority you trust once in your browser. For a panel on your home network, where no public certificate is possible
+
+Usage: kora panel tls self-signed [OPTIONS]
+
+Options:
+      --name <NAME>
+          A name or address people will open the panel with (repeat for several). This computer's name and addresses are added automatically
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tls tailscale =====
+Use the certificate Tailscale issues for this computer's tailnet name (needs MagicDNS and HTTPS certificates enabled in the Tailscale admin console)
+
+Usage: kora panel tls tailscale [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tls auto =====
+Use whatever is available: your own certificate if one is set, else Tailscale's when the panel listens on Tailscale, else plain HTTP. The default
+
+Usage: kora panel tls auto [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tls off =====
+Serve plain HTTP even on addresses other computers can reach (not recommended)
+
+Usage: kora panel tls off [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tls renew =====
+Fetch or make the certificate again now (Tailscale and self-signed)
+
+Usage: kora panel tls renew [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel tls export-ca =====
+Save the local certificate authority's certificate (public) to a file, to install in a browser or on a phone
+
+Usage: kora panel tls export-ca [OPTIONS]
+
+Options:
+      --to <TO>
+          Where to write it. Default: kora-local-ca.crt in the Kora folder
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel proxy =====
+Trust a reverse proxy (Caddy, nginx) in front of the panel, for a public name with a real certificate
+
+Usage: kora panel proxy [OPTIONS] <COMMAND>
+
+Commands:
+  trust         Trust a reverse proxy (Caddy, nginx) in front of the panel. Prints a secret the proxy must send; forwarded headers are accepted only from it
+  txadmin-host  How each server's txAdmin is reached through the proxy: a host name template with {server}, like `tx-{server}.example.com` (give every server's txAdmin a name in the proxy), or `--clear` to use the panel's own name with the server's gateway port (the proxy listens on that port). txAdmin cannot run under a path prefix, so it gets a name or a port of its own. See docs/panel.md
+  forget        Stop trusting any proxy: forwarded headers are refused again
+  status        Show the trusted proxy setting
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel proxy trust =====
+Trust a reverse proxy (Caddy, nginx) in front of the panel. Prints a secret the proxy must send; forwarded headers are accepted only from it
+
+Usage: kora panel proxy trust [OPTIONS] <ADDRESSES>...
+
+Arguments:
+  <ADDRESSES>...
+          The proxy's address as the panel sees it (127.0.0.1 when it runs on this computer). Repeat for several
+
+Options:
+      --panel <PANEL>
+          The panel address the proxy forwards to, for the configuration examples
+          
+          [default: 127.0.0.1:47120]
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel proxy txadmin-host =====
+How each server's txAdmin is reached through the proxy: a host name template with {server}, like `tx-{server}.example.com` (give every server's txAdmin a name in the proxy), or `--clear` to use the panel's own name with the server's gateway port (the proxy listens on that port). txAdmin cannot run under a path prefix, so it gets a name or a port of its own. See docs/panel.md
+
+Usage: kora panel proxy txadmin-host [OPTIONS] [TEMPLATE]
+
+Arguments:
+  [TEMPLATE]
+          The template (lower-case letters, digits, `-` and `.`, with `{server}`; `{port}` is the gateway port)
+
+Options:
+      --clear
+          Go back to the panel's own name with the gateway port
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel proxy forget =====
+Stop trusting any proxy: forwarded headers are refused again
+
+Usage: kora panel proxy forget [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel proxy status =====
+Show the trusted proxy setting
+
+Usage: kora panel proxy status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
 ===== kora panel restart =====
 Restart the background panel (the one that keeps running after you close the window). The sign-in link stays the same; open pages sign in again
 
@@ -415,6 +782,74 @@ Options:
 Show whether they are on or off
 
 Usage: kora panel remote-actions status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote =====
+Remote sign-in settings that are not about one person
+
+Usage: kora panel remote [OPTIONS] <COMMAND>
+
+Commands:
+  require-strong  Require a passkey or one-time codes for everybody who signs in from another computer: the old token links stop working for sign-in (the same switch as Settings, Remote access). Local to this computer
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote require-strong =====
+Require a passkey or one-time codes for everybody who signs in from another computer: the old token links stop working for sign-in (the same switch as Settings, Remote access). Local to this computer
+
+Usage: kora panel remote require-strong [OPTIONS] <COMMAND>
+
+Commands:
+  on      Allow these actions for administrators who sign in with a token
+  off     Refuse these actions for token sign-ins from other computers (the default)
+  status  Show whether they are on or off
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote require-strong on =====
+Allow these actions for administrators who sign in with a token
+
+Usage: kora panel remote require-strong on [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote require-strong off =====
+Refuse these actions for token sign-ins from other computers (the default)
+
+Usage: kora panel remote require-strong off [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora panel remote require-strong status =====
+Show whether they are on or off
+
+Usage: kora panel remote require-strong status [OPTIONS]
 
 Options:
       --no-elevate
@@ -550,6 +985,368 @@ Options:
 
       --version <vX.Y.Z>
           Install exactly this release (also an older one or a pre-release), e.g. v0.2.1
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora reach =====
+Can players reach a server? A checklist (running, firewall, router, internet) and the fixes
+
+Usage: kora reach [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Server name or folder
+
+Options:
+      --cfx-list
+          Also look the server up on Cfx.re's public server list (for this check; --remember keeps the choice)
+
+      --ip-echo
+          Also ask api.ipify.org for this connection's public address (for this check; --remember keeps the choice)
+
+      --remember
+          Keep the outside lookups chosen above for next time
+
+      --forward <FORWARD>
+          Turn automatic port forwarding (UPnP / NAT-PMP) of the game port on or off for this server
+          
+          [possible values: on, off]
+
+      --open-firewall
+          Open the game port (TCP and UDP) in this computer's firewall. Needs administrator rights
+
+      --json
+          Print the result as JSON
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup =====
+Back up a server (database, settings, txAdmin data, resources), restore it, or set a backup schedule
+
+Usage: kora backup [OPTIONS] <COMMAND>
+
+Commands:
+  create    Make a backup of a server (database, settings, txAdmin data, resources)
+  list      List the backups of a server
+  archived  List the backups Kora kept of servers that were deleted (restore one as a new server with `backup import`)
+  verify    Check every file of a backup against its checksums
+  restore   Put a backup back on the server (a safety copy of the server as it is now is made first)
+  undo      Undo the last restore (puts the safety copy back)
+  delete    Delete one backup
+  prune     Remove old backups under the retention rules
+  import    Bring the server in a backup file onto THIS computer as a new server (made with `backup create --for-move`)
+  schedule  Show or change where backups go, how many are kept, and the schedule
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup create =====
+Make a backup of a server (database, settings, txAdmin data, resources)
+
+Usage: kora backup create [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Server name or folder
+
+Options:
+      --encrypt
+          Protect the file with a password (see --password-stdin; KORA_BACKUP_PASSWORD also works)
+
+      --password-stdin
+          Read the password from the first line of standard input
+
+      --everything
+          Keep every resource in full (a bigger file that needs no internet to restore)
+
+      --stop-server
+          Stop the server while the backup runs (a strictly consistent copy), and start it again
+
+      --folder <DIR>
+          Keep this backup in another folder
+
+      --for-move
+          A copy to move the server to another computer: needs a password and is never removed by the retention rules
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup list =====
+List the backups of a server
+
+Usage: kora backup list [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          Server name or folder
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup archived =====
+List the backups Kora kept of servers that were deleted (restore one as a new server with `backup import`)
+
+Usage: kora backup archived [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup verify =====
+Check every file of a backup against its checksums
+
+Usage: kora backup verify [OPTIONS] <SERVER> <ID>
+
+Arguments:
+  <SERVER>
+          
+
+  <ID>
+          The backup's number (see `kora backup list`), or `latest`
+
+Options:
+      --password-stdin
+          Read the password from the first line of standard input
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup restore =====
+Put a backup back on the server (a safety copy of the server as it is now is made first)
+
+Usage: kora backup restore [OPTIONS] <SERVER> <ID>
+
+Arguments:
+  <SERVER>
+          
+
+  <ID>
+          The backup's number, or `latest`
+
+Options:
+      --password-stdin
+          Read the password from the first line of standard input
+
+      --yes
+          Do not ask for confirmation
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup undo =====
+Undo the last restore (puts the safety copy back)
+
+Usage: kora backup undo [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          
+
+Options:
+      --password-stdin
+          Read the password from the first line of standard input
+
+      --yes
+          Do not ask for confirmation
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup delete =====
+Delete one backup
+
+Usage: kora backup delete [OPTIONS] <SERVER> <ID>
+
+Arguments:
+  <SERVER>
+          
+
+  <ID>
+          
+
+Options:
+      --yes
+          Do not ask for confirmation
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup prune =====
+Remove old backups under the retention rules
+
+Usage: kora backup prune [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup import =====
+Bring the server in a backup file onto THIS computer as a new server (made with `backup create --for-move`)
+
+Usage: kora backup import [OPTIONS] <FILE>
+
+Arguments:
+  <FILE>
+          The backup file (.tar.gz or .tar.gz.age)
+
+Options:
+      --password-stdin
+          Read the password from the first line of standard input
+
+      --name <NAME>
+          A name for the new server (default: the old name, made unique)
+
+      --dir <DIR>
+          The folder for the new server (default: the usual place for its name)
+
+      --game-port <GAME_PORT>
+          The game port (default: the old one, or the next free one)
+
+      --txadmin-port <TXADMIN_PORT>
+          The txAdmin port (default: the old one, or the next free one)
+
+      --licence-key <NAME>
+          Use this saved licence key instead of the one in the file (see `kora keys`)
+
+      --fork-choice <FORK_CHOICE>
+          A fork server whose GitHub account cannot be used here: keep the remotes as recorded (keep), make your own copies in the account signed in here (own), or use the original repositories (originals)
+          
+          [default: keep]
+          [possible values: keep, own, originals]
+
+      --start
+          Start the server when it is imported
+
+      --start-over
+          Remove what an earlier, failed import of this server made, and begin again
+
+      --run-mode <RUN_MODE>
+          How the new server runs: `service` (the default) or `container` (Linux, Podman or Docker)
+          
+          [possible values: service, container]
+
+      --yes
+          Do not ask for confirmation
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup schedule =====
+Show or change where backups go, how many are kept, and the schedule
+
+Usage: kora backup schedule [OPTIONS] <SERVER>
+
+Arguments:
+  <SERVER>
+          
+
+Options:
+      --daily <HH:MM>
+          Every day at HH:MM (24 hours, this computer's time)
+
+      --weekly <DAY> <HH:MM>
+          Every week on DAY (mon..sun) at HH:MM
+
+      --off
+          Turn scheduled backups off
+
+      --keep-last <N>
+          Keep this many of the newest backups (0 = no limit)
+
+      --keep-days <DAYS>
+          Also keep the newest backup of each day for this many days (0 = off)
+
+      --folder <DIR>
+          Keep backups in this folder (outside the server folder)
+
+      --default-folder
+          Go back to Kora's own backups folder
+
+      --stop <STOP>
+          Stop the server during scheduled backups
+          
+          [possible values: on, off]
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora support =====
+Make one file to hand to whoever is helping you: your Kora's state with every secret removed
+
+Usage: kora support [OPTIONS] <COMMAND>
+
+Commands:
+  bundle  Prepare a support bundle, show what is in it, and save it on this computer after you agree
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora support bundle =====
+Prepare a support bundle, show what is in it, and save it on this computer after you agree
+
+Usage: kora support bundle [OPTIONS] [SERVER]
+
+Arguments:
+  [SERVER]
+          Only this server's files (default: every server)
+
+Options:
+      --show <FILE>
+          Print the cleaned text of one file of the bundle (for example servers/prod/server.cfg) and stop
+
+      --yes
+          Save it without asking
 
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
@@ -821,18 +1618,133 @@ Options:
   -h, --help
           Print help
 
+===== kora audit =====
+Who changed what (from the panel and from `kora` commands), newest first
+
+Usage: kora audit [OPTIONS]
+
+Options:
+      --server <SERVER>
+          Only this server
+
+      --op <OP>
+          Only this operation (for example server_control, key_add, update_apply)
+
+      --actor <ACTOR>
+          Only whose name contains this (a Tailscale login, a user name, an account name)
+
+      --result <RESULT>
+          Only this result: ok, failed, refused or started
+
+      --days <DAYS>
+          Only the last this many days
+
+      --limit <LIMIT>
+          How many rows to show (the newest first)
+          
+          [default: 50]
+
+      --json
+          Print JSON, one row per line
+
+      --service
+          Show what Kora's administrator service did with administrator rights instead (its own log: your account's lines, or everyone's when you administer this computer)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora store =====
+Kora's own data file: where it is, a backup or restore of it, and the way back to the old JSON files
+
+Usage: kora store [OPTIONS] <COMMAND>
+
+Commands:
+  status       Show where Kora's data file is, its version, what is in it and what backups there are
+  backup       Make a consistent copy of Kora's data file (saved licence keys included: keep it private)
+  restore      Put a backup of the data file back (Kora Panel must not be running). The current data file is backed up first, and the backup must open and be a version this Kora understands
+  export-json  Write the old JSON files (the way back to Kora 0.7): everything changed since the upgrade comes with you
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora store status =====
+Show where Kora's data file is, its version, what is in it and what backups there are
+
+Usage: kora store status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora store backup =====
+Make a consistent copy of Kora's data file (saved licence keys included: keep it private)
+
+Usage: kora store backup [OPTIONS]
+
+Options:
+      --to <TO>
+          Where to put the copy (default: the store's backups folder)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora store restore =====
+Put a backup of the data file back (Kora Panel must not be running). The current data file is backed up first, and the backup must open and be a version this Kora understands
+
+Usage: kora store restore [OPTIONS] <BACKUP>
+
+Arguments:
+  <BACKUP>
+          The backup file (see `kora store status` for where they are)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora store export-json =====
+Write the old JSON files (the way back to Kora 0.7): everything changed since the upgrade comes with you
+
+Usage: kora store export-json [OPTIONS]
+
+Options:
+      --to <TO>
+          The folder to write them in (default: inside the private store folder)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
 ===== kora keys =====
 Saved Cfx.re licence keys: list, add, rename, replace, remove, and change a server's key
 
 Usage: kora keys [OPTIONS] <COMMAND>
 
 Commands:
-  list     List the saved keys (name and the last 4 characters only) and which servers use them
-  add      Save a licence key under a name. The key is read from CFX_LICENSE_KEY or standard input, never from the command line
-  replace  Put a different key under an existing name (read from CFX_LICENSE_KEY or standard input). Installed servers keep their own key
-  rename   Give a saved key another name
-  remove   Forget a saved key. Servers installed with it keep working: they have their own copy
-  use      Change the licence key of an installed server to a saved key (restart the server afterwards if it is running)
+  list      List the saved keys (name and the last 4 characters only) and which servers use them
+  add       Save a licence key under a name. The key is read from CFX_LICENSE_KEY or standard input, never from the command line
+  replace   Put a different key under an existing name (read from CFX_LICENSE_KEY or standard input). Installed servers keep their own key
+  rename    Give a saved key another name
+  remove    Forget a saved key. Servers installed with it keep working: they have their own copy
+  keychain  Where the saved keys are kept: Kora's private file, or the system keychain (Windows: protected for your account; Linux: GNOME Keyring, KWallet)
+  use       Change the licence key of an installed server to a saved key (restart the server afterwards if it is running)
 
 Options:
       --no-elevate
@@ -917,6 +1829,59 @@ Options:
   -y, --yes
           Do not ask for confirmation
 
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys keychain =====
+Where the saved keys are kept: Kora's private file, or the system keychain (Windows: protected for your account; Linux: GNOME Keyring, KWallet)
+
+Usage: kora keys keychain [OPTIONS] <COMMAND>
+
+Commands:
+  status  Show where each saved key is kept, and where new ones go
+  on      Use the system keychain (when this computer has one) and move the saved keys into it
+  off     Keep every key in Kora's private file: moves them back out of the keychain. The way back to Kora 0.7 is `kora store export-json`, which carries every key
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys keychain status =====
+Show where each saved key is kept, and where new ones go
+
+Usage: kora keys keychain status [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys keychain on =====
+Use the system keychain (when this computer has one) and move the saved keys into it
+
+Usage: kora keys keychain on [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora keys keychain off =====
+Keep every key in Kora's private file: moves them back out of the keychain. The way back to Kora 0.7 is `kora store export-json`, which carries every key
+
+Usage: kora keys keychain off [OPTIONS]
+
+Options:
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 
@@ -1164,10 +2129,129 @@ Development servers: list and try pull requests on a resource
 Usage: kora pr [OPTIONS] <COMMAND>
 
 Commands:
+  view      A pull request in full: checks, reviews, files, conversation, and whether you may merge it
+  comment   Comment on a pull request, as the GitHub account `gh` is signed in as
+  review    Approve, ask for changes or comment on a pull request (as the signed-in GitHub account)
+  merge     Merge a pull request, if your GitHub account may (the way the repository allows)
   list      List the open pull requests of the original repository and your fork, for one resource
   checkout  Try a pull request on one resource: its number or its GitHub address
 
 Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora pr view =====
+A pull request in full: checks, reviews, files, conversation, and whether you may merge it
+
+Usage: kora pr view [OPTIONS] <SERVER> <RESOURCE> <NUMBER>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+  <NUMBER>
+          The pull request's number
+
+Options:
+      --source <upstream|fork>
+          Which repository it is on: upstream (the original, the default) or fork (yours)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora pr comment =====
+Comment on a pull request, as the GitHub account `gh` is signed in as
+
+Usage: kora pr comment [OPTIONS] --message <MESSAGE> <SERVER> <RESOURCE> <NUMBER>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+  <NUMBER>
+          The pull request's number
+
+Options:
+      --source <upstream|fork>
+          Which repository it is on: upstream (the original, the default) or fork (yours)
+
+  -m, --message <MESSAGE>
+          
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora pr review =====
+Approve, ask for changes or comment on a pull request (as the signed-in GitHub account)
+
+Usage: kora pr review [OPTIONS] --action <approve|request-changes|comment> <SERVER> <RESOURCE> <NUMBER>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+  <NUMBER>
+          The pull request's number
+
+Options:
+      --source <upstream|fork>
+          Which repository it is on: upstream (the original, the default) or fork (yours)
+
+      --action <approve|request-changes|comment>
+          approve, request-changes or comment
+
+  -m, --message <MESSAGE>
+          
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora pr merge =====
+Merge a pull request, if your GitHub account may (the way the repository allows)
+
+Usage: kora pr merge [OPTIONS] <SERVER> <RESOURCE> <NUMBER>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+  <NUMBER>
+          The pull request's number
+
+Options:
+      --source <upstream|fork>
+          Which repository it is on: upstream (the original, the default) or fork (yours)
+
+      --method <METHOD>
+          merge, squash or rebase (default: the first the repository allows)
+
+  -y, --yes
+          Do not ask first
+
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 
@@ -1221,6 +2305,258 @@ Options:
   -y, --yes
           Do not ask before discarding
 
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource =====
+One resource: what it is, which version it is on, and whether a restart is needed
+
+Usage: kora resource [OPTIONS] <COMMAND>
+
+Commands:
+  show           Show one resource: its repository, which version it is on, and whether a restart is needed
+  changes        Show what changed in a resource's folder (files, and a readable diff with --diff)
+  log            The latest commits of the branch the resource is on
+  commit         Commit everything that changed in the resource
+  push           Push the branch the resource is on to your own copy on GitHub (never forced). Acts as the GitHub account `gh` is signed in as
+  new-branch     Make a new branch from where the resource is now (your changes come along)
+  issues         Open issues of the resource's repository
+  issue-comment  Comment on an issue, as the GitHub account `gh` is signed in as
+  releases       Releases of the resource's repository, and which one this server is pinned to
+  fork           Make your own copy (a fork) of resources that are plain clones: all of them, or the ones named
+  versions       Follow released versions or the latest changes. Nothing moves until you check for updates
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource show =====
+Show one resource: its repository, which version it is on, and whether a restart is needed
+
+Usage: kora resource show [OPTIONS] <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource changes =====
+Show what changed in a resource's folder (files, and a readable diff with --diff)
+
+Usage: kora resource changes [OPTIONS] <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+Options:
+      --diff
+          Also print the diff
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource log =====
+The latest commits of the branch the resource is on
+
+Usage: kora resource log [OPTIONS] <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource commit =====
+Commit everything that changed in the resource
+
+Usage: kora resource commit [OPTIONS] --message <MESSAGE> <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+Options:
+  -m, --message <MESSAGE>
+          The text to send (a message or a comment)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource push =====
+Push the branch the resource is on to your own copy on GitHub (never forced). Acts as the GitHub account `gh` is signed in as
+
+Usage: kora resource push [OPTIONS] <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource new-branch =====
+Make a new branch from where the resource is now (your changes come along)
+
+Usage: kora resource new-branch [OPTIONS] <SERVER> <RESOURCE> <NAME>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+  <NAME>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource issues =====
+Open issues of the resource's repository
+
+Usage: kora resource issues [OPTIONS] <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource issue-comment =====
+Comment on an issue, as the GitHub account `gh` is signed in as
+
+Usage: kora resource issue-comment [OPTIONS] --message <MESSAGE> <SERVER> <RESOURCE> <NUMBER>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+  <NUMBER>
+          
+
+Options:
+  -m, --message <MESSAGE>
+          The text to send (a message or a comment)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource releases =====
+Releases of the resource's repository, and which one this server is pinned to
+
+Usage: kora resource releases [OPTIONS] <SERVER> <RESOURCE>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <RESOURCE>
+          
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource fork =====
+Make your own copy (a fork) of resources that are plain clones: all of them, or the ones named
+
+Usage: kora resource fork [OPTIONS] <SERVER> [RESOURCES]...
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  [RESOURCES]...
+          Only these resources
+
+Options:
+      --owner <LOGIN_OR_ORG>
+          The GitHub user or organisation to fork into (default: the account `gh` is signed in as)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora resource versions =====
+Follow released versions or the latest changes. Nothing moves until you check for updates
+
+Usage: kora resource versions [OPTIONS] <SERVER> <VERSIONS>
+
+Arguments:
+  <SERVER>
+          Registry name, or the server folder
+
+  <VERSIONS>
+          [possible values: released, latest]
+
+Options:
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 
@@ -1329,6 +2665,22 @@ Options:
   -h, --help
           Print help
 
+===== kora container-logs =====
+Copy a container server's output to its console log (started by Kora for container-mode servers)
+
+Usage: kora container-logs [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The server folder (absolute path)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
 ===== kora start =====
 Start a server's background service
 
@@ -1408,15 +2760,20 @@ Options:
   -h, --help
           Print help
 
-===== kora helper =====
-The optional privileged helper: lets the panel do the few things that need administrator rights
+===== kora service =====
+Kora's administrator service: who may use it, and whether it is running
 
-Usage: kora helper [OPTIONS] <COMMAND>
+Usage: kora service [OPTIONS] <COMMAND>
 
 Commands:
-  install    Install the helper service for your user account (needs administrator rights; run with sudo)
-  uninstall  Remove the helper service (needs administrator rights)
-  status     Say whether the helper is installed and running
+  status          Say whether the service is installed and running, and whether it serves your account
+  list            List the accounts that may use the service
+  allow           Let accounts use the service (administrators only). Give the accounts' names
+  install         Install the service on this computer (needs administrator rights; asks once). Linux: downloads this version's program from the official release, checks its checksum and puts it in /usr/lib/kora. For Debian and Ubuntu the `.deb` package does the same
+  uninstall       Remove the service (needs administrator rights). Servers it set up keep working
+  migrate         Bring an earlier Kora layout (0.6.x / 0.7.0) over to the service without touching servers or data (administrators only; the package and the MSI run it): the old Linux helper goes, update tasks lose their full administrator token, servers set up the old way are recorded as yours
+  finish-upgrade  Finish upgrading for YOUR account (no administrator rights): your earlier copy of Kora is set aside, its PATH entry removed and the background panel pointed at the installed program
+  deny            Stop an account using the service (administrators only). Servers it set up keep working
 
 Options:
       --no-elevate
@@ -1425,22 +2782,10 @@ Options:
   -h, --help
           Print help
 
-===== kora helper serve =====
-Run the helper (started by its system service; not for people)
+===== kora service serve =====
+Run the service (started by the system; not for people)
 
-Usage: kora helper serve [OPTIONS]
-
-Options:
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
-  -h, --help
-          Print help
-
-===== kora helper install =====
-Install the helper service for your user account (needs administrator rights; run with sudo)
-
-Usage: kora helper install [OPTIONS]
+Usage: kora service serve [OPTIONS]
 
 Options:
       --no-elevate
@@ -1449,22 +2794,10 @@ Options:
   -h, --help
           Print help
 
-===== kora helper uninstall =====
-Remove the helper service (needs administrator rights)
+===== kora service status =====
+Say whether the service is installed and running, and whether it serves your account
 
-Usage: kora helper uninstall [OPTIONS]
-
-Options:
-      --no-elevate
-          Do not ask Windows/sudo for administrator permission (for developers and CI)
-
-  -h, --help
-          Print help
-
-===== kora helper status =====
-Say whether the helper is installed and running
-
-Usage: kora helper status [OPTIONS]
+Usage: kora service status [OPTIONS]
 
 Options:
       --no-elevate
@@ -1473,21 +2806,135 @@ Options:
   -h, --help
           Print help
 
-===== kora admin-worker =====
-Windows: Kora Panel's short-lived administrator helper (started through the permission prompt)
+===== kora service list =====
+List the accounts that may use the service
 
-Usage: kora admin-worker [OPTIONS]
+Usage: kora service list [OPTIONS]
 
 Options:
-      --pipe <PIPE>
-          The panel's pipe
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
 
-      --parent <PARENT>
-          The panel's process id
+  -h, --help
+          Print help
 
-      --selftest
-          CI only, on an account that is already elevated: run the panel's side and a worker without the prompt
+===== kora service allow =====
+Let accounts use the service (administrators only). Give the accounts' names
 
+Usage: kora service allow [OPTIONS] <ACCOUNTS>...
+
+Arguments:
+  <ACCOUNTS>...
+          Account names (Windows: DOMAIN\name or a SID; Linux: the user name or uid:1000)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service allow-installer =====
+Allow the person who started Kora's installer, when an administrator typed the password for them (Windows; run by the installer, not by people). Windows tells it which process started the installation; it asks Windows who that is and who asked for the permission, and allows that person only when the answer is sound (see `kora_core::privsvc::installer_user`)
+
+Usage: kora service allow-installer [OPTIONS] <CLIENT_PID>
+
+Arguments:
+  <CLIENT_PID>
+          The process that started the installation (the installer's `ClientProcessId`)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service install =====
+Install the service on this computer (needs administrator rights; asks once). Linux: downloads this version's program from the official release, checks its checksum and puts it in /usr/lib/kora. For Debian and Ubuntu the `.deb` package does the same
+
+Usage: kora service install [OPTIONS]
+
+Options:
+      --allow <ACCOUNT>
+          Also let this account use the service (the account that ran sudo is always added)
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service uninstall =====
+Remove the service (needs administrator rights). Servers it set up keep working
+
+Usage: kora service uninstall [OPTIONS]
+
+Options:
+      --purge
+          Also remove the list of allowed accounts, the ownership records and the audit log
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service migrate =====
+Bring an earlier Kora layout (0.6.x / 0.7.0) over to the service without touching servers or data (administrators only; the package and the MSI run it): the old Linux helper goes, update tasks lose their full administrator token, servers set up the old way are recorded as yours
+
+Usage: kora service migrate [OPTIONS]
+
+Options:
+      --quiet
+          Say nothing unless something is wrong
+
+      --dry-run
+          Only say what would be done
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service finish-upgrade =====
+Finish upgrading for YOUR account (no administrator rights): your earlier copy of Kora is set aside, its PATH entry removed and the background panel pointed at the installed program
+
+Usage: kora service finish-upgrade [OPTIONS]
+
+Options:
+      --dry-run
+          Only say what would be done
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service unit =====
+Print the systemd unit text (the package is built from it; not for people)
+
+Usage: kora service unit [OPTIONS]
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora service deny =====
+Stop an account using the service (administrators only). Servers it set up keep working
+
+Usage: kora service deny [OPTIONS] <ACCOUNT>
+
+Arguments:
+  <ACCOUNT>
+          
+
+Options:
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 
@@ -1495,7 +2942,7 @@ Options:
           Print help
 
 ===== kora admin-step =====
-One administrator step of an install or delete, run by that helper
+One administrator step of an install or delete, run by Kora's administrator service
 
 Usage: kora admin-step [OPTIONS] --step <STEP> --dir <DIR> <ACTION>
 
@@ -1509,7 +2956,7 @@ Options:
       --step <STEP>
           The install step (see `kora_core::installer::system_ops`)
           
-          [possible values: prepare.db, build.db, system.firewall, system.service, system.schedule]
+          [possible values: prepare.db, build.db, system.firewall, reach.firewall, system.service, system.schedule]
 
       --dir <DIR>
           The server folder
@@ -1536,7 +2983,7 @@ Options:
           Print help
 
 ===== kora admin-db =====
-Start (or install) Kora's own MariaDB on Windows, run by that helper
+Start (or install) Kora's own MariaDB on Windows, run by Kora's administrator service
 
 Usage: kora admin-db [OPTIONS] <ACTION>
 
@@ -1547,6 +2994,106 @@ Arguments:
           [possible values: start, install]
 
 Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup-job =====
+Create, replace or remove the operating-system job of a server's scheduled backups, run by Kora's administrator service
+
+Usage: kora backup-job [OPTIONS] <COMMAND>
+
+Commands:
+  set  Create or replace the job
+  off  Remove the job (nothing else)
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup-job set =====
+Create or replace the job
+
+Usage: kora backup-job set [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The server's full folder
+
+Options:
+      --daily <HH:MM>
+          Every day at HH:MM (24 hours, this computer's time)
+
+      --weekly <DAY> <HH:MM>
+          Every week on DAY (mon..sun) at HH:MM
+
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora backup-job off =====
+Remove the job (nothing else)
+
+Usage: kora backup-job off [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The server's full folder
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora hand-over =====
+Give a restored or imported server's files to the account the server runs as (asks Kora's administrator service; or run as administrator)
+
+Usage: kora hand-over [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The server's full folder
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora desktop =====
+What the Kora desktop app (tray icon and window) asks of kora. Run by the app, never by a person
+
+Usage: kora desktop [OPTIONS] <COMMAND>
+
+Commands:
+  session  Make sure the panel runs and print one line of JSON: its port, a one-time sign-in link and its token
+
+Options:
+      --no-elevate
+          Do not ask Windows/sudo for administrator permission (for developers and CI)
+
+  -h, --help
+          Print help
+
+===== kora desktop session =====
+Make sure the panel runs and print one line of JSON: its port, a one-time sign-in link and its token
+
+Usage: kora desktop session [OPTIONS]
+
+Options:
+      --no-background
+          Never set up or start a background service (the app runs the panel itself instead)
+
       --no-elevate
           Do not ask Windows/sudo for administrator permission (for developers and CI)
 

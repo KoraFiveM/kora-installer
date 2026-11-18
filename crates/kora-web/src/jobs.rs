@@ -25,6 +25,10 @@ pub trait Jobs: Send + Sync {
     fn get(&self, id: &str) -> Option<Value>;
     /// Past events plus a receiver of later messages (ends with `Done`/`Failed`).
     fn subscribe(&self, id: &str) -> Option<(Vec<Value>, Receiver<JobMessage>)>;
+    /// The recent jobs, newest first, without their events (what the Jobs page shows, also after a restart).
+    fn history(&self, _limit: usize) -> Vec<Value> {
+        Vec::new()
+    }
     /// The operation that started the job (`None`: unknown job, or not one of ours).
     fn op(&self, id: &str) -> Option<Op> {
         let v = self.get(id)?;
@@ -43,9 +47,7 @@ pub(crate) fn may_read(caller: &Caller, op: Option<Op>) -> Result<(), ApiError> 
     let refuse = || ApiError::forbidden("Your account cannot follow this job.");
     let op = op.ok_or_else(refuse)?;
     if roles::local_only(op) {
-        return Err(ApiError::forbidden(
-            "This job can only be followed on the computer that runs Kora.",
-        ));
+        return Err(ApiError::forbidden("This job can only be followed on the computer that runs Kora."));
     }
     match &caller.identity {
         Some(id) if id.role >= roles::min_role(op) => Ok(()),
@@ -68,18 +70,30 @@ impl Jobs for kora_core::api::JobRegistry {
     fn op(&self, id: &str) -> Option<Op> {
         kora_core::api::JobRegistry::get(self, id).map(|s| s.op)
     }
+    fn history(&self, limit: usize) -> Vec<Value> {
+        kora_core::api::JobRegistry::history(self, limit)
+            .into_iter()
+            .filter_map(|s| {
+                let mut v = serde_json::to_value(s).ok()?;
+                if let Some(e) = v.get("error").and_then(Value::as_str).map(job_error) {
+                    v["error"] = e;
+                }
+                Some(v)
+            })
+            .collect()
+    }
 }
 
 /// The UI reads a job error as a Problem (`{code, message, details?, actions?}`) plus, for some
-/// jobs, `command?`, `kept?`, `log_path?`, `resume?`. A job body returns `Err(String)`: plain text
+/// jobs, `command?`, `kept?`, `log_path?`, `resume?`. A job body returns `Err(JobFailure)`, stored as
+/// that JSON. This also reads rows written by older builds: plain text
 /// becomes `{code: "failed", message}`; a packed [`kora_core::problem::Problem`] becomes its JSON;
 /// a JSON object (for structured failures such as installs or `needs_elevation`) is passed
 /// through, with `code` defaulting to `failed`.
 pub fn job_error(e: &str) -> Value {
-    if kora_core::problem::Problem::is_encoded(e) {
-        return kora_core::problem::Problem::decode(e).to_json();
+    if let Some(p) = kora_core::store::jobs::read_legacy_packed(e) {
+        return p.to_json();
     }
-    let e = &crate::error::friendly(e.to_string());
     match serde_json::from_str::<Value>(e) {
         Ok(mut v @ Value::Object(_)) if v.get("message").is_some_and(Value::is_string) => {
             if v.get("code").is_none() {
@@ -120,16 +134,12 @@ impl MemoryJobs {
         Self::default()
     }
     pub fn create(&self, id: &str) {
-        self.inner
-            .lock()
-            .unwrap()
-            .insert(id.to_string(), Entry::default());
+        self.inner.lock().unwrap().insert(id.to_string(), Entry::default());
     }
     pub fn push(&self, id: &str, ev: Value) {
         if let Some(e) = self.inner.lock().unwrap().get_mut(id) {
             e.events.push(ev.clone());
-            e.subs
-                .retain(|s| s.send(JobMessage::Event(ev.clone())).is_ok());
+            e.subs.retain(|s| s.send(JobMessage::Event(ev.clone())).is_ok());
         }
     }
     pub fn finish(&self, id: &str, result: Value) {
@@ -158,10 +168,8 @@ impl Jobs for MemoryJobs {
             Some(JobMessage::Failed(m)) => ("failed", Value::Null, json!(m)),
             Some(JobMessage::Event(_)) => ("running", Value::Null, Value::Null),
         };
-        Some(
-            json!({"id": id, "op": "test", "server": null, "state": state,
-            "events": e.events, "result": result, "error": error}),
-        )
+        Some(json!({"id": id, "op": "test", "server": null, "state": state,
+            "events": e.events, "result": result, "error": error}))
     }
     fn subscribe(&self, id: &str) -> Option<(Vec<Value>, Receiver<JobMessage>)> {
         let mut g = self.inner.lock().unwrap();
@@ -177,11 +185,7 @@ impl Jobs for MemoryJobs {
     }
 }
 
-pub async fn job_get(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    Path(id): Path<String>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn job_get(State(st): State<AppState>, Extension(caller): Extension<Caller>, Path(id): Path<String>) -> Result<Json<Value>, ApiError> {
     let jobs = st.jobs.clone();
     crate::blocking(move || {
         let v = jobs.get(&id).ok_or_else(|| ApiError::not_found("unknown job"))?;
@@ -191,11 +195,25 @@ pub async fn job_get(
     .await
 }
 
-pub async fn job_events(
+/// `GET /jobs?limit=`: the recent jobs the caller could have started (this run's and, after a restart, the
+/// remembered ones), newest first, without their events. A remote caller only sees jobs of operations their
+/// role allows, and never a local-only operation's.
+pub async fn jobs_list(
     State(st): State<AppState>,
     Extension(caller): Extension<Caller>,
-    Path(id): Path<String>,
-) -> Result<impl IntoResponse, ApiError> {
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<Value>, ApiError> {
+    let jobs = st.jobs.clone();
+    crate::blocking(move || {
+        let limit: usize = q.get("limit").and_then(|v| v.parse().ok()).unwrap_or(50).clamp(1, 300);
+        let all = jobs.history(limit);
+        let shown: Vec<Value> = all.into_iter().filter(|j| may_read(&caller, j.get("op").and_then(Value::as_str).and_then(|n| Op::ALL.iter().copied().find(|o| o.name() == n))).is_ok()).collect();
+        Ok(Json(json!({"jobs": shown})))
+    })
+    .await
+}
+
+pub async fn job_events(State(st): State<AppState>, Extension(caller): Extension<Caller>, Path(id): Path<String>) -> Result<impl IntoResponse, ApiError> {
     let jobs = st.jobs.clone();
     let c = caller.clone();
     let (past, rx) = crate::blocking(move || {
@@ -203,8 +221,7 @@ pub async fn job_events(
             return Err(ApiError::not_found("unknown job"));
         }
         may_read(&c, jobs.op(&id))?;
-        jobs.subscribe(&id)
-            .ok_or_else(|| ApiError::not_found("unknown job"))
+        jobs.subscribe(&id).ok_or_else(|| ApiError::not_found("unknown job"))
     })
     .await?;
     let permit = st.stream_permit(&caller)?;
@@ -232,27 +249,18 @@ pub async fn job_events(
                     return;
                 }
                 Ok(JobMessage::Failed(m)) => {
-                    send(
-                        Event::default()
-                            .event("failed")
-                            .data(json!({"error": m}).to_string()),
-                    );
+                    send(Event::default().event("failed").data(json!({"error": m}).to_string()));
                     return;
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    send(
-                        Event::default()
-                            .event("failed")
-                            .data(json!({"error": "job ended unexpectedly"}).to_string()),
-                    );
+                    send(Event::default().event("failed").data(json!({"error": "job ended unexpectedly"}).to_string()));
                     return;
                 }
             }
         }
     });
-    Ok(Sse::new(Limited::new(ReceiverStream::new(trx), permit))
-        .keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
+    Ok(Sse::new(Limited::new(ReceiverStream::new(trx), permit)).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
 }
 
 fn progress(v: &Value) -> Event {
@@ -267,11 +275,7 @@ mod tests {
     use serde_json::json;
 
     fn remote(role: Role) -> Caller {
-        Caller {
-            remote: true,
-            peer: Some("100.64.0.9:5000".parse().unwrap()),
-            identity: Some(Identity { name: "x".into(), provider: Provider::Token, role }),
-        }
+        Caller { remote: true, peer: Some("100.64.0.9:5000".parse().unwrap()), identity: Some(Identity { name: "x".into(), provider: Provider::Token, role }) }
     }
 
     #[test]
@@ -293,6 +297,6 @@ mod tests {
         assert_eq!(job_error(r#"{"code":"needs_elevation","message":"m","command":["kora"]}"#)["code"], "needs_elevation");
         assert_eq!(job_error("[1]"), json!({"code": "failed", "message": "[1]"}));
         let p = kora_core::problem::Problem::new("github.signed_out", "Sign in.").with_action(kora_core::problem::Action::SignInGithub { scopes: vec![] });
-        assert_eq!(job_error(&p.encode()), json!({"code": "github.signed_out", "message": "Sign in.", "actions": [{"kind": "sign_in_github"}]}));
+        assert_eq!(job_error(&kora_core::api::JobFailure::new(p).to_text()), json!({"code": "github.signed_out", "message": "Sign in.", "actions": [{"kind": "sign_in_github"}]}));
     }
 }

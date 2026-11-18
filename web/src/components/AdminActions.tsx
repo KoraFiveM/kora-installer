@@ -1,37 +1,63 @@
 import { useMemo, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, askForAdminNext } from '@/api/client'
+import { api } from '@/api/client'
+import { elevateInstallService } from '@/lib/shell'
 import { useAlerts } from '@/lib/app'
 import { ProblemActions, toProblem, type ActionContext, type ActionHandlers } from '@/lib/problemActions'
+import { t } from '@/i18n'
+import '@/i18n/en/errors/adminActions'
+
+/** How long the installer may take before the panel stops waiting (the person answers Windows' prompt meanwhile). */
+const INSTALL_WAIT_MS = 15 * 60_000
 
 /**
- * The app-wide "Ask for administrator permission" / "Ask again" button (`request_admin`). Only on
- * Windows, where the panel can ask Windows itself (`GET /system` `admin_prompt`): it repeats what
- * failed, now telling the panel that the person asked, so Windows shows its permission prompt on
- * the computer that runs Kora (even for a remote session). Pages that know better (the install
- * wizard) register their own handler, which wins.
+ * The app-wide "Install Kora's administrator service" button (`install_admin_service`). Only on Windows, where
+ * the panel can start the installer itself: it asks an administrator for approval ONCE, on the computer that
+ * runs Kora (this is the one place a permission prompt remains), and then repeats what failed, which now
+ * works without asking. On Linux ErrorNotice shows the command instead (`kora service install`).
  */
 export function AdminActions({ children }: { children: ReactNode }) {
   const sys = useQuery({ queryKey: ['system'], queryFn: api.system, staleTime: 60_000 })
   const qc = useQueryClient()
   const alerts = useAlerts()
+  const windows = sys.data?.platform === 'windows'
   const handlers = useMemo<ActionHandlers>(() => {
-    if (!sys.data?.admin_prompt) return {}
+    if (!windows) return {}
     return {
-      request_admin: async (_a, ctx?: ActionContext) => {
-        if (!ctx?.retry) return
-        askForAdminNext()
+      install_admin_service: async (_a, ctx?: ActionContext) => {
         try {
-          const r = await ctx.retry()
-          const job = r && typeof r === 'object' && 'job' in r
-          alerts.push('success', job ? 'Windows gave permission. Kora is doing it now.' : 'Windows gave permission and Kora made the change.')
-        } catch (e) {
-          alerts.push('warning', toProblem(e)?.message ?? 'Windows did not give permission.')
-        } finally {
+          // Inside the Kora desktop app the app itself launches `kora service install` with Windows' permission prompt in
+          // front of its window (a background panel's prompt only flashes in the taskbar). The installer then runs on its
+          // own, so wait until the service answers for this account. Outside the app (false): the panel starts it as a job.
+          if (await elevateInstallService()) {
+            alerts.push('info', t('errors.adminActions.koraInstallerRunningWindows'))
+            const until = Date.now() + INSTALL_WAIT_MS
+            for (;;) {
+              if ((await api.system()).admin_service?.state === 'ready') break
+              if (Date.now() > until) throw new Error(t('errors.adminActions.installerDidFinishTime'))
+              await new Promise((r) => setTimeout(r, 2000))
+            }
+          } else {
+            const { job } = await api.adminService.install()
+            alerts.push('info', t('errors.adminActions.koraInstallerRunningWindows2'))
+            const until = Date.now() + INSTALL_WAIT_MS
+            for (;;) {
+              const j = await api.jobs.get(job)
+              if (j.state === 'done') break
+              if (j.state === 'failed') throw new Error(j.error?.message ?? t('errors.adminActions.installerStopped'))
+              if (Date.now() > until) throw new Error(t('errors.adminActions.installerDidFinishTime2'))
+              await new Promise((r) => setTimeout(r, 1000))
+            }
+          }
+          alerts.push('success', t('errors.adminActions.korasAdministratorServiceInsta'))
           void qc.invalidateQueries()
+          if (ctx?.afterFix) await ctx.afterFix()
+          else if (ctx?.retry) await ctx.retry()
+        } catch (e) {
+          alerts.push('warning', toProblem(e)?.message ?? t('errors.adminActions.korasAdministratorServiceInsta2'))
         }
       },
     }
-  }, [sys.data?.admin_prompt, qc, alerts])
+  }, [windows, qc, alerts])
   return <ProblemActions handlers={handlers}>{children}</ProblemActions>
 }

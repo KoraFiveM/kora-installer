@@ -10,20 +10,62 @@
 //! let p = Problem::new(codes::GH_MISSING, "The GitHub CLI (gh) is not installed. Kora needs it for development servers.")
 //!     .with_details("`gh --version` could not be run")
 //!     .with_action(Action::InstallTool { tool: Tool::Gh })
-//!     .with_action(Action::ChangeAnswers { section: Some("mode".into()) });
+//!     .with_action(Action::ChangeAnswers { section: Some("source".into()) });
 //! assert_eq!(p.actions.len(), 2);
 //! ```
 //!
-//! # Carrying it through code that only knows `String` errors
+//! # One error convention (typed errors)
 //!
-//! Most of Kora's errors are still `String`s (`api::Res<T>`, `InstallError`, job errors). A Problem
-//! goes through them unchanged: `String::from(problem)` (or [`Problem::encode`]) packs it into a
-//! string, and [`Problem::decode`] (or `Problem::from(string)`) unpacks it again. A plain string
-//! that never was a Problem decodes to a generic one ([`codes::FAILED`], no actions), so every
-//! existing error keeps working; the panel then offers its generic "Try again / Copy details".
+//! An error that can reach a person is a [`Problem`] from where it is raised to where it is shown.
+//! Nothing packs a Problem into a string: functions return `Result<T, Problem>` ([`Res`]), the web
+//! panel turns it into its JSON error envelope (`ApiError::from`), and the command line prints it
+//! in one place (`kora-cli`'s `ui::fail`, which uses `Display`: message, details, one hint per
+//! action).
 //!
-//! Code that shows an error in a terminal must use [`plain_text`] (or `Problem::to_string()`), never
-//! the packed string itself.
+//! * Raise one with [`Problem::new`] (+ details and actions), or [`Problem::generic`] for a plain
+//!   sentence. A bare `String` or `&str` converts into a generic Problem (`?` and `.into()` work),
+//!   so a sentence written for a person needs no ceremony.
+//! * Low-level errors (`std::io::Error`, `serde_json::Error`, `ureq::Error`, SQLite errors,
+//!   [`crate::git::GitError`]) convert into a Problem whose message is a generic sentence and whose
+//!   `details` hold the low-level text (never the message: a person does not need `os error 13`).
+//!   The internal enums that callers `match` on (`GitError`, `LockError`, `UpdateError`, `DbError`,
+//!   ...) stay enums; `problem/convert.rs` holds their `From` conversions.
+//! * Add words with [`Problem::context`] / [`Context::context`] (`.context("saving the server
+//!   list")`), [`Problem::lead`] (`"could not save: <message>"`) or [`Problem::and_say`]
+//!   (`"<message>. Nothing was changed."`) instead of `format!("...: {e}")`: the code, the actions
+//!   and the details survive. [`Problem::one_line`] is for the few places that must keep a plain
+//!   string (a field of a wire type, a log line, a summary list).
+//! * Error codes are the constants in a `codes` module, never a string literal at the place a
+//!   Problem is raised (a test greps for it). They stay `&str` constants, and `Problem::code` a
+//!   `String`, because the wire format is that string and other branches add codes the same way; a
+//!   newtype would only have made every one of them a merge conflict.
+//! * Old data: job errors stored by v0.7.0 may hold a packed string. The one function that still
+//!   reads that form is `store::jobs::read_legacy_packed` (read only, never written). A test
+//!   (`tests/problem_conventions.rs`) greps the tree for the packed marker and the removed helper
+//!   names.
+//!
+//! # What each part became
+//!
+//! | Area | Before | After |
+//! |---|---|---|
+//! | `api::Res<T>`, the `Backend` trait, `SystemBackend`, `FakeBackend` | `Result<T, String>` (maybe packed) | `Result<T, Problem>` |
+//! | `paidassets`, `support::service`, `backup::*`, `reach`, `update::manual`, `addresources`, `feedback`, `hub::config` | `String` | `Problem` |
+//! | `InstallError`, `installer::Result` | wrapper over a (maybe packed) string | gone: `Result<T, Problem>` |
+//! | `StepError::Failed` | `String` | `Problem` (io and JSON variants stay) |
+//! | `Registry`, `ServerFile`, `Profile`, saved answers, paused installs | `io::Result`, store problems flattened by `problem_to_io` | `Result<T, Problem>` (the flatteners are deleted) |
+//! | job bodies and job rows | `Err(String)`, maybe packed or JSON text | `Err(JobFailure)` = `Problem` + extras; the stored `error` is that flat JSON (as before) |
+//! | `ApiError::core`, handlers | `is_encoded` / `decode`, words sniffed for 404 and "no record" | `ApiError::from(Problem)`; codes (`server.not_kora`, `needs_db_password`, `branch.busy`) |
+//! | CLI | `plain_text(&string)` at each print | `ui::fail(problem)` |
+//! | privileged service protocol | refusals are text, a step's failure is a Problem as JSON inside `data` | unchanged (it never carried a packed string) |
+//! | removed | `encode`, `decode`, `is_encoded`, `plain_text`, `message_of`, `From<Problem> for String`, `problem_to_io`, `problem_to_string`, `is_busy_message`, the packed marker | |
+//!
+//! Plain `String` errors that remain on purpose: validation helpers whose text is only ever the
+//! message (`validate_name`'s callers, `backup::dest::check_space`, `check_passphrase`), the
+//! parsers and byte-level helpers inside `self_update`, `tools::unpack`, `installer::http`,
+//! `installer::pinned`, `cfx`, `console`, the privileged service's own refusals (`privsvc::wire::Rejected`),
+//! the panel's sign-in, certificate and Tailscale plumbing (`kora-web` `remote/`, `tls/`), the hub
+//! transport, and the panel start-up helpers in `kora-web/launch.rs`. They are sentences for a person
+//! with nothing to attach; the handlers show them as they are (`ApiError::bad_request`).
 //!
 //! # Adding an action
 //!
@@ -34,6 +76,8 @@
 //! 3. In the panel, add a handler for the `kind` in `web/src/lib/problemActions.ts` (an action
 //!    without a handler is not shown, so an older panel ignores newer actions safely).
 
+mod convert;
+
 use serde::{Deserialize, Serialize};
 
 /// Stable machine codes. Front ends and tests branch on these; never change an existing one.
@@ -41,18 +85,30 @@ use serde::{Deserialize, Serialize};
 pub mod codes {
     /// Anything without a more specific code (also every plain string error).
     pub const FAILED: &str = "failed";
+    /// A git or GitHub command failed (made from `git::GitError`).
+    pub const GIT_FAILED: &str = "git.failed";
+    /// The folder has no `kora-server.json`: it was added from an existing folder, not installed by Kora.
+    pub const SERVER_NOT_KORA: &str = "server.not_kora";
+    /// The disk is full (made from `std::io::Error` of kind `StorageFull`).
+    pub const STORAGE_FULL: &str = "storage_full";
+    /// A file or folder could not be read or written (made from `std::io::Error`).
+    pub const IO: &str = "io";
+    /// Saved data could not be read (from `serde_json` errors; `rusqlite` errors have their own codes in `store`).
+    pub const DATA: &str = "data";
+    /// An internet request failed (from `ureq::Error`).
+    pub const NETWORK: &str = "network";
+
+    /// Codes made by the automatic conversions from low-level errors; `Problem::context` rewrites
+    /// the (generic) message of these.
+    pub fn is_low_level(code: &str) -> bool {
+        matches!(code, IO | DATA | NETWORK)
+    }
     /// Administrator / root rights are needed and Kora does not have them.
     pub const NEEDS_ELEVATION: &str = "needs_elevation";
-    /// Windows: the administrator permission prompt was declined (`helper::worker`).
-    pub const ADMIN_DECLINED: &str = "admin.declined";
-    /// Windows: nobody answered the administrator permission prompt in time.
-    pub const ADMIN_TIMED_OUT: &str = "admin.timed_out";
-    /// Windows: a remote session; the prompt would appear on a desktop nobody may be watching.
-    pub const ADMIN_REMOTE: &str = "admin.remote";
-    /// Windows: an earlier permission prompt is still open.
-    pub const ADMIN_BUSY: &str = "admin.busy";
-    /// Windows: the administrator worker stopped before it finished.
-    pub const ADMIN_LOST: &str = "admin.lost";
+    /// Kora's administrator service is installed but not turned on for this account.
+    pub const SERVICE_NOT_ALLOWED: &str = "service.not_allowed";
+    /// Kora's administrator service stopped answering in the middle of a step.
+    pub const SERVICE_LOST: &str = "service.lost";
 
     /// An install step failed for a reason that has no code of its own.
     pub const INSTALL_STEP_FAILED: &str = "install.step_failed";
@@ -77,6 +133,10 @@ pub mod codes {
 
     /// A remote sign-in made with a token asked for something that stays off until `remote actions` is on.
     pub const REMOTE_ACTIONS_OFF: &str = "remote.actions_off";
+    /// A remote session signed in with a passkey or one-time code asked for a sensitive action without a recent check.
+    pub const REMOTE_REAUTH: &str = "remote.reauth_required";
+    /// A saved licence key's value is not in the place Kora wrote it to (the system keychain entry is gone).
+    pub const KEYS_VALUE_MISSING: &str = "keys.value_missing";
     /// The saved licence keys file (`secrets.json`) cannot be read or is damaged: nothing is changed.
     pub const KEYS_UNREADABLE: &str = "keys.unreadable";
     /// No saved licence key has that name (never saved, renamed or deleted).
@@ -111,6 +171,12 @@ pub mod codes {
     pub const TOOLS_UNSUPPORTED: &str = "tools.unsupported";
     /// The download did not match the checksum Kora expects, so nothing was installed.
     pub const TOOLS_CHECKSUM: &str = "tools.checksum_mismatch";
+    /// A server was removed but its database could not be dropped: the database administrator's password is needed.
+    pub const DB_NEEDS_PASSWORD: &str = "needs_db_password";
+    /// The panel can be reached from other computers over plain HTTP.
+    pub const TLS_MISSING: &str = "tls.missing";
+    /// The panel's HTTPS certificate expires soon or has expired.
+    pub const TLS_EXPIRING: &str = "tls.expiring";
     /// Starting the database server did not work.
     pub const DB_START_FAILED: &str = "db.start_failed";
 }
@@ -124,9 +190,18 @@ pub mod known {
     /// Where Git can be downloaded by hand.
     pub const GIT_URL: &str = "https://git-scm.com/downloads";
 
+    /// The server has no `kora-server.json` (Kora did not install it).
+    pub fn not_a_kora_server() -> Problem {
+        Problem::new(
+            codes::SERVER_NOT_KORA,
+            "This server was added from an existing folder, so Kora did not install it and has no record of how it was set up. Updates, resources, ports and starting from Kora only work for servers that Kora installed.",
+        )
+    }
+
     /// `gh` is not installed.
     pub fn gh_missing() -> Problem {
         Problem::new(codes::GH_MISSING, "The GitHub CLI (gh) is not installed. Kora needs it to work with GitHub.")
+            .with_message_id("errors.problems.ghMissing", &[])
             .with_action(Action::InstallTool { tool: Tool::Gh })
             .with_action(Action::open_link(GH_URL))
     }
@@ -134,6 +209,7 @@ pub mod known {
     /// Git is not installed (and Kora has no copy of its own yet).
     pub fn git_missing() -> Problem {
         Problem::new(codes::INSTALL_TOOL_MISSING, "Git is not installed. Kora needs it to download and update resources.")
+            .with_message_id("errors.problems.gitMissing", &[])
             .with_action(Action::InstallTool { tool: Tool::Git })
             .with_action(Action::open_link(GIT_URL))
     }
@@ -141,28 +217,28 @@ pub mod known {
     /// A database server is installed but not running.
     pub fn db_stopped(name: &str) -> Problem {
         Problem::new(codes::INSTALL_DB_STOPPED, format!("The database server {name} is installed but not running."))
+            .with_message_id("errors.problems.dbStopped", &[("name", name)])
             .with_action(Action::StartDatabase)
     }
 
     /// `gh` is installed but not signed in.
     pub fn github_signed_out() -> Problem {
-        Problem::new(codes::GH_SIGNED_OUT, "You are not signed in to GitHub.").with_action(Action::SignInGithub { scopes: vec![] })
+        Problem::new(codes::GH_SIGNED_OUT, "You are not signed in to GitHub.").with_message_id("errors.problems.githubSignedOut", &[]).with_action(Action::SignInGithub { scopes: vec![] })
     }
 
     /// Signed in without the permissions Kora needs.
     pub fn github_missing_scopes(missing: &[String]) -> Problem {
-        Problem::new(
-            codes::GH_MISSING_SCOPES,
-            "Your GitHub sign-in does not give Kora all the permissions it needs. Sign in again to give them.",
-        )
-        .with_details(format!("Missing permissions (scopes): {}", missing.join(", ")))
-        .with_action(Action::SignInGithub { scopes: missing.to_vec() })
+        Problem::new(codes::GH_MISSING_SCOPES, "Your GitHub sign-in does not give Kora all the permissions it needs. Sign in again to give them.")
+            .with_message_id("errors.problems.githubMissingScopes", &[])
+            .with_details(format!("Missing permissions (scopes): {}", missing.join(", ")))
+            .with_action(Action::SignInGithub { scopes: missing.to_vec() })
     }
 }
 
 /// A tool Kora can install or point to. `#[non_exhaustive]`: new tools may be added.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum Tool {
     Git,
@@ -192,6 +268,7 @@ impl Tool {
 /// [`Action::Unknown`], which front ends do not show.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Action {
     /// Do the same thing again (the generic "Try again").
@@ -202,9 +279,10 @@ pub enum Action {
     /// skip (`installer::PlannedStep::skippable`).
     SkipStep { step: String },
     /// Go back to the install answers; `section` names the wizard page to open (`licence`,
-    /// `mode`, `name`, `ports`, `database`, `options`, `github`, ...), `None` = the summary.
+    /// `source`, `name`, `ports`, `database`, `options`, `github`, ...), `None` = the summary.
     ChangeAnswers {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
         section: Option<String>,
     },
     /// Sign in to GitHub (again). `scopes`: the permissions that are missing (empty = a plain sign-in).
@@ -214,8 +292,9 @@ pub enum Action {
     },
     /// Install a tool for the user.
     InstallTool { tool: Tool },
-    /// Ask for administrator permission (the elevated worker / helper).
-    RequestAdmin,
+    /// Install Kora's administrator service (one administrator approval, once). The panel launches the
+    /// installer where it can (Windows) and otherwise shows the command (`kora service install`).
+    InstallAdminService,
     /// Carry on without the parts that need administrator rights.
     ContinueWithoutAdmin,
     /// Show a command the user can run themselves, with a copy button. `elevated`: it must be
@@ -230,14 +309,22 @@ pub enum Action {
     /// Show the log: of a panel job (`job`) or a file on this computer (`path`).
     OpenLog {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
         job: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
         path: Option<String>,
     },
     /// Copy the message and details (for a bug report).
     CopyDetails,
     /// Start the installed (but stopped) database server for the user.
     StartDatabase,
+    /// Make your own copy (a fork) of a resource that is a plain clone; `None` = every resource of the server.
+    MakeFork {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        resource: Option<String>,
+    },
     /// An action this build does not know (sent by a newer Kora). Never shown.
     #[serde(other)]
     Unknown,
@@ -259,17 +346,13 @@ impl Action {
     /// The line a terminal prints for this action (`None`: nothing useful to say there).
     fn terminal_hint(&self) -> Option<String> {
         match self {
-            Action::ShowCommand { command, elevated } => {
-                Some(format!("{}: {}", if *elevated { "Run as administrator" } else { "Run" }, command.join(" ")))
-            }
+            Action::ShowCommand { command, elevated } => Some(format!("{}: {}", if *elevated { "Run as administrator" } else { "Run" }, command.join(" "))),
             Action::OpenLink { url } => Some(format!("See {url}")),
-            Action::SignInGithub { scopes } if !scopes.is_empty() => {
-                Some(format!("Sign in again with more permissions: gh auth refresh -h github.com -s {}", scopes.join(",")))
-            }
+            Action::SignInGithub { scopes } if !scopes.is_empty() => Some(format!("Sign in again with more permissions: gh auth refresh -h github.com -s {}", scopes.join(","))),
             Action::SignInGithub { .. } => Some("Sign in to GitHub: gh auth login".into()),
             Action::InstallTool { tool } => Some(format!("Install {}.", tool.label())),
             Action::StartDatabase => Some("Start the database: kora check --start-database".into()),
-            Action::RequestAdmin => Some("This needs administrator rights: run it again as administrator (root).".into()),
+            Action::InstallAdminService => Some("Install Kora's administrator service once: kora service install".into()),
             _ => None,
         }
     }
@@ -279,6 +362,7 @@ impl Action {
 ///
 /// JSON: `{"code", "message", "details"?, "actions": [..]}` (`details` left out when empty).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Problem {
     /// Stable machine code ([`codes`]).
     pub code: String,
@@ -286,24 +370,42 @@ pub struct Problem {
     pub message: String,
     /// Technical details (command output, error text) for the "Show details" box.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub details: Option<String>,
     /// What the user can do, best first. Empty: the front end offers its generic choices.
     #[serde(default)]
     pub actions: Vec<Action>,
+    /// The same message as a catalogue id plus named parameters, so a front end can show it in its own language
+    /// (`docs/translations.md`). Optional and backwards compatible: without it, `message` (English) is shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub i18n: Option<Box<MessageRef>>,
 }
 
-/// Marks a string that holds a packed [`Problem`]. Starts with a control character so no
-/// ordinary message can look like one.
-const PACKED: &str = "\u{1}kora-problem:";
+/// A message for a front end's catalogue: the id (`errors.problems.<name>`) and its parameters, all as text (a front end
+/// reads a count as a number where its message says so). The English `message` of the problem is what this id says in English.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct MessageRef {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub params: std::collections::BTreeMap<String, String>,
+}
 
 impl Problem {
     pub fn new(code: &str, message: impl Into<String>) -> Self {
-        Self { code: code.to_string(), message: message.into(), details: None, actions: Vec::new() }
+        Self { code: code.to_string(), message: message.into(), details: None, actions: Vec::new(), i18n: None }
     }
 
     /// A problem with no specific code and no actions (what every plain string error becomes).
     pub fn generic(message: impl Into<String>) -> Self {
         Self::new(codes::FAILED, message)
+    }
+
+    /// Say which catalogue message this is (`id`) and its parameters, for front ends that translate.
+    pub fn with_message_id(mut self, id: &str, params: &[(&str, &str)]) -> Self {
+        self.i18n = Some(Box::new(MessageRef { id: id.to_string(), params: params.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() }));
+        self
     }
 
     pub fn with_details(mut self, details: impl Into<String>) -> Self {
@@ -336,26 +438,6 @@ impl Problem {
         self.code == code
     }
 
-    /// Pack into a string that [`Problem::decode`] turns back into this problem.
-    pub fn encode(&self) -> String {
-        // Serialising plain strings and enums cannot fail.
-        format!("{PACKED}{}", serde_json::to_string(self).unwrap_or_default())
-    }
-
-    /// Unpack a string from [`Problem::encode`]; any other string becomes [`Problem::generic`].
-    pub fn decode(s: &str) -> Self {
-        Self::unpack(s).unwrap_or_else(|| Self::generic(s))
-    }
-
-    /// Is `s` a packed problem?
-    pub fn is_encoded(s: &str) -> bool {
-        Self::unpack(s).is_some()
-    }
-
-    fn unpack(s: &str) -> Option<Self> {
-        serde_json::from_str(s.strip_prefix(PACKED)?).ok()
-    }
-
     /// The JSON the panel reads.
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
@@ -368,7 +450,8 @@ impl Problem {
         let code = v.get("code").and_then(|c| c.as_str()).unwrap_or(codes::FAILED).to_string();
         let details = v.get("details").and_then(|d| d.as_str()).map(String::from);
         let actions = v.get("actions").and_then(|a| serde_json::from_value(a.clone()).ok()).unwrap_or_default();
-        Some(Self { code, message, details, actions })
+        let i18n = v.get("i18n").and_then(|m| serde_json::from_value::<MessageRef>(m.clone()).ok()).map(Box::new);
+        Some(Self { code, message, details, actions, i18n })
     }
 }
 
@@ -388,38 +471,106 @@ impl std::fmt::Display for Problem {
 
 impl std::error::Error for Problem {}
 
-/// Packs the problem (see [`Problem::encode`]).
-impl From<Problem> for String {
-    fn from(p: Problem) -> String {
-        p.encode()
-    }
-}
+/// `Result<T, Problem>`: what every function that can fail in front of a person returns.
+pub type Res<T> = Result<T, Problem>;
 
+/// A sentence written for a person becomes a generic problem.
 impl From<String> for Problem {
     fn from(s: String) -> Self {
-        Self::decode(&s)
+        Self::generic(s)
     }
 }
 
 impl From<&str> for Problem {
     fn from(s: &str) -> Self {
-        Self::decode(s)
+        Self::generic(s)
     }
 }
 
-/// The text to show a person for an error string that may hold a packed [`Problem`].
-pub fn plain_text(s: &str) -> String {
-    match Problem::unpack(s) {
-        Some(p) => p.to_string(),
-        None => s.to_string(),
+impl Problem {
+    /// A low-level failure: a generic message for the person, the technical text in `details`.
+    fn low_level(code: &str, message: &str, e: &dyn std::fmt::Display) -> Self {
+        Self::new(code, message).with_details(e.to_string())
+    }
+
+    /// Say what Kora was doing when this failed (`"saving the server list"`), keeping the code and
+    /// the actions. A problem that came from a low-level error ([`codes::IO`] and friends) gets the
+    /// friendly sentence "Kora hit a problem while ..."; any other problem gets a "While ..." line
+    /// at the start of its details.
+    pub fn context(mut self, doing: &str) -> Self {
+        let doing = doing.trim().trim_end_matches('.');
+        if codes::is_low_level(&self.code) {
+            self.message = format!("Kora hit a problem while {doing}.");
+        } else {
+            let line = format!("While {doing}.");
+            self.details = Some(match self.details.take() {
+                Some(d) => format!("{line}\n{d}"),
+                None => line,
+            });
+        }
+        self
+    }
+
+    /// Put a short lead-in before the message: the replacement for `format!("could not save: {e}")`
+    /// that keeps the code, the details and the actions (`"could not save"` -> "could not save: <message>").
+    pub fn lead(mut self, lead: &str) -> Self {
+        self.message = format!("{}: {}", lead.trim_end_matches([':', ' ']), self.message);
+        self
+    }
+
+    /// Add a sentence after the message (`"Nothing was changed."`): the replacement for
+    /// `format!("{e}. Nothing was changed.")` that keeps the code, details and actions.
+    pub fn and_say(mut self, more: &str) -> Self {
+        let m = self.message.trim_end_matches(['.', ' ']).to_string();
+        self.message = format!("{m}. {more}");
+        self
+    }
+
+    /// The whole problem on one line, for the few places that must keep a plain string (a field of a
+    /// wire type, a log line): the message, then the details in brackets. Not for showing a Problem
+    /// to a person: pass the Problem on instead.
+    pub fn one_line(&self) -> String {
+        match &self.details {
+            Some(d) => format!("{} ({})", self.message, d.replace('\n', "; ")),
+            None => self.message.clone(),
+        }
+    }
+
+    /// Like [`Problem::context`] but takes the text from a closure (only built on the error path).
+    pub fn context_with(self, doing: impl FnOnce() -> String) -> Self {
+        self.context(&doing())
     }
 }
 
-/// Just the message of an error string that may hold a packed [`Problem`] (no details, no hints).
-pub fn message_of(s: &str) -> String {
-    match Problem::unpack(s) {
-        Some(p) => p.message,
-        None => s.to_string(),
+/// `.context("saving the server list")` on any `Result` whose error converts into a [`Problem`].
+pub trait Context<T> {
+    fn context(self, doing: &str) -> Res<T>;
+}
+
+impl<T, E: Into<Problem>> Context<T> for Result<T, E> {
+    fn context(self, doing: &str) -> Res<T> {
+        self.map_err(|e| e.into().context(doing))
+    }
+}
+
+impl From<std::io::Error> for Problem {
+    fn from(e: std::io::Error) -> Self {
+        if e.kind() == std::io::ErrorKind::StorageFull {
+            return Self::new(codes::STORAGE_FULL, "There is no space left on the disk. Free up some space, then try again.").with_details(e.to_string()).with_action(Action::Retry);
+        }
+        Self::low_level(codes::IO, "Kora could not read or write a file.", &e)
+    }
+}
+
+impl From<serde_json::Error> for Problem {
+    fn from(e: serde_json::Error) -> Self {
+        Self::low_level(codes::DATA, "Kora could not read some of its saved data.", &e)
+    }
+}
+
+impl From<ureq::Error> for Problem {
+    fn from(e: ureq::Error) -> Self {
+        Self::low_level(codes::NETWORK, "Kora could not reach the internet address it needed.", &e)
     }
 }
 
@@ -459,7 +610,7 @@ mod tests {
             Action::change_answers("database"),
             Action::SignInGithub { scopes: vec![] },
             Action::InstallTool { tool: Tool::Gh },
-            Action::RequestAdmin,
+            Action::InstallAdminService,
             Action::ContinueWithoutAdmin,
             Action::show_command(&["kora", "x"], true),
             Action::open_link("https://cli.github.com"),
@@ -475,7 +626,7 @@ mod tests {
                 {"kind": "change_answers", "section": "database"},
                 {"kind": "sign_in_github"},
                 {"kind": "install_tool", "tool": "gh"},
-                {"kind": "request_admin"},
+                {"kind": "install_admin_service"},
                 {"kind": "continue_without_admin"},
                 {"kind": "show_command", "command": ["kora", "x"], "elevated": true},
                 {"kind": "open_link", "url": "https://cli.github.com"},
@@ -502,31 +653,36 @@ mod tests {
     }
 
     #[test]
-    fn strings_carry_a_problem_and_plain_strings_still_work() {
-        let p = sample();
-        let s: String = p.clone().into();
-        assert!(Problem::is_encoded(&s));
-        assert_eq!(Problem::decode(&s), p);
-        assert_eq!(Problem::from(s.clone()), p);
-        // Any old error string is a generic problem with no actions.
-        let plain = Problem::decode("disk full");
-        assert_eq!((plain.code.as_str(), plain.message.as_str(), plain.actions.len()), (codes::FAILED, "disk full", 0));
-        assert!(!Problem::is_encoded("disk full") && !Problem::is_encoded("{\"code\":\"x\",\"message\":\"m\"}"));
-        // A broken packed string is shown as it is rather than lost.
-        assert_eq!(Problem::decode("\u{1}kora-problem:{oops").message, "\u{1}kora-problem:{oops");
-        assert_eq!(message_of(&s), p.message);
-        assert_eq!(message_of("plain"), "plain");
+    fn strings_become_generic_problems() {
+        let p = Problem::from("disk full");
+        assert_eq!((p.code.as_str(), p.message.as_str(), p.actions.len()), (codes::FAILED, "disk full", 0));
     }
 
     #[test]
     fn terminals_get_readable_text() {
-        let t = plain_text(&sample().encode());
-        assert_eq!(
-            t,
-            "Your GitHub sign-in is missing a permission.\nmissing: read:org\nSign in again with more permissions: gh auth refresh -h github.com -s read:org\nRun: gh auth refresh"
-        );
+        let t = sample().to_string();
+        assert_eq!(t, "Your GitHub sign-in is missing a permission.\nmissing: read:org\nSign in again with more permissions: gh auth refresh -h github.com -s read:org\nRun: gh auth refresh");
         assert!(!t.contains("kora-problem") && !t.contains('{'));
-        assert_eq!(plain_text("as it was"), "as it was");
+    }
+
+    #[test]
+    fn low_level_errors_keep_their_text_in_the_details() {
+        let e = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        let p: Problem = e.into();
+        assert_eq!(p.code, codes::IO);
+        assert!(!p.message.contains("denied") && p.details.as_deref() == Some("denied"));
+        let p = Err::<(), _>(std::io::Error::other("full")).context("saving the server list").unwrap_err();
+        assert_eq!(p.message, "Kora hit a problem while saving the server list.");
+        assert_eq!(p.details.as_deref(), Some("full"));
+    }
+
+    #[test]
+    fn context_keeps_the_code_and_the_actions() {
+        let p = sample().context("updating a resource");
+        assert_eq!(p.code, codes::GH_MISSING_SCOPES);
+        assert_eq!(p.actions.len(), 3);
+        assert_eq!(p.message, sample().message);
+        assert_eq!(p.details.as_deref(), Some("While updating a resource.\nmissing: read:org"));
     }
 
     #[test]
@@ -541,5 +697,23 @@ mod tests {
     fn actions_are_added_once_and_empty_details_are_dropped() {
         let p = Problem::generic("m").with_action(Action::Retry).with_action(Action::Retry).with_details("  ");
         assert_eq!((p.actions.len(), p.details), (1, None));
+    }
+
+    #[test]
+    fn a_message_id_travels_with_the_problem_and_is_optional() {
+        // Known problems say which catalogue message they are, with parameters.
+        let p = known::db_stopped("MariaDB");
+        let m = p.i18n.clone().expect("a known problem has a message id");
+        assert_eq!(m.id, "errors.problems.dbStopped");
+        assert_eq!(m.params.get("name").map(String::as_str), Some("MariaDB"));
+        // It survives the JSON the panel reads.
+        assert_eq!(Problem::from_json(&p.to_json()).unwrap(), p);
+        // Without one nothing is sent (older panels see exactly what they saw before).
+        let plain = Problem::new(codes::FAILED, "x");
+        assert!(plain.to_json().get("i18n").is_none());
+        // A problem from an older Kora, with no field, still reads.
+        let old = serde_json::json!({ "code": "failed", "message": "old", "actions": [] });
+        assert_eq!(Problem::from_json(&old).unwrap().i18n, None);
+        assert_eq!(serde_json::from_value::<Problem>(old).unwrap().i18n, None);
     }
 }

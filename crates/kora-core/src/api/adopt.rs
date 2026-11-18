@@ -55,9 +55,7 @@ fn has_fxserver(dir: &Path) -> bool {
     if dir.join(exe).is_file() || dir.join("alpine").is_dir() {
         return true;
     }
-    std::fs::read_dir(dir.join("artifacts"))
-        .map(|rd| rd.flatten().any(|e| e.path().join(exe).is_file()))
-        .unwrap_or(false)
+    std::fs::read_dir(dir.join("artifacts")).map(|rd| rd.flatten().any(|e| e.path().join(exe).is_file())).unwrap_or(false)
 }
 
 fn folder_name(dir: &Path) -> String {
@@ -108,12 +106,8 @@ pub fn scan(roots: &[PathBuf], depth: usize, known: &[PathBuf]) -> Vec<Candidate
                 continue;
             }
             let Ok(rd) = std::fs::read_dir(&dir) else { continue };
-            let mut subs: Vec<PathBuf> = rd
-                .flatten()
-                .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-                .filter(|e| !skip_dir(&e.file_name().to_string_lossy().to_lowercase()))
-                .map(|e| e.path())
-                .collect();
+            let mut subs: Vec<PathBuf> =
+                rd.flatten().filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false)).filter(|e| !skip_dir(&e.file_name().to_string_lossy().to_lowercase())).map(|e| e.path()).collect();
             subs.sort();
             next.extend(subs);
         }
@@ -126,7 +120,11 @@ pub fn scan(roots: &[PathBuf], depth: usize, known: &[PathBuf]) -> Vec<Candidate
 pub fn to_entry(c: &Candidate, taken: &[String]) -> ServerEntry {
     let base = {
         let s = slug(&c.name);
-        if s.is_empty() { "server".to_string() } else { s }
+        if s.is_empty() {
+            "server".to_string()
+        } else {
+            s
+        }
     };
     let mut name = base.clone();
     let mut n = 2;
@@ -134,7 +132,7 @@ pub fn to_entry(c: &Candidate, taken: &[String]) -> ServerEntry {
         name = format!("{base}-{n}");
         n += 1;
     }
-    ServerEntry { name, dir: c.dir.clone(), mode: c.mode, ports: c.ports, created_unix: now_unix() }
+    ServerEntry { source: None, versions: None, name, dir: c.dir.clone(), mode: c.mode, ports: c.ports, created_unix: now_unix() }
 }
 
 #[cfg(test)]
@@ -186,6 +184,8 @@ mod tests {
     fn kora_server_file_gives_name_mode_and_ports() {
         let d = tempfile::tempdir().unwrap();
         let sf = ServerFile {
+            source: None,
+            versions: None,
             name: "Main".into(),
             mode: Mode::Development,
             dir: d.path().to_path_buf(),

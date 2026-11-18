@@ -96,7 +96,7 @@ describe('Licence key step', () => {
   })
 
   it('a role that cannot manage keys can only pick, and is told who to ask when there are none', async () => {
-    vi.spyOn(api.keys, 'list').mockResolvedValue({ keys: [], can_manage: false, path: null })
+    vi.spyOn(api.keys, 'list').mockResolvedValue({ keys: [], can_manage: false, path: null, keychain: { mode: 'auto', line: '', active: 'store', available: false } })
     renderApp(<InstallWizard />, '/install')
     expect(await screen.findByText(/Only an administrator can add one/)).toBeInTheDocument()
     expect(screen.queryByLabelText('Licence key')).not.toBeInTheDocument()

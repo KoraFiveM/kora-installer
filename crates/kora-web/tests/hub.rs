@@ -35,16 +35,8 @@ async fn setup(local: &FakeBackend) -> Setup {
     hub::set_store_path(Some(path.clone()));
     hub::set_transport(None);
     let f = local.clone();
-    let app = router(
-        AppState::system(HUB_TOKEN.into(), HUB_ADDR.parse::<SocketAddr>().unwrap())
-            .with_backend(Arc::new(move || Box::new(f.clone()))),
-    );
-    Setup {
-        _dir: dir,
-        store: NodeStore::at(path),
-        app,
-        _guard: guard,
-    }
+    let app = router(AppState::system(HUB_TOKEN.into(), HUB_ADDR.parse::<SocketAddr>().unwrap()).with_backend(Arc::new(move || Box::new(f.clone()))));
+    Setup { _dir: dir, store: NodeStore::at(path), app, _guard: guard }
 }
 
 /// A node panel on a free loopback port. Returns its base URL.
@@ -52,10 +44,7 @@ async fn start_node(fake: &FakeBackend) -> String {
     let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = l.local_addr().unwrap();
     let f = fake.clone();
-    let app = router(
-        AppState::system(NODE_TOKEN.into(), addr)
-            .with_backend(Arc::new(move || Box::new(f.clone()))),
-    );
+    let app = router(AppState::system(NODE_TOKEN.into(), addr).with_backend(Arc::new(move || Box::new(f.clone()))));
     tokio::spawn(async move {
         axum::serve(l, app).await.unwrap();
     });
@@ -63,11 +52,7 @@ async fn start_node(fake: &FakeBackend) -> String {
 }
 
 async fn call(app: &axum::Router, method: &str, uri: &str, body: Option<Value>) -> Response<Body> {
-    let mut b = Request::builder()
-        .method(method)
-        .uri(format!("/api/v1{uri}"))
-        .header(header::HOST, HUB_ADDR)
-        .header(header::AUTHORIZATION, format!("Bearer {HUB_TOKEN}"));
+    let mut b = Request::builder().method(method).uri(format!("/api/v1{uri}")).header(header::HOST, HUB_ADDR).header(header::AUTHORIZATION, format!("Bearer {HUB_TOKEN}"));
     let body = match body {
         Some(v) => {
             b = b.header(header::CONTENT_TYPE, "application/json");
@@ -79,13 +64,7 @@ async fn call(app: &axum::Router, method: &str, uri: &str, body: Option<Value>) 
 }
 
 async fn text_of(r: Response<Body>) -> String {
-    String::from_utf8(
-        axum::body::to_bytes(r.into_body(), 1 << 22)
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap()
+    String::from_utf8(axum::body::to_bytes(r.into_body(), 1 << 22).await.unwrap().to_vec()).unwrap()
 }
 async fn json_of(r: Response<Body>) -> Value {
     let t = text_of(r).await;
@@ -110,24 +89,13 @@ async fn wait_job(app: &axum::Router, r: Response<Body>) -> Value {
 }
 
 async fn add(app: &axum::Router, name: &str, url: &str, token: &str) -> Response<Body> {
-    call(
-        app,
-        "POST",
-        "/nodes",
-        Some(json!({"name": name, "url": url, "token": token})),
-    )
-    .await
+    call(app, "POST", "/nodes", Some(json!({"name": name, "url": url, "token": token}))).await
 }
 
 #[tokio::test]
 async fn hub_and_node_end_to_end() {
     let local = FakeBackend::new();
-    local.state().servers.push(kora_core::api::fake::entry(
-        "hub-local",
-        kora_core::installer::Mode::Production,
-        30120,
-        40120,
-    ));
+    local.state().servers.push(kora_core::api::fake::entry("hub-local", kora_core::installer::Mode::Production, 30120, 40120));
     let s = setup(&local).await;
     let node = FakeBackend::sample();
     let url = start_node(&node).await;
@@ -135,10 +103,7 @@ async fn hub_and_node_end_to_end() {
     let r = add(&s.app, "Basement", &url, NODE_TOKEN).await;
     assert_eq!(r.status(), 201);
     let body = text_of(r).await;
-    assert!(
-        !body.contains(NODE_TOKEN),
-        "the add answer must not echo the token: {body}"
-    );
+    assert!(!body.contains(NODE_TOKEN), "the add answer must not echo the token: {body}");
     let j: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(j["node"]["token_set"], true);
     assert_eq!(j["node"]["server_count"], 2);
@@ -149,27 +114,13 @@ async fn hub_and_node_end_to_end() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        assert_eq!(
-            std::fs::metadata(s.store.path())
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
-        );
+        assert_eq!(std::fs::metadata(s.store.path()).unwrap().permissions().mode() & 0o777, 0o600);
     }
     let list = text_of(call(&s.app, "GET", "/nodes", None).await).await;
     assert!(!list.contains(NODE_TOKEN));
     let list: Value = serde_json::from_str(&list).unwrap();
     let n = &list["nodes"][0];
-    assert_eq!(
-        (
-            n["reachable"].clone(),
-            n["server_count"].clone(),
-            n["api"].clone()
-        ),
-        (json!(true), json!(2), json!(1))
-    );
+    assert_eq!((n["reachable"].clone(), n["server_count"].clone(), n["api"].clone()), (json!(true), json!(2), json!(1)));
     assert_eq!(n["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(n["can_control"], true);
     assert_eq!(n["insecure"], false);
@@ -177,110 +128,40 @@ async fn hub_and_node_end_to_end() {
 
     // Node servers carry the actions the node supports.
     let ns = json_of(call(&s.app, "GET", &format!("/nodes/{id}/servers"), None).await).await;
-    let names: Vec<_> = ns["servers"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|x| x["name"].as_str().unwrap().to_string())
-        .collect();
+    let names: Vec<_> = ns["servers"].as_array().unwrap().iter().map(|x| x["name"].as_str().unwrap().to_string()).collect();
     assert_eq!(names, ["prod", "dev"]);
-    assert_eq!(
-        ns["servers"][0]["actions"],
-        json!(["start", "stop", "restart"])
-    );
+    assert_eq!(ns["servers"][0]["actions"], json!(["start", "stop", "restart"]));
 
     // The fleet: local first, then the node's, each tagged.
     let f = json_of(call(&s.app, "GET", "/fleet", None).await).await;
     assert_eq!(f["partial"], false);
-    let rows: Vec<(String, String)> = f["servers"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|x| {
-            (
-                x["node_name"].as_str().unwrap().into(),
-                x["name"].as_str().unwrap().into(),
-            )
-        })
-        .collect();
+    let rows: Vec<(String, String)> = f["servers"].as_array().unwrap().iter().map(|x| (x["node_name"].as_str().unwrap().into(), x["name"].as_str().unwrap().into())).collect();
     assert_eq!(rows[0], ("This panel".into(), "hub-local".into()));
     assert!(rows.contains(&("Basement".into(), "prod".into())));
     assert!(f["servers"][0]["node_id"].is_null());
 
     // Control a node's server: the hub job completes with the node's own result.
-    let r = call(
-        &s.app,
-        "POST",
-        &format!("/nodes/{id}/servers/dev/control"),
-        Some(json!({"action": "start"})),
-    )
-    .await;
+    let r = call(&s.app, "POST", &format!("/nodes/{id}/servers/dev/control"), Some(json!({"action": "start"}))).await;
     let j = wait_job(&s.app, r).await;
     assert_eq!(j["state"], "done", "{j}");
     assert_eq!(j["result"]["status"], "running");
-    assert!(
-        node.calls().contains(&"Start dev".to_string()),
-        "{:?}",
-        node.calls()
-    );
+    assert!(node.calls().contains(&"Start dev".to_string()), "{:?}", node.calls());
     assert!(local.calls().iter().all(|c| !c.contains("Start")));
-    assert!(j["events"].as_array().unwrap().iter().any(|e| e["message"]
-        .as_str()
-        .is_some_and(|m| m.contains("Basement"))));
+    assert!(j["events"].as_array().unwrap().iter().any(|e| e["message"].as_str().is_some_and(|m| m.contains("Basement"))));
 
     // Errors from the node come back as ours.
-    let r = call(
-        &s.app,
-        "POST",
-        &format!("/nodes/{id}/servers/nope/control"),
-        Some(json!({"action": "start"})),
-    )
-    .await;
+    let r = call(&s.app, "POST", &format!("/nodes/{id}/servers/nope/control"), Some(json!({"action": "start"}))).await;
     let j = wait_job(&s.app, r).await;
     assert_eq!(j["state"], "failed");
-    assert!(
-        j["error"]["message"].as_str().unwrap().contains("nope"),
-        "{j}"
-    );
-    let r = call(
-        &s.app,
-        "POST",
-        &format!("/nodes/{id}/servers/dev/control"),
-        Some(json!({"action": "explode"})),
-    )
-    .await;
+    assert!(j["error"]["message"].as_str().unwrap().contains("nope"), "{j}");
+    let r = call(&s.app, "POST", &format!("/nodes/{id}/servers/dev/control"), Some(json!({"action": "explode"}))).await;
     assert_eq!(r.status(), 400);
 
     // Remove.
-    assert_eq!(
-        call(&s.app, "DELETE", &format!("/nodes/{id}"), None)
-            .await
-            .status(),
-        204
-    );
-    assert_eq!(
-        call(&s.app, "DELETE", &format!("/nodes/{id}"), None)
-            .await
-            .status(),
-        404
-    );
-    assert_eq!(
-        call(&s.app, "GET", &format!("/nodes/{id}/servers"), None)
-            .await
-            .status(),
-        404
-    );
-    assert_eq!(
-        call(
-            &s.app,
-            "POST",
-            &format!("/nodes/{id}/servers/dev/control"),
-            Some(json!({"action": "stop"}))
-        )
-        .await
-        .status(),
-        404
-    );
+    assert_eq!(call(&s.app, "DELETE", &format!("/nodes/{id}"), None).await.status(), 204);
+    assert_eq!(call(&s.app, "DELETE", &format!("/nodes/{id}"), None).await.status(), 404);
+    assert_eq!(call(&s.app, "GET", &format!("/nodes/{id}/servers"), None).await.status(), 404);
+    assert_eq!(call(&s.app, "POST", &format!("/nodes/{id}/servers/dev/control"), Some(json!({"action": "stop"}))).await.status(), 404);
     assert!(s.store.load().unwrap().is_empty());
 }
 
@@ -332,38 +213,22 @@ struct Script {
 }
 impl Transport for Script {
     fn send(&self, r: &HttpRequest) -> Result<HttpResponse, String> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push((r.method.to_string(), r.url.clone()));
-        let ok = |b: Value| {
-            Ok(HttpResponse {
-                status: 200,
-                body: b,
-            })
-        };
+        self.calls.lock().unwrap().push((r.method.to_string(), r.url.clone()));
+        let ok = |b: Value| Ok(HttpResponse { status: 200, body: b });
         if r.url.ends_with("/api/v1/meta") {
-            return ok(
-                json!({"api": 1, "version": "0.3.1", "platform": "linux", "node": "old", "ops": self.ops, "unknown_future_field": {"x": 1}}),
-            );
+            return ok(json!({"api": 1, "version": "0.3.1", "platform": "linux", "node": "old", "ops": self.ops, "unknown_future_field": {"x": 1}}));
         }
         if r.url.ends_with("/api/v1/servers") {
             return ok(json!({"servers": [{"name": "old-one", "status": "running", "extra": 1}]}));
         }
-        Ok(HttpResponse {
-            status: 404,
-            body: json!({"error": {"code": "not_found", "message": "unknown API route"}}),
-        })
+        Ok(HttpResponse { status: 404, body: json!({"error": {"code": "not_found", "message": "unknown API route"}}) })
     }
 }
 
 #[tokio::test]
 async fn an_older_node_is_only_offered_what_it_supports() {
     let s = setup(&FakeBackend::new()).await;
-    let t = Arc::new(Script {
-        ops: vec!["meta", "servers_list", "server_get"],
-        calls: Mutex::default(),
-    });
+    let t = Arc::new(Script { ops: vec!["meta", "servers_list", "server_get"], calls: Mutex::default() });
     hub::set_transport(Some(t.clone()));
     // 203.0.113.0/24 is a documentation range: plain http to it is flagged.
     let r = add(&s.app, "Old", "http://203.0.113.9:47120", "tok").await;
@@ -375,29 +240,15 @@ async fn an_older_node_is_only_offered_what_it_supports() {
     let id = j["node"]["id"].as_str().unwrap().to_string();
 
     let f = json_of(call(&s.app, "GET", "/fleet", None).await).await;
-    let old = f["servers"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|x| x["name"] == "old-one")
-        .unwrap();
+    let old = f["servers"].as_array().unwrap().iter().find(|x| x["name"] == "old-one").unwrap();
     assert_eq!(old["actions"], json!([]));
 
-    let r = call(
-        &s.app,
-        "POST",
-        &format!("/nodes/{id}/servers/old-one/control"),
-        Some(json!({"action": "stop"})),
-    )
-    .await;
+    let r = call(&s.app, "POST", &format!("/nodes/{id}/servers/old-one/control"), Some(json!({"action": "stop"}))).await;
     assert_eq!(r.status(), 422);
     let j = json_of(r).await;
     assert_eq!(j["error"]["code"], "node_unsupported");
     assert!(j["error"]["message"].as_str().unwrap().contains("0.3.1"));
-    assert!(
-        !t.calls.lock().unwrap().iter().any(|(m, _)| m == "POST"),
-        "nothing may be sent for an unsupported action"
-    );
+    assert!(!t.calls.lock().unwrap().iter().any(|(m, _)| m == "POST"), "nothing may be sent for an unsupported action");
     hub::set_transport(None);
 }
 
@@ -419,14 +270,7 @@ async fn a_node_that_is_down_gives_a_partial_fleet() {
     assert_eq!(down["reachable"], false);
     assert!(down["last_error"].as_str().unwrap().len() > 5);
     assert!(down["server_count"].is_null());
-    let from = |who: &str| {
-        f["servers"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|x| x["node_name"] == who)
-            .count()
-    };
+    let from = |who: &str| f["servers"].as_array().unwrap().iter().filter(|x| x["node_name"] == who).count();
     assert_eq!((from("This panel"), from("Up"), from("Down")), (2, 2, 0));
 
     // Listing nodes still works, and listing the dead node's servers says why.

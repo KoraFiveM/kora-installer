@@ -6,6 +6,8 @@ import { api } from '@/api/client'
 import { renderApp } from '@/test/utils'
 import { LicenceKeysCard, RememberedCard } from './LicenceKeys'
 
+const NO_KEYCHAIN = { mode: 'auto', line: "Kept in Kora's private file (no system keychain on this computer).", active: 'store', available: false }
+
 const MAIN = 'cfxk_MAINKEYMAINKEY12345_1111'
 const TEST = 'cfxk_TESTKEYTESTKEY12345_2222'
 
@@ -70,7 +72,7 @@ describe('Settings: licence keys', () => {
     await user.click(within(dlg).getByRole('button', { name: 'Rename' }))
     expect(await screen.findByText('Renamed to "Live".')).toBeInTheDocument()
 
-    await user.click(await screen.findByRole('button', { name: 'Replace the key of Live' }))
+    await user.click(await screen.findByRole('button', { name: 'Replace key of Live' }))
     const rep = await screen.findByRole('dialog')
     await user.type(within(rep).getByLabelText('New licence key'), TEST)
     await user.click(within(rep).getByRole('button', { name: 'Replace key' }))
@@ -88,7 +90,7 @@ describe('Settings: licence keys', () => {
 
   it('lets non-admins see the names but not manage them', async () => {
     await api.keys.add('Main', MAIN)
-    vi.spyOn(api.keys, 'list').mockResolvedValue({ keys: [{ name: 'Main', last4: '1111', added: 0, servers: [], stopped_installs: 0 }], can_manage: false, path: null })
+    vi.spyOn(api.keys, 'list').mockResolvedValue({ keys: [{ name: 'Main', last4: '1111', added: 0, servers: [], stopped_installs: 0, kept: "Kora's private file", problem: null }], can_manage: false, path: null, keychain: NO_KEYCHAIN })
     renderApp(<LicenceKeysCard />)
     expect(await screen.findByText('Main')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Delete Main' })).not.toBeInTheDocument()

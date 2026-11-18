@@ -143,8 +143,8 @@ impl Layout {
         let at = |p: &str| if prefix.as_os_str().is_empty() { PathBuf::from(p) } else { prefix.join(p.trim_start_matches('/')) };
         let dir = at("/opt/kora/bin");
         let in_user_bin = running_exe.parent().is_some_and(|p| p.ends_with(".local/bin"));
-        let session = ["DISPLAY", "WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP"].iter().any(|k| var(k).is_some())
-            || var("XDG_SESSION_TYPE").is_some_and(|t| t == Path::new("x11") || t == Path::new("wayland"));
+        let session =
+            ["DISPLAY", "WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP"].iter().any(|k| var(k).is_some()) || var("XDG_SESSION_TYPE").is_some_and(|t| t == Path::new("x11") || t == Path::new("wayland"));
         Ok(Layout {
             windows,
             exe: dir.join("kora"),
@@ -222,16 +222,26 @@ pub enum CopyKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    CopyExe { from: PathBuf, to: PathBuf, kind: CopyKind },
+    CopyExe {
+        from: PathBuf,
+        to: PathBuf,
+        kind: CopyKind,
+    },
     WriteState(AppState),
     AddMachinePath(String),
     /// Windows: add a folder to the PATH of this user only (no administrator rights).
     AddUserPath(String),
     BroadcastEnv,
     Shortcut(ShortcutSpec),
-    Symlink { link: PathBuf, target: PathBuf },
+    Symlink {
+        link: PathBuf,
+        target: PathBuf,
+    },
     WriteLogo(PathBuf),
-    DesktopEntry { path: PathBuf, content: String },
+    DesktopEntry {
+        path: PathBuf,
+        content: String,
+    },
     RegisterUninstall(UninstallEntry),
     // ---- removal ----
     RemoveShortcut(PathBuf),
@@ -252,13 +262,7 @@ impl Action {
             AddMachinePath(d) => format!("Add {d} to the machine PATH"),
             AddUserPath(d) => format!("Add {d} to your PATH"),
             BroadcastEnv => "Tell running programs the environment changed (new terminals see the new PATH)".into(),
-            Shortcut(s) => format!(
-                "Create the shortcut {} -> {} {}{}",
-                s.path.display(),
-                s.target.display(),
-                s.args,
-                if s.run_as_admin { " (always run as administrator)" } else { "" }
-            ),
+            Shortcut(s) => format!("Create the shortcut {} -> {} {}{}", s.path.display(), s.target.display(), s.args, if s.run_as_admin { " (always run as administrator)" } else { "" }),
             Symlink { link, target } => format!("Link {} -> {}", link.display(), target.display()),
             WriteLogo(p) => format!("Install the Kora logo at {}", p.display()),
             DesktopEntry { path, .. } => format!("Write the launcher {}", path.display()),
@@ -601,9 +605,7 @@ pub fn plan_install(sys: &dyn Sys, l: &Layout, run: &Running, opts: &AppOptions)
             let content = desktop_entry_text(&l.exe, icon);
             match sys.read(path) {
                 Some(cur) if cur == content.as_bytes() => {}
-                Some(cur) if !String::from_utf8_lossy(&cur).contains(DESKTOP_MARKER) => {
-                    plan.notes.push(format!("{} exists and was not made by Kora; left alone.", path.display()))
-                }
+                Some(cur) if !String::from_utf8_lossy(&cur).contains(DESKTOP_MARKER) => plan.notes.push(format!("{} exists and was not made by Kora; left alone.", path.display())),
                 _ => plan.actions.push(Action::DesktopEntry { path: path.clone(), content }),
             }
         }

@@ -12,7 +12,9 @@ pub mod alerts;
 pub mod history;
 pub mod panel_service;
 pub mod probe;
+pub mod wintime;
 
+use crate::problem::Problem;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,33 +42,42 @@ const MAX_POINTS: usize = 360;
 
 /// One look at one server. Absent fields were not measurable.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "MetricSample"))]
 pub struct Sample {
     /// Unix seconds.
     pub t: u64,
     /// The server is running.
     pub up: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub players: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub max_players: Option<u32>,
     /// Percent of the whole machine's CPU used by the server and what it started.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub cpu: Option<f32>,
     /// Megabytes of RAM used by the server and what it started.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub ram_mb: Option<u32>,
     /// Percent of this machine's RAM in use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub sys_ram_pct: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub disk_free_mb: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub disk_free_pct: Option<f32>,
     #[serde(default)]
     pub game_up: bool,
     #[serde(default)]
     pub txadmin_up: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub badge: Option<UpdateBadge>,
 }
 
@@ -108,6 +119,8 @@ pub type BackendMaker = Arc<dyn Fn() -> Box<dyn Backend + Send> + Send + Sync>;
 /// Where raised alerts go besides the panel itself.
 pub trait AlertSink: Send + Sync {
     fn deliver(&self, server: &ServerEntry, alert: &Alert, settings: &AlertSettings);
+    /// A machine-level alert (no server): sent through the notification settings of the servers that allow it.
+    fn deliver_machine(&self, _alert: &Alert) {}
 }
 
 /// Discord (the server's existing webhook) and the generic webhook, each on its own short-lived thread.
@@ -125,22 +138,39 @@ impl AlertSink for RealSink {
                         "success" => 0x2ecc71,
                         _ => 0xf1c40f,
                     };
-                    let _ = notify::send_alert(
-                        &cfg,
-                        &format!("{}: {}", server.name, alert.title),
-                        &alert.message,
-                        colour,
-                    );
+                    let _ = notify::send_alert(&cfg, &format!("{}: {}", server.name, alert.title), &alert.message, colour);
                 }
             }
             if let Some(url) = &settings.webhook_url {
-                let _ = alerts::post_json(
-                    url,
-                    &alerts::webhook_payload(&alert),
-                    settings.webhook_set_remotely,
-                );
+                let _ = alerts::post_json(url, &alerts::webhook_payload(&alert), settings.webhook_set_remotely);
             }
         });
+    }
+
+    fn deliver_machine(&self, alert: &Alert) {
+        let alert = alert.clone();
+        std::thread::spawn(move || {
+            let servers: Vec<(AlertSettings, Option<String>, ServerEntry)> =
+                crate::installer::registry::Registry::load().unwrap_or_default().servers.into_iter().map(|e| (alerts::load_settings(&e.dir), notify::load(&e).discord_webhook, e)).collect();
+            let (discord, hooks) = alerts::machine_targets(&servers.iter().map(|(s, d, _)| (s.clone(), d.clone())).collect::<Vec<_>>());
+            for url in discord {
+                let cfg = notify::NotifyConfig { discord_webhook: Some(url) };
+                let _ = notify::send_alert(&cfg, &format!("Kora: {}", alert.title), &alert.message, RealSink::colour(alert.tone));
+            }
+            for (url, remote) in hooks {
+                let _ = alerts::post_json(&url, &alerts::webhook_payload(&alert), remote);
+            }
+        });
+    }
+}
+
+impl RealSink {
+    fn colour(tone: &str) -> u32 {
+        match tone {
+            "danger" => 0xe74c3c,
+            "success" => 0x2ecc71,
+            _ => 0xf1c40f,
+        }
     }
 }
 
@@ -173,27 +203,18 @@ pub struct Monitor {
 }
 
 pub fn now_unix() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
 /// Write a file only its owner can read (settings with secrets, the panel token).
-pub(crate) fn write_private(path: &Path, text: &str) -> Result<(), String> {
-    std::fs::create_dir_all(path.parent().unwrap_or(Path::new("."))).map_err(|e| e.to_string())?;
+pub(crate) fn write_private(path: &Path, text: &str) -> Result<(), Problem> {
+    std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
     let tmp = path.with_extension("tmp");
-    let user = std::env::var("USERNAME").ok().filter(|u| !u.is_empty());
-    crate::db::write_secret_file(
-        &crate::db::SystemRunner,
-        crate::db::Os::current(),
-        &tmp,
-        text,
-        user.as_deref(),
-    )
-    .map_err(|e| e.to_string())?;
+    let user = crate::winuser::name();
+    crate::db::write_secret_file(&crate::db::SystemRunner, crate::db::Os::current(), &tmp, text, user.as_deref())?;
     crate::fsutil::rename_retrying(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
-        e.to_string()
+        Problem::from(e)
     })
 }
 
@@ -211,11 +232,7 @@ pub fn mark_stop_intent(dir: &Path) {
 }
 
 fn read_intent(dir: &Path) -> Option<u64> {
-    std::fs::read_to_string(intent_path(dir))
-        .ok()?
-        .trim()
-        .parse()
-        .ok()
+    std::fs::read_to_string(intent_path(dir)).ok()?.trim().parse().ok()
 }
 
 fn round1(v: f64) -> f32 {
@@ -224,15 +241,7 @@ fn round1(v: f64) -> f32 {
 
 impl Monitor {
     pub fn new(make: BackendMaker, probe: Arc<dyn Probe>, sink: Arc<dyn AlertSink>) -> Self {
-        Self {
-            inner: Arc::new(Inner {
-                make,
-                probe,
-                sink,
-                state: Mutex::new(State::default()),
-                stop: AtomicBool::new(false),
-            }),
-        }
+        Self { inner: Arc::new(Inner { make, probe, sink, state: Mutex::new(State::default()), stop: AtomicBool::new(false) }) }
     }
 
     /// The real thing: reads this machine, delivers to Discord and the generic webhook.
@@ -241,10 +250,7 @@ impl Monitor {
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
-        self.inner
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.inner.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Start the sampling thread (first pass at once, then every [`INTERVAL`]); it ends on [`Monitor::stop`].
@@ -256,9 +262,7 @@ impl Monitor {
                 while !me.inner.stop.load(Ordering::Relaxed) {
                     // A bug in one pass must not end monitoring.
                     let m = me.clone();
-                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-                        m.tick(now_unix())
-                    }));
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || m.tick(now_unix())));
                     let mut waited = Duration::ZERO;
                     while waited < INTERVAL && !me.inner.stop.load(Ordering::Relaxed) {
                         std::thread::sleep(Duration::from_millis(500));
@@ -279,22 +283,26 @@ impl Monitor {
         let Ok(servers) = backend.list() else { return };
         for e in &servers {
             self.sample_one(&mut *backend, e, now);
+            self.watch_os_job_backup(e, now);
         }
         // Servers taken off the list: drop their state and close their alerts.
         let mut st = self.state();
-        let gone: Vec<String> = st
-            .servers
-            .keys()
-            .filter(|k| !servers.iter().any(|e| &e.name == *k))
-            .cloned()
-            .collect();
+        let gone: Vec<String> = st.servers.keys().filter(|k| !servers.iter().any(|e| &e.name == *k)).cloned().collect();
         for name in gone {
             st.servers.remove(&name);
-            for a in st.alerts.iter_mut().filter(|a| {
-                a.server == name && a.resolved.is_none() && a.kind != AlertKind::Recovered
-            }) {
+            for a in st.alerts.iter_mut().filter(|a| a.server == name && a.resolved.is_none() && a.kind != AlertKind::Recovered) {
                 a.resolved = Some(now);
             }
+        }
+    }
+
+    /// A scheduled backup made by the operating system's job runs as the person, outside this process: when it fails it records that in the
+    /// person's store, and the alert is raised here, the same as for the panel's own scheduler (one open alert, closed by the next success).
+    fn watch_os_job_backup(&self, e: &ServerEntry, now: u64) {
+        match self.inner.probe.os_job_backup_failure(e) {
+            Some(Some(why)) => self.raise_external(e, AlertKind::BackupFailed, format!("The scheduled backup did not work: {why}"), now),
+            Some(None) => self.resolve_external(&e.name, AlertKind::BackupFailed, now),
+            None => {}
         }
     }
 
@@ -304,16 +312,13 @@ impl Monitor {
             return;
         }
         let detail = backend.status_detail(e);
-        let game = if detail.running {
-            probe.game_info(e.ports.game)
-        } else {
-            None
-        };
-        let proc_ = if detail.running {
-            probe.process(e)
-        } else {
-            None
-        };
+        // A container server restarted by its engine (a crash, a reboot) has lost the process that copies its output to
+        // the console log: start it again. Does nothing for any other server, or when one runs.
+        if detail.running {
+            crate::container::logs::ensure_follower(&e.dir);
+        }
+        let game = if detail.running { probe.game_info(e.ports.game) } else { None };
+        let proc_ = if detail.running { probe.process(e) } else { None };
         let mem = probe.memory();
         let disk = probe.disk(&e.dir);
         let sample = Sample {
@@ -323,13 +328,9 @@ impl Monitor {
             max_players: game.and_then(|g| g.max_players),
             cpu: proc_.and_then(|p| p.cpu_pct).map(|c| round1(f64::from(c))),
             ram_mb: proc_.map(|p| u32::try_from(p.rss_bytes / (1024 * 1024)).unwrap_or(u32::MAX)),
-            sys_ram_pct: mem.filter(|m| m.total > 0).map(|m| {
-                round1((m.total - m.available.min(m.total)) as f64 / m.total as f64 * 100.0)
-            }),
+            sys_ram_pct: mem.filter(|m| m.total > 0).map(|m| round1((m.total - m.available.min(m.total)) as f64 / m.total as f64 * 100.0)),
             disk_free_mb: disk.map(|d| d.free / (1024 * 1024)),
-            disk_free_pct: disk
-                .filter(|d| d.total > 0)
-                .map(|d| round1(d.free as f64 / d.total as f64 * 100.0)),
+            disk_free_pct: disk.filter(|d| d.total > 0).map(|d| round1(d.free as f64 / d.total as f64 * 100.0)),
             game_up: detail.game_listening,
             txadmin_up: detail.txadmin_up,
             badge: backend.badge(e),
@@ -342,32 +343,14 @@ impl Monitor {
         {
             let mut st = self.state();
             let st = &mut *st;
-            let track = st.servers.entry(e.name.clone()).or_insert_with(|| Track {
-                history: history::History::load(&e.dir, now),
-                last_up: None,
-                active: HashMap::new(),
-            });
-            let facts = alerts::Facts {
-                prev_up: track.last_up,
-                intentional_stop: intent_fresh,
-                disk_total: disk.map(|d| d.total),
-            };
+            let track = st.servers.entry(e.name.clone()).or_insert_with(|| Track { history: history::History::load(&e.dir, now), last_up: None, active: HashMap::new() });
+            let facts = alerts::Facts { prev_up: track.last_up, intentional_stop: intent_fresh, disk_total: disk.map(|d| d.total) };
             let changes = alerts::evaluate(&sample, &facts, &settings, &track.active);
             for c in changes {
                 match c {
                     alerts::Change::Raise(kind, message) | alerts::Change::Event(kind, message) => {
                         st.next_id += 1;
-                        let alert = Alert {
-                            id: st.next_id,
-                            server: e.name.clone(),
-                            kind,
-                            tone: kind.tone(),
-                            title: kind.title(),
-                            message,
-                            raised: now,
-                            resolved: None,
-                            acked: false,
-                        };
+                        let alert = Alert { id: st.next_id, server: e.name.clone(), kind, tone: kind.tone(), title: kind.title(), message, raised: now, resolved: None, acked: false };
                         if kind != AlertKind::Recovered {
                             track.active.insert(kind, alert.id);
                         }
@@ -384,11 +367,7 @@ impl Monitor {
                 }
             }
             while st.alerts.len() > MAX_ALERTS {
-                let pos = st
-                    .alerts
-                    .iter()
-                    .position(|a| a.resolved.is_some() || a.acked)
-                    .unwrap_or(0);
+                let pos = st.alerts.iter().position(|a| a.resolved.is_some() || a.acked).unwrap_or(0);
                 st.alerts.remove(pos);
             }
             // A stop that was asked for has been seen; an old marker left by a restart is cleaned up.
@@ -409,13 +388,67 @@ impl Monitor {
     pub fn metrics(&self, e: &ServerEntry, range: Range, now: u64) -> MetricsView {
         let st = self.state();
         let track = st.servers.get(&e.name);
-        let view = |h: &history::History| MetricsView {
-            samples: h.range(now, range.secs(), MAX_POINTS),
-            latest: h.latest().cloned(),
-        };
+        let view = |h: &history::History| MetricsView { samples: h.range(now, range.secs(), MAX_POINTS), latest: h.latest().cloned() };
         match track {
             Some(t) => view(&t.history),
             None => view(&history::History::load(&e.dir, now)),
+        }
+    }
+
+    /// Raise an alert that does not come from sampling (a failed backup): it shows in the panel and goes to
+    /// the same Discord / webhook as the others. One open alert per kind and server: a second failure while
+    /// the first is open is not announced again.
+    pub fn raise_external(&self, e: &ServerEntry, kind: AlertKind, message: String, now: u64) {
+        let alert = {
+            let mut st = self.state();
+            let st = &mut *st;
+            if st.alerts.iter().any(|a| a.server == e.name && a.kind == kind && a.resolved.is_none()) {
+                return;
+            }
+            st.next_id += 1;
+            let alert = Alert { id: st.next_id, server: e.name.clone(), kind, tone: kind.tone(), title: kind.title(), message, raised: now, resolved: None, acked: false };
+            st.alerts.push_back(alert.clone());
+            while st.alerts.len() > MAX_ALERTS {
+                let pos = st.alerts.iter().position(|a| a.resolved.is_some() || a.acked).unwrap_or(0);
+                st.alerts.remove(pos);
+            }
+            alert
+        };
+        self.inner.sink.deliver(e, &alert, &alerts::load_settings(&e.dir));
+    }
+
+    /// Raise a machine-level alert (about Kora's own panel or service, no server): it shows in the panel's alert list with an empty
+    /// `server`, and goes out through the notification settings. One open alert per kind: a second one while the first is open is not announced again.
+    pub fn raise_machine(&self, kind: AlertKind, message: String, now: u64) {
+        let alert = {
+            let mut st = self.state();
+            let st = &mut *st;
+            if st.alerts.iter().any(|a| a.server.is_empty() && a.kind == kind && a.resolved.is_none()) {
+                return;
+            }
+            st.next_id += 1;
+            let alert = Alert { id: st.next_id, server: String::new(), kind, tone: kind.tone(), title: kind.title(), message, raised: now, resolved: None, acked: false };
+            st.alerts.push_back(alert.clone());
+            while st.alerts.len() > MAX_ALERTS {
+                let pos = st.alerts.iter().position(|a| a.resolved.is_some() || a.acked).unwrap_or(0);
+                st.alerts.remove(pos);
+            }
+            alert
+        };
+        self.inner.sink.deliver_machine(&alert);
+    }
+
+    /// The machine-level condition of `kind` is over.
+    pub fn resolve_machine(&self, kind: AlertKind, now: u64) {
+        for a in self.state().alerts.iter_mut().filter(|a| a.server.is_empty() && a.kind == kind && a.resolved.is_none()) {
+            a.resolved = Some(now);
+        }
+    }
+
+    /// Close the open alerts of `kind` for a server (the condition is over).
+    pub fn resolve_external(&self, server: &str, kind: AlertKind, now: u64) {
+        for a in self.state().alerts.iter_mut().filter(|a| a.server == server && a.kind == kind && a.resolved.is_none()) {
+            a.resolved = Some(now);
         }
     }
 

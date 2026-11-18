@@ -13,9 +13,10 @@ Documentation: <https://docs.koraframe.work/guides/installer/overview>
 The panel is Kora's only interface, and it is what "the Kora app" is: a page in your browser, plus a Start Menu / desktop
 shortcut (a launcher in the applications menu on Linux) that opens it. Run `kora` (or double-click the shortcut): Kora
 makes sure the panel is running in the background and opens your browser at it. With no servers yet it opens straight into
-the install wizard. Nothing asks for administrator rights; `kora` never elevates, and the panel runs as you. When an
-action does need them (services, firewall rules, installing MariaDB) the panel shows the exact command to run as
-administrator.
+the install wizard. `kora` never elevates, and the panel runs as you. The parts that need administrator rights (services,
+firewall rules, installing MariaDB, updating Kora) are done by Kora's small administrator service, which the installer
+(`.msi` on Windows, `.deb` on Debian/Ubuntu, `sudo kora service install` elsewhere) sets up with one approval; without it
+the panel offers to install it, to carry on without those parts, or shows the command to run.
 
 The panel installs servers, starts, stops and updates them, shows the console and logs, and handles resources, schedules
 and notifications. It listens on `127.0.0.1` only (port 47120, or the next free one up to 47140; `--port` changes it) and
@@ -28,7 +29,12 @@ computer first. `kora panel --tailscale` instead opens it to your own devices ov
 `kora install` with options stays the scriptable, non-interactive installer. The terminal screens (TUI) of earlier
 versions are gone: everything they did is in the panel.
 
-Guide: [docs/panel.md](docs/panel.md).
+**The desktop app (optional).** `kora-desktop` is a tray icon and a small native window that shows the same panel: the icon
+shows at a glance whether your servers run, its menu starts, stops and restarts them, and you get a notification when one
+stops. It is a thin client of the panel (nothing changes for the browser route, remote use or a server without a screen),
+Windows first (WebView2; Linux with WebKitGTK second). See [docs/desktop-app.md](docs/desktop-app.md).
+
+Guide: [docs/panel.md](docs/panel.md). Languages and how to add one: [docs/translations.md](docs/translations.md); accessibility: [docs/accessibility.md](docs/accessibility.md). Where Kora keeps its own data, backups and the way back to older versions: [docs/store.md](docs/store.md).
 
 ## Install
 
@@ -43,6 +49,14 @@ Windows 10/11 or Server 2019+ (PowerShell):
 ```powershell
 irm https://github.com/KoraFiveM/kora-installer/releases/latest/download/install.ps1 | iex
 ```
+
+Both scripts first offer the **system install** (asked once; answer n to skip): the `.msi` on Windows (one Windows
+permission prompt), the `.deb` on Debian/Ubuntu (your password once, or `sudo kora service install` on other
+systems). It puts Kora in a protected folder together with Kora's administrator service, so installing servers,
+firewall rules and databases later needs no password and no terminal (`KORA_SYSTEM=1` / `-System` does it without
+asking, `KORA_SYSTEM=0` / `-PerUser` installs just for you). The per-user install below needs no administrator rights;
+the parts of a server that need them are then a button, a command or skipped. You can also download
+`kora-windows-x86_64.msi` / `kora-linux-x86_64.deb` from the release page yourself.
 
 The script also makes a Start Menu and Desktop shortcut on Windows (a launcher in the applications menu on Linux
 desktops); they are yours only, no administrator rights, and open the panel. `KORA_NO_SHORTCUTS=1` (or `-NoShortcuts`)
@@ -64,7 +78,7 @@ pre-release or a draft); see the [Releases page](https://github.com/KoraFiveM/ko
 
 ## What the install wizard does
 
-1. **Welcome:** choose the short guided questions or every step, then production or development.
+1. **Welcome:** choose the short guided questions or every step, then where the resources come from (plain clones, or your own copies on GitHub) and which versions to follow.
 2. **Choices:** server name and folder, your Cfx.re licence key, ports, which resources to install.
 3. **Checks:** free disk space and port conflicts (with next-free-port suggestions) before anything is changed.
 4. **Install:** downloads and verifies FXServer, sets up the database, clones/installs resources, creates the service and firewall rules.
@@ -75,20 +89,23 @@ safe: firewall, schedule, starting the server) instead of starting over. An inst
 restarting the panel, can be carried on from the install page when it used a saved licence key. Scripts can use flags
 instead of the wizard (`kora install --help`, `kora install --dry-run` to preview).
 
-### Production vs development mode
+### How the server runs (Linux)
 
-- **Production:** a server that runs for players. Resources are installed from releases; updating to newer releases is manual for now.
-- **Development:** you sign in to GitHub in the wizard and pick where your forks go (your account or an organisation).
-  The server updates itself on a schedule you choose (`kora schedule`).
+By default a server is a system service. When Podman or Docker works, the wizard (and `kora install --run-mode container`) can run it **in a container** instead: nothing is installed on the system, rootless Podman needs no administrator rights, the database is a MariaDB container next to the server, and everything in the panel works the same. See [docs/panel.md](docs/panel.md#running-a-server-in-a-container-linux).
+
+### Where the resources come from, and which versions
+
+- **Plain clones** (no GitHub account needed) or **your own copies** (forks in your GitHub account or an organisation you belong to, so you can change them, push and open pull requests).
+- **Released versions** (pinned, stable: you choose when to move to a newer release) or the **latest changes** (the main branch). The two are separate choices; clones default to released and your own copies to the latest. Older servers made as "production" or "development" read as clones + released and own copies + latest.
+- Everything else (the resource page, branches and pull requests, updates, the automatic update, the GitHub work) is the same for every server.
 
 ## Requirements
 
 - Windows 10/11 or Server 2019+, or Debian 12+ / Ubuntu 22.04+ (x86-64).
-- Administrator rights are **not** needed to install Kora, open the panel or get started. Setting up a server's
-  service, firewall rules or a database server does need them: on Linux the panel shows the `sudo` command to run (or does
-  it for you once the optional helper is installed); on Windows an install from the panel asks once, when it starts, with
-  a normal Windows permission prompt for all of its administrator parts. If you say no, you can ask again, carry on
-  without those parts, or see the command to run.
+- Administrator rights are **not** needed to open the panel or get started. Installing Kora's administrator service (the
+  `.msi` on Windows, the `.deb` on Debian/Ubuntu, or `sudo kora service install`) needs one approval. After that the panel
+  sets up a server's service, firewall rules and database without asking again; without the service it offers to install
+  it, to carry on without those parts, or shows the command to run.
 - Server folder (suggested by default): Windows `C:\Kora\<name>`; Linux `~/kora/<name>` in your own home folder, also
   when Kora runs with `sudo`. Logged in as root (common on rented servers), it is `/home/kora/<name>`: Kora creates a
   normal `kora` user account that owns it. On Linux the background service runs as its own account, which cannot enter
@@ -106,25 +123,28 @@ Most things are in the panel (`kora`); these are the same operations for scripts
 | Command | What it does |
 |---|---|
 | `kora` (also `kora manager`, `kora install` with no options) | Make sure the panel runs in the background and open it (the install page for `kora install`). |
-| `kora panel` | The panel in this window, or set up and manage it: `--tailscale`, `--setup`, `--print-link`, `--new-token`, `--remove-service`, `restart`, `remote-actions on\|off\|status`, `user ...` (remote users), `tailscale allow\|remove\|list\|off`. |
-| `kora install --name ... --mode prod\|dev ...` | Install a server without asking (`--dry-run` to preview, `--license-key-name` to use a saved key). |
+| `kora panel` | The panel in this window, or set up and manage it: `--tailscale`, `--setup`, `--print-link`, `--new-token`, `--remove-service`, `restart`, `remote-actions on\|off\|status`, `user invite\|reset\|credentials\|list\|remove\|api-token ...` (remote users: passkeys and one-time codes), `tls status\|set\|self-signed\|tailscale\|off\|renew\|export-ca` (HTTPS), `proxy trust\|forget\|status` (a reverse proxy), `tailscale allow\|remove\|list\|off`. |
+| `kora install --name ... [--source clone\|fork] [--versions released\|latest] [--fork-owner <login-or-org>] ...` | Install a server without asking (`--dry-run` to preview, `--license-key-name` to use a saved key). `--mode prod\|dev` is the old spelling of the first two and still works. |
 | `kora status`, `kora start\|stop\|restart <server>` | List servers; control a server's background service. |
-| `kora update <server>` | Preview, apply and roll back updates (`--auto` is for schedulers). `kora schedule show\|set\|off <server>` sets when a Development server updates itself. |
+| `kora update <server>` | Preview, apply and roll back updates (`--auto` is for schedulers). `kora schedule show\|set\|off <server>` sets when a server updates itself. |
 | `kora add-resources`, `kora add-asset <server> <zip>...` | Add catalogue resources, or paid assets downloaded from the Cfx.re Portal. |
-| `kora branch list\|show\|switch\|default\|all\|restore <server> ...`, `kora pr list\|checkout <server> <resource> ...` | Development servers: change a resource's branch or try a pull request; updates leave a switched resource alone. |
-| `kora keys list\|add\|replace\|rename\|remove\|use`, `kora profile show\|forget` | Saved licence keys (a key is read from `CFX_LICENSE_KEY` or standard input, never from the command line) and the remembered Cfx.re name and GitHub owner. |
-| `kora check [--start-database]`, `kora tools status\|install`, `kora github owners` | The System check, Kora's own Git and GitHub CLI copies, GitHub helpers for Development mode. |
+| `kora branch list\|show\|switch\|default\|all\|restore <server> ...`, `kora pr list\|checkout\|view\|comment\|review\|merge <server> <resource> ...` | Change a resource's branch or try a pull request (updates leave a switched resource alone), and read, comment on, review or merge pull requests as the GitHub account `gh` is signed in as. |
+| `kora resource show\|changes\|log\|commit\|push\|new-branch\|issues\|issue-comment\|releases\|fork\|versions <server> ...` | One resource: where it is and whether the running server needs a restart; what changed, commit, push, a new branch, issues, releases; make your own copy (fork); change which versions the server follows. |
+| `kora keys list\|add\|replace\|rename\|remove\|use\|keychain status\|on\|off`, `kora profile show\|forget` | Saved licence keys (a key is read from `CFX_LICENSE_KEY` or standard input, never from the command line; kept in the system keychain when there is one: Windows DPAPI, Linux Secret Service) and the remembered Cfx.re name and GitHub owner. |
+| `kora check [--start-database]`, `kora tools status\|install`, `kora github owners` | The System check, Kora's own Git and GitHub CLI copies, GitHub helpers. |
 | `kora webhook ...` | Discord notifications for update reports. |
+| `kora backup create\|list\|verify\|restore\|undo\|delete\|prune\|schedule <server>`, `kora backup import <file>` | Back up a server (database, settings, txAdmin data, resources; optional password), check a backup, restore it (a safety copy is made first and can be undone), set where backups go and a schedule, or bring a server from a backup (or another computer) as a new one. The file holds secrets: a password is read from `--password-stdin` or `KORA_BACKUP_PASSWORD`, never an argument. |
+| `kora support bundle [<server>]` | One file to hand to whoever is helping you, with every secret removed. You see what is in it first; it is never uploaded. |
 | `kora app install\|status\|uninstall` | Kora's per-user shortcuts (Start Menu / Desktop, applications menu). `kora uninstall --app` removes the OLD machine-wide app of earlier versions. |
 | `kora self-update` | Update Kora to the newest stable release (checksum-verified). |
 | `kora delete <server>` | Delete a server and what the installer created for it. |
 | `kora uninstall [--dry-run]` | Remove the system changes Kora made. Asks item by item; your server folders and databases are kept unless you say otherwise, and so are your saved keys. |
-| `kora helper install\|uninstall\|status` | The optional helper that lets the panel do the few things that need administrator rights. |
+| `kora service status\|list\|allow\|deny\|install\|uninstall` | Kora's administrator service: who may use it, installing and removing it. |
 
 ## Status and limits
 
 - Linux is tested end to end. Windows is covered by CI smoke tests; real-machine runs have started, so please report problems.
-- Not released yet: automatic updates for production servers. See [RELEASE_NOTES.md](RELEASE_NOTES.md) and
+- Automatic updates for servers on released versions are new in 0.8 and off until turned on. See [RELEASE_NOTES.md](RELEASE_NOTES.md) and
   [CHANGELOG.md](CHANGELOG.md); check the changelog for what is newer than the version you run.
 - **The Windows `.exe` is unsigned**, so SmartScreen may warn ("More info", "Run anyway").
   The install scripts verify the SHA-256 checksum for you. To check by hand, compare with the `.sha256` file next to each download:

@@ -40,6 +40,8 @@ pub enum Op {
     ConsoleSend,
     ConsoleEnable,
     ResourcesList,
+    /// One resource's page: what it is, where its files are, whether a restart is needed.
+    ResourceGet,
     ResourceEnsure,
     /// Start, stop or restart one resource on a running server (through the console helper).
     ResourceControl,
@@ -79,6 +81,9 @@ pub enum Op {
     InstallLog,
     SelfUpdateCheck,
     SelfUpdateApply,
+    /// Install Kora's administrator service (Windows: runs the installer, which asks for administrator approval on the
+    /// computer that runs Kora; elsewhere answers with the command to run). Local only.
+    AdminServiceInstall,
     AppStatus,
     AppInstall,
     AppUninstall,
@@ -86,6 +91,12 @@ pub enum Op {
     UninstallRun,
     JobsGet,
     JobEvents,
+    /// The recent jobs, including those from before the panel last restarted.
+    JobsList,
+    /// The audit log: who did what (admins only).
+    AuditList,
+    /// What the administrator service did with administrator rights (its own audit file), for the Activity log (admins only).
+    AuditServiceList,
     Events,
     MetricsGet,
     AlertsList,
@@ -149,6 +160,116 @@ pub enum Op {
     BranchBulkPreview,
     /// Development: switch every resource that has a branch, or all back to normal.
     BranchBulkApply,
+    /// A resource's local changes and a read-only diff.
+    ResourceChanges,
+    /// Recent commits of the branch a resource is on.
+    ResourceLog,
+    /// Commit a resource's changes with a message (admins).
+    ResourceCommit,
+    /// Push the checked-out branch to your own copy on GitHub (admins; never forced).
+    ResourcePush,
+    /// Make a new branch from where a resource is (admins).
+    ResourceNewBranch,
+    /// A pull request in full: checks, reviews, files, conversation.
+    PrView,
+    /// Comment on a pull request as the signed-in GitHub account (admins).
+    PrComment,
+    /// Approve, ask for changes or comment on a pull request (admins).
+    PrReview,
+    /// Merge a pull request, if the GitHub account may (admins).
+    PrMerge,
+    /// Open issues of a resource's repository.
+    IssuesList,
+    /// Comment on an issue as the signed-in GitHub account (admins).
+    IssueComment,
+    /// Releases of a resource's repository and which one the server is pinned to.
+    ResourceReleases,
+    /// Make your own copy (fork) of resources that are plain clones (a job; admins).
+    ResourcesFork,
+    /// Follow released versions or the latest changes (admins).
+    VersionsSet,
+    /// Can players reach this server? The guided checklist (running, firewall, router, internet).
+    ReachCheck,
+    /// Which outside services the reachability check may contact.
+    ReachSettingsGet,
+    /// Allow or forbid those outside lookups.
+    ReachSettingsSet,
+    /// Turn automatic port forwarding (UPnP / NAT-PMP) of the game port on or off for one server.
+    ForwardingSet,
+    /// Open the game port in this computer's firewall (administrator rights).
+    ReachFirewallOpen,
+    /// A one-time ticket to open this server's txAdmin through the panel (needs the same role as controlling the server's code).
+    TxAdminTicket,
+    /// Which ways of signing in this address offers (no sign-in needed).
+    AuthOptions,
+    /// Sign in with a passkey or a password and one-time code (no sign-in needed).
+    AuthLogin,
+    /// Set up a first passkey or one-time codes with an enrolment link (no sign-in needed; the link is the credential).
+    AuthEnrol,
+    /// A fresh passkey or code check for the most sensitive actions.
+    AuthReauth,
+    /// Your own credentials and signed-in devices.
+    AuthAccount,
+    /// Change your own sign-in: passkeys, one-time codes, password, devices.
+    AuthAccountChange,
+    /// What a user can sign in with (on the computer that runs Kora).
+    UserCredentials,
+    /// Take credentials away from a user and give them a new enrolment link (on the computer that runs Kora).
+    UserReset,
+    /// The API tokens for scripts (never their secrets).
+    ApiTokensList,
+    /// Make an API token for a script; the secret is shown once.
+    ApiTokenCreate,
+    /// Revoke an API token.
+    ApiTokenRevoke,
+    /// The HTTPS state of the panel: which certificate, until when, its fingerprint.
+    TlsStatus,
+    /// Fetch or make the panel's certificate again now.
+    TlsRenew,
+    /// The local certificate authority's certificate (public), to trust it once.
+    TlsCa,
+    /// Use the system keychain for saved licence keys (and move them in), or keep them all in Kora's private file.
+    KeychainSet,
+    /// The backups of a server: the list, where they go, the schedule and the "last backup" line.
+    BackupsList,
+    /// Make a backup of a server (a job with progress).
+    BackupCreate,
+    /// Change where backups go, how many are kept and the backup schedule (administrators).
+    BackupSettingsSet,
+    /// Remove old backups under the retention rules (administrators).
+    BackupPrune,
+    /// Undo the last restore by restoring the safety copy taken before it (a job; administrators).
+    BackupUndo,
+    /// Check every file of a backup against its checksums (a job).
+    BackupVerify,
+    /// What restoring a backup would change. Reads only.
+    BackupPreview,
+    /// Restore a backup onto its server (a job; administrators).
+    BackupRestore,
+    /// Delete a backup (administrators).
+    BackupDelete,
+    /// Download the archive file: it holds secrets (administrators).
+    BackupDownload,
+    /// The "last backup" line of every server, for the servers list.
+    BackupsOverview,
+    /// Prepare a support bundle and show what is in it (nothing is saved or sent).
+    SupportBundlePreview,
+    /// One file of a prepared support bundle, as it will be saved.
+    SupportBundleFile,
+    /// Save the prepared support bundle on this computer.
+    SupportBundleCreate,
+    /// Download a saved support bundle.
+    SupportBundleDownload,
+    /// The short cleaned text a bug report may attach.
+    SupportSummary,
+    /// Upload a backup file to this computer, to bring its server in (administrators).
+    BackupImportUpload,
+    /// Look at a backup file: the server in it, what would be created, what is in the way. Reads only.
+    BackupImportInspect,
+    /// Bring the server in a backup onto this computer as a new server (a job; administrators).
+    BackupImportStart,
+    /// Backups of servers that were deleted (kept, restorable as a new server; administrators).
+    BackupsArchived,
 }
 
 impl Op {
@@ -170,6 +291,7 @@ impl Op {
         Op::ConsoleSend,
         Op::ConsoleEnable,
         Op::ResourcesList,
+        Op::ResourceGet,
         Op::ResourceEnsure,
         Op::ResourceControl,
         Op::UpdatePreview,
@@ -207,6 +329,7 @@ impl Op {
         Op::InstallLog,
         Op::SelfUpdateCheck,
         Op::SelfUpdateApply,
+        Op::AdminServiceInstall,
         Op::AppStatus,
         Op::AppInstall,
         Op::AppUninstall,
@@ -214,6 +337,9 @@ impl Op {
         Op::UninstallRun,
         Op::JobsGet,
         Op::JobEvents,
+        Op::JobsList,
+        Op::AuditList,
+        Op::AuditServiceList,
         Op::Events,
         Op::MetricsGet,
         Op::AlertsList,
@@ -258,6 +384,61 @@ impl Op {
         Op::StashRestore,
         Op::BranchBulkPreview,
         Op::BranchBulkApply,
+        Op::ResourceChanges,
+        Op::ResourceLog,
+        Op::ResourceCommit,
+        Op::ResourcePush,
+        Op::ResourceNewBranch,
+        Op::PrView,
+        Op::PrComment,
+        Op::PrReview,
+        Op::PrMerge,
+        Op::IssuesList,
+        Op::IssueComment,
+        Op::ResourceReleases,
+        Op::ResourcesFork,
+        Op::VersionsSet,
+        Op::ReachCheck,
+        Op::ReachSettingsGet,
+        Op::ReachSettingsSet,
+        Op::ForwardingSet,
+        Op::ReachFirewallOpen,
+        Op::TxAdminTicket,
+        Op::AuthOptions,
+        Op::AuthLogin,
+        Op::AuthEnrol,
+        Op::AuthReauth,
+        Op::AuthAccount,
+        Op::AuthAccountChange,
+        Op::UserCredentials,
+        Op::UserReset,
+        Op::ApiTokensList,
+        Op::ApiTokenCreate,
+        Op::ApiTokenRevoke,
+        Op::TlsStatus,
+        Op::TlsRenew,
+        Op::TlsCa,
+        Op::KeychainSet,
+        Op::BackupsList,
+        Op::BackupCreate,
+        Op::BackupSettingsSet,
+        Op::BackupPrune,
+        Op::BackupUndo,
+        Op::BackupVerify,
+        Op::BackupPreview,
+        Op::BackupRestore,
+        Op::BackupDelete,
+        Op::BackupDownload,
+        Op::BackupsOverview,
+        Op::SupportBundlePreview,
+        Op::SupportBundleFile,
+        Op::SupportBundleCreate,
+        Op::SupportBundleDownload,
+        Op::SupportSummary,
+        Op::BackupImportUpload,
+        Op::BackupImportInspect,
+        Op::BackupImportStart,
+        Op::BackupsArchived,
     ];
 
     /// Stable snake_case name (used in `/meta` capabilities and job records).
@@ -280,6 +461,7 @@ impl Op {
             Op::ConsoleSend => "console_send",
             Op::ConsoleEnable => "console_enable",
             Op::ResourcesList => "resources_list",
+            Op::ResourceGet => "resource_get",
             Op::ResourceEnsure => "resource_ensure",
             Op::ResourceControl => "resource_control",
             Op::UpdatePreview => "update_preview",
@@ -317,6 +499,7 @@ impl Op {
             Op::InstallLog => "install_log",
             Op::SelfUpdateCheck => "self_update_check",
             Op::SelfUpdateApply => "self_update_apply",
+            Op::AdminServiceInstall => "admin_service_install",
             Op::AppStatus => "app_status",
             Op::AppInstall => "app_install",
             Op::AppUninstall => "app_uninstall",
@@ -324,6 +507,9 @@ impl Op {
             Op::UninstallRun => "uninstall_run",
             Op::JobsGet => "jobs_get",
             Op::JobEvents => "job_events",
+            Op::JobsList => "jobs_list",
+            Op::AuditList => "audit_list",
+            Op::AuditServiceList => "audit_service_list",
             Op::Events => "events",
             Op::MetricsGet => "metrics_get",
             Op::AlertsList => "alerts_list",
@@ -368,6 +554,61 @@ impl Op {
             Op::StashRestore => "stash_restore",
             Op::BranchBulkPreview => "branch_bulk_preview",
             Op::BranchBulkApply => "branch_bulk_apply",
+            Op::ResourceChanges => "resource_changes",
+            Op::ResourceLog => "resource_log",
+            Op::ResourceCommit => "resource_commit",
+            Op::ResourcePush => "resource_push",
+            Op::ResourceNewBranch => "resource_new_branch",
+            Op::PrView => "pr_view",
+            Op::PrComment => "pr_comment",
+            Op::PrReview => "pr_review",
+            Op::PrMerge => "pr_merge",
+            Op::IssuesList => "issues_list",
+            Op::IssueComment => "issue_comment",
+            Op::ResourceReleases => "resource_releases",
+            Op::ResourcesFork => "resources_fork",
+            Op::VersionsSet => "versions_set",
+            Op::ReachCheck => "reach_check",
+            Op::ReachSettingsGet => "reach_settings_get",
+            Op::ReachSettingsSet => "reach_settings_set",
+            Op::ForwardingSet => "forwarding_set",
+            Op::ReachFirewallOpen => "reach_firewall_open",
+            Op::TxAdminTicket => "txadmin_ticket",
+            Op::AuthOptions => "auth_options",
+            Op::AuthLogin => "auth_login",
+            Op::AuthEnrol => "auth_enrol",
+            Op::AuthReauth => "auth_reauth",
+            Op::AuthAccount => "auth_account",
+            Op::AuthAccountChange => "auth_account_change",
+            Op::UserCredentials => "user_credentials",
+            Op::UserReset => "user_reset",
+            Op::ApiTokensList => "api_tokens_list",
+            Op::ApiTokenCreate => "api_token_create",
+            Op::ApiTokenRevoke => "api_token_revoke",
+            Op::TlsStatus => "tls_status",
+            Op::TlsRenew => "tls_renew",
+            Op::TlsCa => "tls_ca",
+            Op::KeychainSet => "keychain_set",
+            Op::BackupsList => "backups_list",
+            Op::BackupCreate => "backup_create",
+            Op::BackupSettingsSet => "backup_settings_set",
+            Op::BackupPrune => "backup_prune",
+            Op::BackupUndo => "backup_undo",
+            Op::BackupVerify => "backup_verify",
+            Op::BackupPreview => "backup_preview",
+            Op::BackupRestore => "backup_restore",
+            Op::BackupDelete => "backup_delete",
+            Op::BackupDownload => "backup_download",
+            Op::BackupsOverview => "backups_overview",
+            Op::SupportBundlePreview => "support_bundle_preview",
+            Op::SupportBundleFile => "support_bundle_file",
+            Op::SupportBundleCreate => "support_bundle_create",
+            Op::SupportBundleDownload => "support_bundle_download",
+            Op::SupportSummary => "support_summary",
+            Op::BackupImportUpload => "backup_import_upload",
+            Op::BackupImportInspect => "backup_import_inspect",
+            Op::BackupImportStart => "backup_import_start",
+            Op::BackupsArchived => "backups_archived",
         }
     }
 
@@ -391,6 +632,7 @@ impl Op {
             Op::ConsoleSend => (Method::Post, "/servers/{s}/console"),
             Op::ConsoleEnable => (Method::Put, "/servers/{s}/console/enabled"),
             Op::ResourcesList => (Method::Get, "/servers/{s}/resources"),
+            Op::ResourceGet => (Method::Get, "/servers/{s}/resources/{name}"),
             Op::ResourceEnsure => (Method::Post, "/servers/{s}/ensure"),
             Op::ResourceControl => (Method::Post, "/servers/{s}/resources/{name}/control"),
             Op::UpdatePreview => (Method::Post, "/servers/{s}/update/preview"),
@@ -428,6 +670,7 @@ impl Op {
             Op::InstallLog => (Method::Get, "/installs/{job}/log"),
             Op::SelfUpdateCheck => (Method::Get, "/self-update"),
             Op::SelfUpdateApply => (Method::Post, "/self-update"),
+            Op::AdminServiceInstall => (Method::Post, "/system/admin-service/install"),
             Op::AppStatus => (Method::Get, "/app"),
             Op::AppInstall => (Method::Put, "/app"),
             Op::AppUninstall => (Method::Delete, "/app"),
@@ -435,6 +678,9 @@ impl Op {
             Op::UninstallRun => (Method::Post, "/uninstall"),
             Op::JobsGet => (Method::Get, "/jobs/{id}"),
             Op::JobEvents => (Method::Get, "/jobs/{id}/events"),
+            Op::JobsList => (Method::Get, "/jobs"),
+            Op::AuditList => (Method::Get, "/audit"),
+            Op::AuditServiceList => (Method::Get, "/audit/service"),
             Op::Events => (Method::Get, "/events"),
             Op::MetricsGet => (Method::Get, "/servers/{s}/metrics"),
             Op::AlertsList => (Method::Get, "/alerts"),
@@ -481,6 +727,61 @@ impl Op {
             Op::StashRestore => (Method::Post, "/servers/{s}/resources/{name}/stash/restore"),
             Op::BranchBulkPreview => (Method::Post, "/servers/{s}/branches/preview"),
             Op::BranchBulkApply => (Method::Post, "/servers/{s}/branches/apply"),
+            Op::ResourceChanges => (Method::Get, "/servers/{s}/resources/{name}/changes"),
+            Op::ResourceLog => (Method::Get, "/servers/{s}/resources/{name}/log"),
+            Op::ResourceCommit => (Method::Post, "/servers/{s}/resources/{name}/commit"),
+            Op::ResourcePush => (Method::Post, "/servers/{s}/resources/{name}/push"),
+            Op::ResourceNewBranch => (Method::Post, "/servers/{s}/resources/{name}/new-branch"),
+            Op::PrView => (Method::Get, "/servers/{s}/resources/{name}/prs/{number}"),
+            Op::PrComment => (Method::Post, "/servers/{s}/resources/{name}/prs/{number}/comment"),
+            Op::PrReview => (Method::Post, "/servers/{s}/resources/{name}/prs/{number}/review"),
+            Op::PrMerge => (Method::Post, "/servers/{s}/resources/{name}/prs/{number}/merge"),
+            Op::IssuesList => (Method::Get, "/servers/{s}/resources/{name}/issues"),
+            Op::IssueComment => (Method::Post, "/servers/{s}/resources/{name}/issues/{number}/comment"),
+            Op::ResourceReleases => (Method::Get, "/servers/{s}/resources/{name}/releases"),
+            Op::ResourcesFork => (Method::Post, "/servers/{s}/fork"),
+            Op::VersionsSet => (Method::Put, "/servers/{s}/versions"),
+            Op::ReachCheck => (Method::Post, "/servers/{s}/reach"),
+            Op::ReachSettingsGet => (Method::Get, "/reach/settings"),
+            Op::ReachSettingsSet => (Method::Put, "/reach/settings"),
+            Op::ForwardingSet => (Method::Put, "/servers/{s}/forwarding"),
+            Op::ReachFirewallOpen => (Method::Post, "/servers/{s}/reach/firewall"),
+            Op::TxAdminTicket => (Method::Post, "/servers/{s}/txadmin/ticket"),
+            Op::AuthOptions => (Method::Get, "/auth/options"),
+            Op::AuthLogin => (Method::Post, "/auth/login"),
+            Op::AuthEnrol => (Method::Post, "/auth/enrol"),
+            Op::AuthReauth => (Method::Post, "/auth/reauth"),
+            Op::AuthAccount => (Method::Get, "/auth/account"),
+            Op::AuthAccountChange => (Method::Post, "/auth/account"),
+            Op::UserCredentials => (Method::Get, "/users/{name}/credentials"),
+            Op::UserReset => (Method::Post, "/users/{name}/reset"),
+            Op::ApiTokensList => (Method::Get, "/api-tokens"),
+            Op::ApiTokenCreate => (Method::Post, "/api-tokens"),
+            Op::ApiTokenRevoke => (Method::Delete, "/api-tokens/{id}"),
+            Op::TlsStatus => (Method::Get, "/tls"),
+            Op::TlsRenew => (Method::Post, "/tls/renew"),
+            Op::TlsCa => (Method::Get, "/tls/ca"),
+            Op::KeychainSet => (Method::Put, "/keys/keychain"),
+            Op::BackupsList => (Method::Get, "/servers/{s}/backups"),
+            Op::BackupCreate => (Method::Post, "/servers/{s}/backups"),
+            Op::BackupSettingsSet => (Method::Put, "/servers/{s}/backups/settings"),
+            Op::BackupPrune => (Method::Post, "/servers/{s}/backups/prune"),
+            Op::BackupUndo => (Method::Post, "/servers/{s}/backups/undo"),
+            Op::BackupVerify => (Method::Post, "/servers/{s}/backups/{id}/verify"),
+            Op::BackupPreview => (Method::Post, "/servers/{s}/backups/{id}/preview"),
+            Op::BackupRestore => (Method::Post, "/servers/{s}/backups/{id}/restore"),
+            Op::BackupDelete => (Method::Delete, "/servers/{s}/backups/{id}"),
+            Op::BackupDownload => (Method::Get, "/servers/{s}/backups/{id}/file"),
+            Op::BackupsOverview => (Method::Get, "/backups"),
+            Op::SupportBundlePreview => (Method::Post, "/support/bundle/preview"),
+            Op::SupportBundleFile => (Method::Post, "/support/bundle/file"),
+            Op::SupportBundleCreate => (Method::Post, "/support/bundle"),
+            Op::SupportBundleDownload => (Method::Get, "/support/bundle/{file}"),
+            Op::SupportSummary => (Method::Post, "/support/summary"),
+            Op::BackupImportUpload => (Method::Post, "/backups/import/upload"),
+            Op::BackupImportInspect => (Method::Post, "/backups/import/inspect"),
+            Op::BackupImportStart => (Method::Post, "/backups/import"),
+            Op::BackupsArchived => (Method::Get, "/backups/archived"),
         }
     }
 
@@ -500,6 +801,7 @@ impl Op {
                 | Op::InstallStart
                 | Op::InstallResume
                 | Op::SelfUpdateApply
+                | Op::AdminServiceInstall
                 | Op::UninstallRun
                 | Op::NodeServerControl
                 | Op::AssetImport
@@ -507,12 +809,18 @@ impl Op {
                 | Op::DbStart
                 | Op::BranchBulkPreview
                 | Op::BranchBulkApply
+                | Op::BackupCreate
+                | Op::BackupUndo
+                | Op::BackupVerify
+                | Op::BackupRestore
+                | Op::BackupImportStart
+                | Op::ResourcesFork
         )
     }
 
     /// Jobs that only read: they may run next to a mutating job of the same server.
     pub fn is_read_only_job(self) -> bool {
-        matches!(self, Op::UpdatePreview | Op::ServersScan | Op::BranchBulkPreview)
+        matches!(self, Op::UpdatePreview | Op::ServersScan | Op::BranchBulkPreview | Op::BackupVerify)
     }
 
     /// True when [`super::Backend`] (or the api helpers) can serve it today.
@@ -531,6 +839,7 @@ impl Op {
                 | Op::ConsoleSend
                 | Op::ConsoleEnable
                 | Op::ResourcesList
+                | Op::ResourceGet
                 | Op::ResourceEnsure
                 | Op::ResourceControl
                 | Op::UpdatePreview
@@ -570,6 +879,20 @@ impl Op {
                 | Op::StashRestore
                 | Op::BranchBulkPreview
                 | Op::BranchBulkApply
+                | Op::ResourceChanges
+                | Op::ResourceLog
+                | Op::ResourceCommit
+                | Op::ResourcePush
+                | Op::ResourceNewBranch
+                | Op::PrView
+                | Op::PrComment
+                | Op::PrReview
+                | Op::PrMerge
+                | Op::IssuesList
+                | Op::IssueComment
+                | Op::ResourceReleases
+                | Op::ResourcesFork
+                | Op::VersionsSet
         )
     }
 }
@@ -599,6 +922,7 @@ mod tests {
             | Op::ConsoleSend
             | Op::ConsoleEnable
             | Op::ResourcesList
+            | Op::ResourceGet
             | Op::ResourceEnsure
             | Op::ResourceControl
             | Op::UpdatePreview
@@ -636,6 +960,7 @@ mod tests {
             | Op::InstallLog
             | Op::SelfUpdateCheck
             | Op::SelfUpdateApply
+            | Op::AdminServiceInstall
             | Op::AppStatus
             | Op::AppInstall
             | Op::AppUninstall
@@ -643,6 +968,9 @@ mod tests {
             | Op::UninstallRun
             | Op::JobsGet
             | Op::JobEvents
+            | Op::JobsList
+            | Op::AuditList
+            | Op::AuditServiceList
             | Op::Events
             | Op::MetricsGet
             | Op::AlertsList
@@ -687,13 +1015,67 @@ mod tests {
             | Op::StashRestore
             | Op::BranchBulkPreview
             | Op::BranchBulkApply
-            => Op::ALL.contains(&op),
+            | Op::ResourceChanges
+            | Op::ResourceLog
+            | Op::ResourceCommit
+            | Op::ResourcePush
+            | Op::ResourceNewBranch
+            | Op::PrView
+            | Op::PrComment
+            | Op::PrReview
+            | Op::PrMerge
+            | Op::IssuesList
+            | Op::IssueComment
+            | Op::ResourceReleases
+            | Op::ResourcesFork
+            | Op::VersionsSet
+            | Op::ReachCheck
+            | Op::ReachSettingsGet
+            | Op::ReachSettingsSet
+            | Op::ForwardingSet
+            | Op::ReachFirewallOpen
+            | Op::TxAdminTicket
+            | Op::AuthOptions
+            | Op::AuthLogin
+            | Op::AuthEnrol
+            | Op::AuthReauth
+            | Op::AuthAccount
+            | Op::AuthAccountChange
+            | Op::UserCredentials
+            | Op::UserReset
+            | Op::ApiTokensList
+            | Op::ApiTokenCreate
+            | Op::ApiTokenRevoke
+            | Op::TlsStatus
+            | Op::TlsRenew
+            | Op::TlsCa
+            | Op::KeychainSet
+            | Op::BackupsList
+            | Op::BackupCreate
+            | Op::BackupSettingsSet
+            | Op::BackupPrune
+            | Op::BackupUndo
+            | Op::BackupVerify
+            | Op::BackupPreview
+            | Op::BackupRestore
+            | Op::BackupDelete
+            | Op::BackupDownload
+            | Op::BackupsOverview
+            | Op::SupportBundlePreview
+            | Op::SupportBundleFile
+            | Op::SupportBundleCreate
+            | Op::SupportBundleDownload
+            | Op::SupportSummary
+            | Op::BackupImportUpload
+            | Op::BackupImportInspect
+            | Op::BackupImportStart
+            | Op::BackupsArchived => Op::ALL.contains(&op),
         }
     }
 
     #[test]
     fn all_is_complete() {
-        assert_eq!(Op::ALL.len(), 105);
+        assert_eq!(Op::ALL.len(), 165);
         for op in Op::ALL {
             assert!(listed(*op), "{op:?} missing from ALL");
         }

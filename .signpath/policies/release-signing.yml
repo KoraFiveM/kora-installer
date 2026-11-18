@@ -1,0 +1,25 @@
+# SignPath pipeline policy for the signing policy `release-signing` (docs/release-signing.md).
+#
+# Reference this file from SignPath (Project > Signing policy > Pipeline policies > external definition in the source
+# repository) or paste it into the web interface. Start with the level "Log" (a violation is only shown on the
+# signing request), switch to "Enforce" once a first release has been signed cleanly.
+#
+# Open-source signing requires that every job of the workflow ran on GitHub-hosted runners and that the binary is
+# built from source in a verifiable way; the manual approval of every release is set on the signing policy itself
+# in SignPath (a maintainer other than the one who pushed the tag, when there is more than one).
+github-build-policies:
+  version: '1.0'
+  # false: a maintainer may re-run a build whose approval timed out (the 4 h wait in sign-windows.yml).
+  disallow_reruns: false
+  runners:
+    require_github_hosted: true
+
+# Branch protection the signed code came from. These constraints must be covered by an ACTIVE branch ruleset of the
+# repository (Settings > Rules > Rulesets), otherwise the policy fails: set the ruleset first, then enable this.
+github-scm-policies:
+  version: '1.0'
+  ruleset_constraints:
+    - allow_bypass_actors: true
+      rules:
+        - type: non_fast_forward
+        - type: deletion

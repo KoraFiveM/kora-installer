@@ -88,7 +88,7 @@ pub fn save(server: &ServerRecord, cfg: &NotifyConfig) -> Result<(), NotifyError
     std::fs::create_dir_all(path.parent().unwrap_or(Path::new("."))).map_err(io)?;
     let text = serde_json::to_string_pretty(cfg).map_err(|e| NotifyError::Io(e.to_string()))?;
     let tmp = path.with_extension("json.tmp");
-    let user = std::env::var("USERNAME").ok().filter(|u| !u.is_empty());
+    let user = crate::winuser::name();
     db::write_secret_file(&db::SystemRunner, Os::current(), &tmp, &text, user.as_deref()).map_err(|e| NotifyError::Io(e.to_string()))?;
     crate::fsutil::rename_retrying(&tmp, &path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
@@ -103,8 +103,7 @@ pub fn windows_acl_plan(server: &ServerRecord, windows_user: &str) -> Result<db:
 
 // ------------------------------------------------------------- validation
 
-const HOSTS: [&str; 6] =
-    ["discord.com", "ptb.discord.com", "canary.discord.com", "discordapp.com", "ptb.discordapp.com", "canary.discordapp.com"];
+const HOSTS: [&str; 6] = ["discord.com", "ptb.discord.com", "canary.discord.com", "discordapp.com", "ptb.discordapp.com", "canary.discordapp.com"];
 
 /// `(host, id, token)` of a well-formed Discord webhook URL.
 fn parse(url: &str) -> Result<(String, &str, &str), NotifyError> {
@@ -176,13 +175,7 @@ fn limit_lines(value: &str) -> String {
 /// problems (messages may carry paths) and no mentions.
 pub fn build_payload(report: &UpdateReport) -> serde_json::Value {
     let mut p = report.discord_payload();
-    let counts = format!(
-        "{} updated · {} skipped · {} rolled back · {} need attention",
-        report.updated.len(),
-        report.skipped.len(),
-        report.rolled_back.len(),
-        report.needs_attention.len()
-    );
+    let counts = format!("{} updated · {} skipped · {} rolled back · {} need attention", report.updated.len(), report.skipped.len(), report.rolled_back.len(), report.needs_attention.len());
     let ids = |v: Vec<&String>| v.into_iter().cloned().collect::<Vec<_>>().join("\n");
     let rolled = ids(report.rolled_back.iter().map(|(i, _)| i).collect());
     let attention = ids(report.needs_attention.iter().map(|(i, _)| i).collect());
@@ -363,7 +356,7 @@ mod tests {
     const GOOD: &str = "https://discord.com/api/webhooks/123456789/abc_DEF-ghi";
 
     fn server(dir: &Path) -> ServerRecord {
-        ServerEntry { name: "Alpha".into(), dir: dir.to_path_buf(), mode: Mode::Development, ports: PortsRecord { game: 1, txadmin: 2 }, created_unix: 0 }
+        ServerEntry { source: None, versions: None, name: "Alpha".into(), dir: dir.to_path_buf(), mode: Mode::Development, ports: PortsRecord { game: 1, txadmin: 2 }, created_unix: 0 }
     }
 
     fn report() -> UpdateReport {
@@ -415,15 +408,7 @@ mod tests {
         assert!(!redact("https://evil.net/secret-token").contains("secret"));
         let cfg = NotifyConfig { discord_webhook: Some(GOOD.into()) };
         assert!(!format!("{cfg:?}").contains("abc_DEF"));
-        for e in [
-            NotifyError::InvalidUrl("x"),
-            NotifyError::Http(500),
-            NotifyError::RateLimited,
-            NotifyError::Timeout,
-            NotifyError::Network,
-            NotifyError::TooLarge,
-            NotifyError::Redirected,
-        ] {
+        for e in [NotifyError::InvalidUrl("x"), NotifyError::Http(500), NotifyError::RateLimited, NotifyError::Timeout, NotifyError::Network, NotifyError::TooLarge, NotifyError::Redirected] {
             assert!(!e.to_string().contains("abc_DEF"));
         }
     }
@@ -464,7 +449,7 @@ mod tests {
         let c = windows_acl_plan(&s, "Sticky").unwrap();
         assert_eq!(c.program, "icacls");
         assert!(c.args.iter().any(|a| a == "/inheritance:r"));
-        assert!(c.args.iter().any(|a| a == "Sticky:(R,W)"));
+        assert!(c.args.iter().any(|a| a == "Sticky:(R,W,D)"));
         assert!(c.args[0].ends_with("notify.json"));
         assert!(windows_acl_plan(&s, "bad;user").is_err());
     }
@@ -554,13 +539,7 @@ mod tests {
 
     #[test]
     fn rate_limit_is_retried_then_succeeds() {
-        let (url, _, count) = mock(Box::new(|i, _| {
-            if i < 2 {
-                http("429 Too Many Requests", "", "{\"retry_after\": 0.01}")
-            } else {
-                http("204 No Content", "", "")
-            }
-        }));
+        let (url, _, count) = mock(Box::new(|i, _| if i < 2 { http("429 Too Many Requests", "", "{\"retry_after\": 0.01}") } else { http("204 No Content", "", "") }));
         post(&url, &serde_json::json!({"a": 1}), &fast()).unwrap();
         assert_eq!(count.load(Ordering::SeqCst), 3);
     }

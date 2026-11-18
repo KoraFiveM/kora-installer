@@ -14,6 +14,19 @@ afterEach(() => {
 })
 
 describe('session secret', () => {
+  it('a refused enrolment link or sign-in in another tab does not end this tab\'s session', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, identity: { name: 'sam', provider: 'passkey', role: 'admin' }, secret: 's3cr3t' }))
+    await api.session.createByCode('c0de')
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: { code: 'unauthorized', message: 'This link has expired or was already used.' } }))
+    await expect(api.auth.enrol({ step: 'check', link: 'used' })).rejects.toBeInstanceOf(ApiError)
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: { code: 'unauthorized', message: 'not right' } }))
+    await expect(api.auth.login({ step: 'code', user: 'x', password: 'y', code: 'z' })).rejects.toBeInstanceOf(ApiError)
+    expect(sessionSecret()).toBe('s3cr3t')
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: { code: 'unauthorized', message: 'session gone' } }))
+    await expect(api.servers.list()).rejects.toBeInstanceOf(ApiError)
+    expect(sessionSecret()).toBeNull()
+  })
+
   it('keeps the secret from sign-in and sends it with every request and stream', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, identity: { name: 'local', provider: 'local', role: 'admin' }, secret: 's3cr3t' }))
     await api.session.createByCode('c0de')

@@ -14,10 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{
-    desktop_exec_arg, plan_uninstall, same_path, Action, AppError, CopyKind, EnvGet, Layout, Plan, RealSys, Result, ShortcutSpec, Sys,
-    DESKTOP_MARKER, LOGO_PNG,
-};
+use super::{desktop_exec_arg, plan_uninstall, same_path, Action, AppError, CopyKind, EnvGet, Layout, Plan, RealSys, Result, ShortcutSpec, Sys, DESKTOP_MARKER, LOGO_PNG};
 
 /// Where the per-user shortcuts and (if needed) a per-user copy of the program go.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,10 +51,7 @@ impl UserLayout {
                 None => wjoin(profile.as_deref().ok_or_else(|| need("APPDATA"))?, &["AppData", "Roaming"]),
             };
             // A OneDrive-backed Desktop is the one people actually see.
-            let desktop_dir = var("OneDrive")
-                .map(|o| wjoin(&o, &["Desktop"]))
-                .filter(|d| is_dir(d))
-                .or_else(|| profile.as_deref().map(|p| wjoin(p, &["Desktop"])));
+            let desktop_dir = var("OneDrive").map(|o| wjoin(&o, &["Desktop"])).filter(|d| is_dir(d)).or_else(|| profile.as_deref().map(|p| wjoin(p, &["Desktop"])));
             let lnk = format!("{}.lnk", super::APP_NAME);
             return Ok(UserLayout {
                 windows,
@@ -71,8 +65,8 @@ impl UserLayout {
         }
         let home = var("HOME").filter(|h| h.is_absolute()).ok_or_else(|| AppError("HOME is not set, so Kora cannot find your user folders".into()))?;
         let data = var("XDG_DATA_HOME").filter(|d| d.is_absolute()).unwrap_or_else(|| home.join(".local").join("share"));
-        let session = ["DISPLAY", "WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP"].iter().any(|k| var(k).is_some())
-            || var("XDG_SESSION_TYPE").is_some_and(|t| t == Path::new("x11") || t == Path::new("wayland"));
+        let session =
+            ["DISPLAY", "WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP"].iter().any(|k| var(k).is_some()) || var("XDG_SESSION_TYPE").is_some_and(|t| t == Path::new("x11") || t == Path::new("wayland"));
         Ok(UserLayout {
             windows,
             program: home.join(".local").join("bin").join("kora"),
@@ -103,10 +97,41 @@ impl Default for UserOptions {
     }
 }
 
-/// The launcher text: starts a bare `kora` (the panel), without a terminal window.
+/// The name of the Kora desktop app (tray icon and window, `crates/kora-desktop`). Not `Kora.exe`: on Windows
+/// that would be the same file name as `kora.exe`.
+pub const SHELL_BASENAME: &str = "kora-desktop";
+
+/// The desktop app that would sit next to `kora` (`kora-desktop.exe` on Windows).
+pub fn shell_sibling(kora: &Path, windows: bool) -> PathBuf {
+    let (dir, _) = split_last(kora);
+    let name = if windows { format!("{SHELL_BASENAME}.exe") } else { SHELL_BASENAME.to_string() };
+    if windows {
+        wjoin(&dir, &[&name])
+    } else {
+        dir.join(name)
+    }
+}
+
+fn is_shell(exe: &Path) -> bool {
+    split_last(exe).1.to_ascii_lowercase().starts_with(SHELL_BASENAME)
+}
+
+/// What the shortcuts run: the desktop app when it is installed next to `kora`, else `kora` itself (a bare
+/// `kora` opens the panel in the browser, as before).
+pub fn launcher_exe(sys: &dyn Sys, kora: &Path, windows: bool) -> PathBuf {
+    let shell = shell_sibling(kora, windows);
+    if sys.exists(&shell) {
+        shell
+    } else {
+        kora.to_path_buf()
+    }
+}
+
+/// The launcher text: starts a bare `kora` (the panel in the browser) or the desktop app, without a terminal window.
 pub fn desktop_entry_text(exe: &Path, icon: &Path) -> String {
+    let comment = if is_shell(exe) { "Kora: your FiveM servers in a window, with a tray icon" } else { "Install and manage your FiveM servers in your browser" };
     format!(
-        "[Desktop Entry]\nType=Application\nName={}\nComment=Install and manage your FiveM servers in your browser\nExec={}\nIcon={}\nTerminal=false\nCategories=Network;Utility;\n{DESKTOP_MARKER}\n",
+        "[Desktop Entry]\nType=Application\nName={}\nComment={comment}\nExec={}\nIcon={}\nTerminal=false\nCategories=Network;Utility;\n{DESKTOP_MARKER}\n",
         super::APP_NAME,
         desktop_exec_arg(exe),
         icon.display()
@@ -121,9 +146,10 @@ pub fn shortcut_spec(exe: &Path, path: &Path) -> ShortcutSpec {
         args: String::new(),
         workdir: split_last(exe).0,
         icon: format!("{},0", exe.display()),
-        description: "Open Kora: install and manage your FiveM servers in your browser".into(),
+        description: if is_shell(exe) { "Open Kora: your FiveM servers in a window, with a tray icon".into() } else { "Open Kora: install and manage your FiveM servers in your browser".into() },
         run_as_admin: false,
-        minimized: true,
+        // The desktop app has no console window to hide.
+        minimized: !is_shell(exe),
     }
 }
 
@@ -160,7 +186,8 @@ fn runs_from(run_exe: &Path, dir: Option<&Path>) -> bool {
 
 pub fn plan_user_install(sys: &dyn Sys, ul: &UserLayout, run_exe: &Path, legacy_dir: Option<&Path>, opts: &UserOptions) -> Plan {
     let mut plan = Plan::default();
-    let exe = target_exe(ul, run_exe, legacy_dir);
+    let kora = target_exe(ul, run_exe, legacy_dir);
+    let exe = launcher_exe(sys, &kora, ul.windows);
     if runs_from(run_exe, legacy_dir) && !sys.exists(&ul.program) {
         plan.actions.push(Action::CopyExe { from: run_exe.to_path_buf(), to: ul.program.clone(), kind: CopyKind::Fresh });
         if let Some(dir) = ul.program.parent().filter(|_| ul.windows) {
@@ -192,9 +219,7 @@ pub fn plan_user_install(sys: &dyn Sys, ul: &UserLayout, run_exe: &Path, legacy_
             let content = desktop_entry_text(&exe, icon);
             match sys.read(path) {
                 Some(cur) if cur == content.as_bytes() => {}
-                Some(cur) if !String::from_utf8_lossy(&cur).contains(DESKTOP_MARKER) => {
-                    plan.notes.push(format!("{} exists and was not made by Kora; left alone.", path.display()))
-                }
+                Some(cur) if !String::from_utf8_lossy(&cur).contains(DESKTOP_MARKER) => plan.notes.push(format!("{} exists and was not made by Kora; left alone.", path.display())),
                 _ => {
                     if sys.read(icon).as_deref() != Some(LOGO_PNG) {
                         plan.actions.push(Action::WriteLogo(icon.clone()));
@@ -220,7 +245,7 @@ pub struct UserInstall {
 /// Make (or refresh) the per-user shortcuts through `sys`.
 pub fn install_user_with(sys: &mut dyn Sys, ul: &UserLayout, run_exe: &Path, legacy_dir: Option<&Path>, opts: &UserOptions) -> Result<UserInstall> {
     let plan = plan_user_install(sys, ul, run_exe, legacy_dir, opts);
-    let exe = target_exe(ul, run_exe, legacy_dir);
+    let exe = launcher_exe(sys, &target_exe(ul, run_exe, legacy_dir), ul.windows);
     let mut changes = Vec::new();
     // The shortcuts of a plan never need the old layout's state file, but `apply` wants a layout.
     let dummy = dummy_layout(ul);
@@ -390,6 +415,9 @@ pub fn install_user(opts: &UserOptions) -> Result<UserInstall> {
             // The background panel may have been set up from the old copy: it must not lose its program.
             repoint_background_panel(&l.exe, &out.exe);
         }
+        // Running from the installed program (package / MSI) while an earlier per-user copy is still there:
+        // "Finish upgrading Kora" (set it aside, drop its PATH entry, re-point the background panel).
+        let _ = crate::privsvc::migrate_os::finish_upgrade_user(false);
     }
     Ok(out)
 }

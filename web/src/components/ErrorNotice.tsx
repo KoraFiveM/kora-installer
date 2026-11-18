@@ -6,8 +6,13 @@ import { api } from '@/api/client'
 import type { ProblemAction } from '@/api/types'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { SupportBundleLink } from '@/components/SupportBundleLink'
 import { CopyButton, CopyField } from '@/components/CopyButton'
 import { actionLabel, buttonActions, detailsText, isAdminCode, runAction, toProblem, useProblemHandlers, type ActionHandlers, type NoticeProblem } from '@/lib/problemActions'
+import { t, msg, tById, locale, debugUntranslated } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/errors/errorNotice'
+import '@/i18n/en/errors/problems' // i18n-dynamic: the server names these messages by id (tById)
 
 /** Turn a command array into one line that can be pasted into a terminal. */
 export function commandLine(cmd: string[]): string {
@@ -27,11 +32,13 @@ export function toNotice(e: unknown): Notice | null {
   return p && { message: p.message, code: p.code, command: p.command, status: p.status }
 }
 
-const NO_ANSWER = 'Kora Panel did not answer. Check that it is still running on the server (`kora panel restart` restarts it), then reload this page.'
+const UNTRANSLATED_TITLE = 'This text comes from the server in English: it has no message id yet' // i18n-ignore: a translators' debug marker, English only
+const UNTRANSLATED_MARK = 'EN' // i18n-ignore: a translators' debug marker
+const NO_ANSWER = msg('errors.errorNotice.koraPanelDidAnswer')
 
 /** What to do next for a few common errors, added under the message (null = nothing to add). */
 export function nextStep(n: Notice): string | null {
-  if (n.status === 409 && n.message.includes('Another update is running')) return "Wait for it to finish, then try again. Its progress is on the server's Resources tab."
+  if (n.status === 409 && n.message.includes('Another update is running') /* i18n-ignore: the server's own English text, matched until the 409 carries a code */) return t('errors.errorNotice.waitFinishTryAgain')
   return null
 }
 
@@ -49,18 +56,12 @@ function WithCode({ text }: { text: string }) {
 /** The heading of an administrator-rights problem. */
 function adminTitle(code: string): string {
   switch (code) {
-    case 'admin.declined':
-      return 'Windows did not get permission'
-    case 'admin.timed_out':
-      return 'Nobody answered the permission prompt'
-    case 'admin.remote':
-      return 'Windows has to ask on the computer that runs Kora'
-    case 'admin.busy':
-      return 'Windows is still asking'
-    case 'admin.lost':
-      return 'The administrator part stopped'
+    case 'service.lost':
+      return t('errors.errorNotice.administratorPartStopped')
+    case 'service.not_allowed':
+      return t('errors.errorNotice.korasAdministratorServiceTurne')
     default:
-      return 'This needs administrator rights'
+      return t('errors.errorNotice.needsAdministratorRights')
   }
 }
 
@@ -76,9 +77,9 @@ function SystemCheckLink() {
   // In the install wizard the answers live on that page: the check opens beside it, so nothing typed is lost.
   const beside = window.location.pathname.startsWith('/install')
   const link = inRouter && !beside
-    ? <Link className={cls} to="/system">Open the System check</Link>
-    : <a className={cls} href="/system" {...(beside ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>Open the System check{beside ? ' in a new tab' : ''}</a>
-  return <p className="mt-2 text-xs">{link} to see what Kora needs on this computer.</p>
+    ? <Link className={cls} to="/system">{t('errors.errorNotice.openSystemCheck')}</Link>
+    : <a className={cls} href="/system" {...(beside ? { target: '_blank', rel: 'noopener noreferrer' /* i18n-ignore: an HTML token */ } : {})}>{beside ? t('errors.errorNotice.openSystemCheckNewTab') : t('errors.errorNotice.openSystemCheck')}</a>
+  return <p className="mt-2 text-xs">{rich('errors.errorNotice.linkSeeWhatKora', { link })}</p>
 }
 
 /** Errors where "Copy details" helps when nothing better is offered: real failures, not answers to a bad request. */
@@ -111,7 +112,11 @@ export function ErrorNotice({ error, title, actions, onRetry, onFixed }: {
   if (!p) return null
   const elevation = isAdminCode(p.code)
   // The request never arrived (see `request` in api/client.ts).
-  const message = p.code === 'network' ? NO_ANSWER : p.message
+  // The server names many problems by id: those are shown in the person's language. Others show the server's English text;
+  // with the translators' debug switch (localStorage kora.i18n.debug = 1) they carry an "EN" mark.
+  const known = p.i18n ? tById(p.i18n.id, p.i18n.params) : null
+  const message = p.code === 'network' ? t(NO_ANSWER) : known ?? p.message
+  const untranslated = known === null && p.code !== 'network' && locale() !== 'en' && debugUntranslated()
   const step = nextStep(p)
   const commands = p.actions.filter((a): a is Extract<ProblemAction, { kind: 'show_command' }> => a.kind === 'show_command')
   // Older answers carry the command only as `command`.
@@ -120,8 +125,10 @@ export function ErrorNotice({ error, title, actions, onRetry, onFixed }: {
   const links = p.actions.filter((a): a is Extract<ProblemAction, { kind: 'open_link' }> => a.kind === 'open_link' && a.url.startsWith('https://'))
   const log = p.actions.find((a): a is Extract<ProblemAction, { kind: 'open_log' }> => a.kind === 'open_log')
   const buttons = buttonActions(p, handlers)
-  // Windows can be asked (a "request_admin" button): the command is the last resort, folded away.
-  const canAsk = buttons.some((a) => a.kind === 'request_admin')
+  // The installer can be launched from here (an "install_admin_service" button): the command is the last resort, folded away.
+  const canAsk = buttons.some((a) => a.kind === 'install_admin_service')
+  // Without a handler that can launch the installer, say how to install the service (one administrator approval).
+  const explainInstall = p.actions.some((a) => a.kind === 'install_admin_service') && !buttons.some((a) => a.kind === 'install_admin_service')
   const fallback = buttons.length === 0 && (!!onRetry || isFailure(p))
   const copy = p.actions.some((a) => a.kind === 'copy_details') || fallback
   const run = async (a: ProblemAction) => {
@@ -134,21 +141,27 @@ export function ErrorNotice({ error, title, actions, onRetry, onFixed }: {
   }
   return (
     <Alert tone={elevation ? 'warning' : 'danger'} title={title ?? (elevation ? adminTitle(p.code) : undefined)}>
-      <p><WithCode text={message} /></p>
+      <p><WithCode text={message} />{untranslated && <span className="ml-1.5 rounded bg-amber/20 px-1 text-[10px] font-semibold text-amber" title={UNTRANSLATED_TITLE}>{UNTRANSLATED_MARK}</span>}</p>
       {step && <p className="mt-2">{step}</p>}
-      {elevation && commands.length > 0 && !canAsk && (
-        <p className="mt-2">Kora is running without administrator rights, so it cannot do this itself. Run the command below as administrator (on Windows, open a terminal with &quot;Run as administrator&quot;; on Linux, run it as root, for example with sudo), then come back here.</p>
+      {explainInstall && (
+        <div className="mt-2">
+          <p>{t('errors.errorNotice.installKorasAdministratorServi')}</p>
+          <CommandField command={['kora', 'service', 'install']} elevated />
+        </div>
+      )}
+      {elevation && commands.length > 0 && !canAsk && !explainInstall && (
+        <p className="mt-2">{t('errors.errorNotice.koraRunningWithoutAdministrato')}</p>
       )}
       {canAsk && commands.length > 0 ? (
         <details className="mt-2">
-          <summary className="cursor-pointer text-sm">Show me the command</summary>
-          <p className="mt-1 text-sm">Or do it yourself: open a terminal with &quot;Run as administrator&quot; on the computer that runs Kora, run this command, then come back here.</p>
+          <summary className="cursor-pointer text-sm">{t('errors.errorNotice.showMeCommand')}</summary>
+          <p className="mt-1 text-sm">{t('errors.errorNotice.doYourselfOpenTerminal')}</p>
           {commands.map((c, i) => <CommandField key={i} command={c.command} elevated={!!c.elevated} />)}
         </details>
       ) : commands.map((c, i) => <CommandField key={i} command={c.command} elevated={!!c.elevated} />)}
       {refusal && commands.length === 0 && (
         <div className="mt-2">
-          <CopyField value={refusal} label="Command to run" />
+          <CopyField value={refusal} label={t('errors.errorNotice.commandRun')} />
         </div>
       )}
       {links.length > 0 && (
@@ -160,8 +173,9 @@ export function ErrorNotice({ error, title, actions, onRetry, onFixed }: {
       )}
       {p.details && (
         <details className="mt-2">
-          <summary className="cursor-pointer text-xs text-muted-foreground">Show details</summary>
+          <summary className="cursor-pointer text-xs text-muted-foreground">{t('errors.errorNotice.showDetails')}</summary>
           <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-ink p-2 font-mono text-xs">{p.details}</pre>
+          {isFailure(p) && <p className="mt-1 text-xs text-muted-foreground">{rich('errors.errorNotice.stillStuckSupportbundlelinkNod', { supportBundleLink: <SupportBundleLink /> })}</p>}
         </details>
       )}
       {log && <LogBox job={log.job} path={log.path} />}
@@ -171,15 +185,15 @@ export function ErrorNotice({ error, title, actions, onRetry, onFixed }: {
           {buttons.map((a, i) => (
             <Button key={`${a.kind}-${i}`} size="sm" variant={i === 0 ? 'default' : 'secondary'} disabled={busy !== null} aria-busy={busy === a} onClick={() => void run(a)}>
               {busy === a && <Loader2 className="animate-spin" aria-hidden />}
-              {actionLabel(a, p)}
+              {actionLabel(a)}
             </Button>
           ))}
-          {fallback && onRetry && <Button size="sm" variant="default" onClick={onRetry}>Try again</Button>}
-          {copy && <CopyButton text={detailsText(p)} label="Copy details" />}
+          {fallback && onRetry && <Button size="sm" variant="default" onClick={onRetry}>{t('errors.errorNotice.tryAgain')}</Button>}
+          {copy && <CopyButton text={detailsText(p)} label={t('errors.errorNotice.copyDetails')} />}
         </div>
       )}
       {!(buttons.length > 0 || fallback) && copy && (
-        <div className="mt-3"><CopyButton text={detailsText(p)} label="Copy details" /></div>
+        <div className="mt-3"><CopyButton text={detailsText(p)} label={t('errors.errorNotice.copyDetails')} /></div>
       )}
     </Alert>
   )
@@ -189,7 +203,7 @@ export function ErrorNotice({ error, title, actions, onRetry, onFixed }: {
 function CommandField({ command, elevated }: { command: string[]; elevated: boolean }) {
   return (
     <div className="mt-2">
-      {elevated ? <ElevatedCommand command={command} /> : <CopyField value={commandLine(command)} label="Command to run" />}
+      {elevated ? <ElevatedCommand command={command} /> : <CopyField value={commandLine(command)} label={t('errors.errorNotice.commandRun')} />}
     </div>
   )
 }
@@ -197,7 +211,7 @@ function CommandField({ command, elevated }: { command: string[]; elevated: bool
 function ElevatedCommand({ command }: { command: string[] }) {
   const sys = useQuery({ queryKey: ['system'], queryFn: api.system, staleTime: 60_000 })
   const prefix = sys.data?.platform === 'linux' && command[0] !== 'sudo' ? 'sudo ' : ''
-  return <CopyField value={prefix + commandLine(command)} label="Command to run" />
+  return <CopyField value={prefix + commandLine(command)} label={t('errors.errorNotice.commandRun')} />
 }
 
 /** "Show the log": the end of a panel job's log, or where the log file is. */
@@ -213,16 +227,16 @@ function LogBox({ job, path }: { job?: string; path?: string }) {
       gone = true
     }
   }, [open, job, lines])
-  if (!job) return path ? <p className="mt-2 text-xs">The log is in <code className="font-mono">{path}</code></p> : null
+  if (!job) return path ? <p className="mt-2 text-xs">{rich('errors.errorNotice.logCodeNode', { code: <code className="font-mono">{path}</code> })}</p> : null
   return (
     <div className="mt-2">
-      <Button variant="link" size="sm" className="h-auto p-0 text-xs" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? 'Hide the log' : 'Show the log'}</Button>
+      <Button variant="link" size="sm" className="h-auto p-0 text-xs" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? t('errors.errorNotice.hideLog') : t('errors.errorNotice.showLog')}</Button>
       {open && (
         <div className="mt-1 space-y-1">
-          {lines ? <pre aria-label="Install log" className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-ink p-2 font-mono text-xs">{lines.join('\n')}</pre>
-            : failed ? <p className="text-xs">The log could not be read.</p>
-            : <p role="status" className="text-xs text-muted-foreground">Reading the log...</p>}
-          {path && <p className="text-xs">Saved in <code className="font-mono">{path}</code></p>}
+          {lines ? <pre aria-label={t('errors.errorNotice.installLog')} className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-ink p-2 font-mono text-xs">{lines.join('\n')}</pre>
+            : failed ? <p className="text-xs">{t('errors.errorNotice.logCouldRead')}</p>
+            : <p role="status" className="text-xs text-muted-foreground">{t('errors.errorNotice.readingLog')}</p>}
+          {path && <p className="text-xs">{rich('errors.errorNotice.savedCodeNode', { code: <code className="font-mono">{path}</code> })}</p>}
         </div>
       )}
     </div>

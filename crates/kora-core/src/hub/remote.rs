@@ -22,26 +22,10 @@ impl Meta {
         self.ops.iter().any(|o| o == op)
     }
     fn parse(v: &Value) -> Result<Meta, RemoteError> {
-        let api = v.get("api").and_then(Value::as_u64).ok_or_else(|| {
-            RemoteError::Invalid("That address does not look like a Kora panel.".into())
-        })?;
+        let api = v.get("api").and_then(Value::as_u64).ok_or_else(|| RemoteError::Invalid("That address does not look like a Kora panel.".into()))?;
         let text = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-        let ops = v
-            .get("ops")
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(|o| o.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-        Ok(Meta {
-            api: api as u32,
-            version: text("version"),
-            platform: text("platform"),
-            node: text("node"),
-            ops,
-        })
+        let ops = v.get("ops").and_then(Value::as_array).map(|a| a.iter().filter_map(|o| o.as_str().map(String::from)).collect()).unwrap_or_default();
+        Ok(Meta { api: api as u32, version: text("version"), platform: text("platform"), node: text("node"), ops })
     }
 }
 
@@ -54,11 +38,7 @@ pub enum RemoteError {
     /// The node is too old (or restricted) to offer this action.
     Unsupported(String),
     /// The node answered with an error status; `code` and `message` are the node's own.
-    Status {
-        status: u16,
-        code: String,
-        message: String,
-    },
+    Status { status: u16, code: String, message: String },
     /// The answer was not what a Kora panel sends.
     Invalid(String),
     /// A job on the node failed or timed out.
@@ -68,11 +48,7 @@ pub enum RemoteError {
 impl std::fmt::Display for RemoteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RemoteError::Unreachable(m)
-            | RemoteError::Unauthorized(m)
-            | RemoteError::Unsupported(m)
-            | RemoteError::Invalid(m)
-            | RemoteError::JobFailed(m) => f.write_str(m),
+            RemoteError::Unreachable(m) | RemoteError::Unauthorized(m) | RemoteError::Unsupported(m) | RemoteError::Invalid(m) | RemoteError::JobFailed(m) => f.write_str(m),
             RemoteError::Status { message, .. } => f.write_str(message),
         }
     }
@@ -102,23 +78,9 @@ impl RemoteBackend {
         }
     }
 
-    fn call(
-        &self,
-        method: &'static str,
-        path: &str,
-        body: Option<Value>,
-        auth: bool,
-    ) -> Result<Value, RemoteError> {
-        let req = HttpRequest {
-            method,
-            url: format!("{}/api/v1{path}", self.base),
-            token: auth.then(|| self.token.clone()),
-            body,
-        };
-        let r = self
-            .transport
-            .send(&req)
-            .map_err(RemoteError::Unreachable)?;
+    fn call(&self, method: &'static str, path: &str, body: Option<Value>, auth: bool) -> Result<Value, RemoteError> {
+        let req = HttpRequest { method, url: format!("{}/api/v1{path}", self.base), token: auth.then(|| self.token.clone()), body };
+        let r = self.transport.send(&req).map_err(RemoteError::Unreachable)?;
         if (200..300).contains(&r.status) {
             return Ok(r.body);
         }
@@ -138,9 +100,7 @@ impl RemoteBackend {
         }
         let m = Meta::parse(&self.call("GET", "/meta", None, false)?)?;
         if m.api < 1 {
-            return Err(RemoteError::Invalid(
-                "That address does not look like a Kora panel.".into(),
-            ));
+            return Err(RemoteError::Invalid("That address does not look like a Kora panel.".into()));
         }
         *self.meta.lock().unwrap() = Some(m.clone());
         Ok(m)
@@ -152,14 +112,7 @@ impl RemoteBackend {
         if m.supports(op) {
             Ok(m)
         } else {
-            Err(RemoteError::Unsupported(format!(
-                "That node (Kora {}) does not support this yet. Update it to use this from here.",
-                if m.version.is_empty() {
-                    "?"
-                } else {
-                    &m.version
-                }
-            )))
+            Err(RemoteError::Unsupported(format!("That node (Kora {}) does not support this yet. Update it to use this from here.", if m.version.is_empty() { "?" } else { &m.version })))
         }
     }
 
@@ -181,50 +134,23 @@ impl RemoteBackend {
 
     /// Start/stop/restart and wait for the node's job. `on_event` gets each new job event.
     /// Returns the job's result.
-    pub fn server_control(
-        &self,
-        server: &str,
-        action: &str,
-        on_event: &mut dyn FnMut(&Value),
-    ) -> Result<Value, RemoteError> {
+    pub fn server_control(&self, server: &str, action: &str, on_event: &mut dyn FnMut(&Value)) -> Result<Value, RemoteError> {
         self.require("server_control")?;
         self.require("jobs_get")?;
-        let started = self.call(
-            "POST",
-            &format!("/servers/{}/control", enc(server)),
-            Some(json!({ "action": action })),
-            true,
-        )?;
+        let started = self.call("POST", &format!("/servers/{}/control", enc(server)), Some(json!({ "action": action })), true)?;
         self.wait_job(&started, on_event)
     }
 
     /// Check for updates on a node's server (a read-only job). Returns the job's result.
-    pub fn update_preview(
-        &self,
-        server: &str,
-        scope: Value,
-        on_event: &mut dyn FnMut(&Value),
-    ) -> Result<Value, RemoteError> {
+    pub fn update_preview(&self, server: &str, scope: Value, on_event: &mut dyn FnMut(&Value)) -> Result<Value, RemoteError> {
         self.require("update_preview")?;
         self.require("jobs_get")?;
-        let started = self.call(
-            "POST",
-            &format!("/servers/{}/update/preview", enc(server)),
-            Some(scope),
-            true,
-        )?;
+        let started = self.call("POST", &format!("/servers/{}/update/preview", enc(server)), Some(scope), true)?;
         self.wait_job(&started, on_event)
     }
 
-    fn wait_job(
-        &self,
-        started: &Value,
-        on_event: &mut dyn FnMut(&Value),
-    ) -> Result<Value, RemoteError> {
-        let id = started["job"]
-            .as_str()
-            .ok_or_else(|| RemoteError::Invalid("The node did not start the job.".into()))?
-            .to_string();
+    fn wait_job(&self, started: &Value, on_event: &mut dyn FnMut(&Value)) -> Result<Value, RemoteError> {
+        let id = started["job"].as_str().ok_or_else(|| RemoteError::Invalid("The node did not start the job.".into()))?.to_string();
         let t0 = Instant::now();
         let mut seen = 0usize;
         loop {
@@ -239,18 +165,13 @@ impl RemoteBackend {
                 Some("done") => return Ok(job["result"].clone()),
                 Some("failed") => {
                     let e = &job["error"];
-                    let msg = e["message"]
-                        .as_str()
-                        .or_else(|| e.as_str())
-                        .unwrap_or("The job failed on the node.");
+                    let msg = e["message"].as_str().or_else(|| e.as_str()).unwrap_or("The job failed on the node.");
                     return Err(RemoteError::JobFailed(msg.to_string()));
                 }
                 _ => {}
             }
             if t0.elapsed() > self.job_timeout {
-                return Err(RemoteError::JobFailed(
-                    "The node is taking too long; check it directly.".into(),
-                ));
+                return Err(RemoteError::JobFailed("The node is taking too long; check it directly.".into()));
             }
             std::thread::sleep(self.poll_every);
         }
@@ -280,34 +201,20 @@ mod tests {
         fn send(&self, r: &HttpRequest) -> Result<HttpResponse, String> {
             self.1.lock().unwrap().push(r.clone());
             let q = self.0.lock().unwrap();
-            let i = q
-                .iter()
-                .position(|(u, _)| r.url.ends_with(u.as_str()))
-                .ok_or("no route")?;
+            let i = q.iter().position(|(u, _)| r.url.ends_with(u.as_str())).ok_or("no route")?;
             Ok(q[i].1.clone())
         }
     }
     fn ok(v: Value) -> HttpResponse {
-        HttpResponse {
-            status: 200,
-            body: v,
-        }
+        HttpResponse { status: 200, body: v }
     }
 
     #[test]
     fn skew_refuses_unknown_ops_and_sends_token_only_when_needed() {
         let f = Arc::new(Fake(
             Mutex::new(vec![
-                (
-                    "/api/v1/meta".into(),
-                    ok(
-                        json!({"api":1,"version":"0.3.9","ops":["meta","servers_list"],"future":true}),
-                    ),
-                ),
-                (
-                    "/api/v1/servers".into(),
-                    ok(json!({"servers":[{"name":"a"}]})),
-                ),
+                ("/api/v1/meta".into(), ok(json!({"api":1,"version":"0.3.9","ops":["meta","servers_list"],"future":true}))),
+                ("/api/v1/servers".into(), ok(json!({"servers":[{"name":"a"}]}))),
             ]),
             Mutex::default(),
         ));

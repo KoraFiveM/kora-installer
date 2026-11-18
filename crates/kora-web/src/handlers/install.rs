@@ -12,24 +12,21 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::response::Response;
 use axum::{Extension, Json};
-use kora_core::api::install::{
-    self as core, InstallEnv, SystemInstallEnv, WireDbAdmin, WireInstall,
-};
+use kora_core::api::install::{self as core, InstallEnv, SystemInstallEnv, WireDbAdmin, WireInstall};
 use kora_core::api::Op;
 use kora_core::installer::paused::PausedStore;
-use kora_core::installer::{slug, InstallRequest, Mode};
+use kora_core::installer::{slug, InstallRequest};
 use kora_core::keystore::KeyStore;
 use kora_core::problem::{codes, Action, Problem};
 use kora_core::profile::ProfileStore;
 use serde_json::{json, Value};
 
-use crate::elevated::{AdminAsk, WorkerAdmin};
+use crate::elevated::ServiceAdmin;
 use crate::remote::Caller;
 use crate::{blocking, ApiError, AppState};
-use kora_core::helper::worker;
 use kora_core::installer::system_ops::SharedAdmin;
 
 static ENV: RwLock<Option<Arc<dyn InstallEnv>>> = RwLock::new(None);
@@ -41,36 +38,22 @@ pub fn set_env(e: Option<Arc<dyn InstallEnv>>) {
 
 /// The machine seam in use.
 pub fn env() -> Arc<dyn InstallEnv> {
-    ENV.read()
-        .unwrap_or_else(|p| p.into_inner())
-        .clone()
-        .unwrap_or_else(|| Arc::new(SystemInstallEnv))
+    ENV.read().unwrap_or_else(|p| p.into_inner()).clone().unwrap_or_else(|| Arc::new(SystemInstallEnv))
 }
 
 fn parse<T: for<'de> serde::Deserialize<'de>>(v: Value) -> Result<T, ApiError> {
-    serde_json::from_value(v).map_err(|_| {
-        ApiError::bad_request("That request was not understood. Reload the page and try again.")
-    })
+    serde_json::from_value(v).map_err(|_| ApiError::bad_request("That request was not understood. Reload the page and try again."))
 }
 
 fn port_of(v: &Value, key: &str, label: &str) -> Result<u16, ApiError> {
-    v.get(key)
-        .and_then(Value::as_u64)
-        .and_then(|n| u16::try_from(n).ok())
-        .ok_or_else(|| {
-            ApiError::bad_request(format!(
-                "The {label} port must be a number between 1024 and 65535."
-            ))
-        })
+    v.get(key).and_then(Value::as_u64).and_then(|n| u16::try_from(n).ok()).ok_or_else(|| ApiError::bad_request(format!("The {label} port must be a number between 1024 and 65535.")))
 }
 
 /// `GET /artifacts` → `{recommended, items: [{build, url}]}` (builds known to be broken are left out).
 pub async fn artifacts_list() -> Result<Json<Value>, ApiError> {
     let e = env();
     let list = blocking(move || {
-        e.artifacts().map_err(|m| {
-            ApiError::new(StatusCode::BAD_GATEWAY, "internal", format!("Could not read the list of FiveM server builds ({m}). Check your internet connection and try again."))
-        })
+        e.artifacts().map_err(|m| ApiError::new(StatusCode::BAD_GATEWAY, "internal", format!("Could not read the list of FiveM server builds ({m}). Check your internet connection and try again.")))
     })
     .await?;
     Ok(Json(core::artifacts_json(&list)))
@@ -84,7 +67,7 @@ pub async fn install_defaults(State(st): State<AppState>) -> Result<Json<Value>,
         let mut v = core::defaults(&*e, &servers);
         // What Kora remembers (never secret): the wizard pre-fills these, still editable.
         let p = ProfileStore::default().load();
-        v["profile"] = json!({"cfx_username": p.cfx_username, "cfx_identifier": p.cfx_identifier, "github_owner": p.github_owner});
+        v["profile"] = serde_json::to_value(super::keys::profile_view(&p)).unwrap_or(Value::Null);
         // Saved answers that name a saved key which is gone: say so instead of silently picking nothing.
         if let Some(n) = v["saved"]["license_key_name"].as_str().map(String::from) {
             if !KeyStore::default().exists(&n).unwrap_or(true) {
@@ -112,14 +95,8 @@ pub async fn install_saved_clear() -> Result<StatusCode, ApiError> {
 }
 
 /// `POST /checks/ports` `{game, txadmin}` → `{game: {port, ok, text, suggestion}, txadmin: {...}}`.
-pub async fn check_ports(
-    State(st): State<AppState>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
-    let (game, tx) = (
-        port_of(&body, "game", "game")?,
-        port_of(&body, "txadmin", "txAdmin")?,
-    );
+pub async fn check_ports(State(st): State<AppState>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+    let (game, tx) = (port_of(&body, "game", "game")?, port_of(&body, "txadmin", "txAdmin")?);
     let e = env();
     let v = blocking(move || {
         let servers = st.backend().list().map_err(ApiError::internal)?;
@@ -132,21 +109,12 @@ pub async fn check_ports(
 
 /// `POST /checks/disk` `{dir}` → `{ok, free_bytes, needed_bytes, message}`.
 pub async fn check_disk(Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
-    let dir = body
-        .get("dir")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .unwrap_or_default()
-        .to_string();
+    let dir = body.get("dir").and_then(Value::as_str).map(str::trim).unwrap_or_default().to_string();
     if dir.is_empty() {
-        return Err(ApiError::bad_request(
-            "Choose a folder for the server first.",
-        ));
+        return Err(ApiError::bad_request("Choose a folder for the server first."));
     }
     let e = env();
-    let v =
-        blocking(move || Ok(core::disk_check(e.disk(), std::path::Path::new(&dir), None).json()))
-            .await?;
+    let v = blocking(move || Ok(core::disk_check(e.disk(), std::path::Path::new(&dir), None).json())).await?;
     Ok(Json(v))
 }
 
@@ -158,9 +126,7 @@ pub async fn check_db_login(Json(body): Json<Value>) -> Result<Json<Value>, ApiE
         Some(a) => Some(parse::<WireDbAdmin>(a.clone())?.to_admin()),
     };
     if let Some(a) = &admin {
-        kora_core::db::validate_host(&a.host).map_err(|_| {
-            ApiError::bad_request("That database server address does not look right.")
-        })?;
+        kora_core::db::validate_host(&a.host).map_err(|_| ApiError::bad_request("That database server address does not look right."))?;
     }
     let e = env();
     let automatic = admin.is_none();
@@ -173,7 +139,7 @@ pub async fn check_db_login(Json(body): Json<Value>) -> Result<Json<Value>, ApiE
                 // "start it for me" button (`problem`, shown by the wizard).
                 let db = if local { super::toolchain::env().database() } else { Default::default() };
                 let problem = (db.installed && !db.running).then(|| kora_core::problem::known::db_stopped(db.name.as_deref().unwrap_or("the database")).to_json());
-                json!({"ok": false, "message": m, "problem": problem})
+                json!({"ok": false, "message": m.message, "problem": problem})
             }
         })
     })
@@ -194,10 +160,11 @@ pub async fn check_cfx(Json(body): Json<Value>) -> Result<Json<Value>, ApiError>
             Ok(a) => {
                 ProfileStore::default().remember_cfx(&a.username, &a.identifier());
                 json!({
-                "ok": true, "id": a.id, "username": a.username, "identifier": a.identifier(),
-                "message": format!("Found {} (fivem:{}). This account will be the txAdmin admin.", a.username, a.id),
-            })},
-            Err(m) => json!({"ok": false, "id": null, "username": null, "identifier": null, "message": m}),
+                    "ok": true, "id": a.id, "username": a.username, "identifier": a.identifier(),
+                    "message": format!("Found {} (fivem:{}). This account will be the txAdmin admin.", a.username, a.id),
+                })
+            }
+            Err(m) => json!({"ok": false, "id": null, "username": null, "identifier": null, "message": m.message}),
         })
     })
     .await?;
@@ -206,10 +173,7 @@ pub async fn check_cfx(Json(body): Json<Value>) -> Result<Json<Value>, ApiError>
 
 /// `POST /installs/plan`: the same checks as starting, nothing changed, no secrets in the answer.
 /// → `{summary, steps, needs_admin, elevated, disk, warnings, notes}`.
-pub async fn install_plan(
-    State(st): State<AppState>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn install_plan(State(st): State<AppState>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
     let wire: WireInstall = parse(body)?;
     let e = env();
     let v = blocking(move || {
@@ -221,31 +185,32 @@ pub async fn install_plan(
             }
         }
         let servers = st.backend().list().map_err(ApiError::internal)?;
-        Ok(with_admin_prompt(core::plan(&*e, &req, &servers), crate::elevated::worker_supported()))
+        Ok(with_admin_service(core::plan(&*e, &req, &servers)))
     })
     .await?;
     Ok(Json(v))
 }
 
-/// What Windows will do, said up front: `admin_prompt` is true when this install needs
-/// administrator rights and Windows will ask for them once, when it starts (the panel's worker).
-pub const ADMIN_PROMPT_NOTE: &str = "Windows will ask you once for permission when the install starts: choose Yes. Kora does everything else as you.";
+/// What the person is told up front when the install needs administrator rights: `admin_service` is the state
+/// of Kora's administrator service for this account (`ready`: it does those parts by itself, with nothing to
+/// approve; `missing` / `not_allowed`: the choices the wizard shows).
+pub const ADMIN_SERVICE_NOTE: &str = "Kora's administrator service does the parts that need administrator rights. There is nothing to approve. Kora does everything else as you.";
 
-fn with_admin_prompt(mut v: Value, worker: bool) -> Value {
+fn with_admin_service(mut v: Value) -> Value {
+    let state = crate::elevated::service_state()["state"].clone();
     let needs = v["needs_admin"].as_array().is_some_and(|a| !a.is_empty());
-    let prompt = worker && needs && v["elevated"] != json!(true);
-    v["admin_prompt"] = json!(prompt);
-    if prompt {
+    if state == json!("ready") && needs && v["elevated"] != json!(true) {
         for key in ["warnings", "notes"] {
             if let Some(list) = v[key].as_array_mut() {
                 for w in list.iter_mut() {
                     if w.as_str().is_some_and(|s| s.starts_with("Some of this needs administrator rights")) {
-                        *w = json!(ADMIN_PROMPT_NOTE);
+                        *w = json!(ADMIN_SERVICE_NOTE);
                     }
                 }
             }
         }
     }
+    v["admin_service"] = state;
     v
 }
 
@@ -298,10 +263,7 @@ fn log_push(job: &str, line: String) {
 
 fn log_finish(job: &str, path: Option<PathBuf>) {
     // The file also holds the error text, so prefer it once it exists.
-    let from_file = path
-        .as_ref()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .map(|t| t.lines().map(String::from).collect::<Vec<_>>());
+    let from_file = path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| t.lines().map(String::from).collect::<Vec<_>>());
     with_logs(|l| {
         if let Some(e) = l.by_job.get_mut(job) {
             e.path = path;
@@ -313,11 +275,7 @@ fn log_finish(job: &str, path: Option<PathBuf>) {
 }
 
 /// `GET /installs/{job}/log` → `{path, lines}` (the end of the log; `path` is empty until the log is written).
-pub async fn install_log(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    Path(job): Path<String>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn install_log(State(st): State<AppState>, Extension(caller): Extension<Caller>, Path(job): Path<String>) -> Result<Json<Value>, ApiError> {
     // The log belongs to the install job: a remote caller needs the role that job needs.
     if caller.remote {
         crate::jobs::may_read(&caller, st.jobs.op(&job))?;
@@ -408,90 +366,42 @@ fn finished_events(events: &[Value]) -> Vec<Value> {
     let mut last: Vec<(String, Value)> = Vec::new();
     for ev in events {
         let Some(step) = ev.get("step").and_then(Value::as_str) else { continue };
-        // "Administrator permission" belongs to one run: a resumed run asks again when it needs to.
-        if step == ADMIN_STEP {
-            continue;
-        }
         last.retain(|(s, _)| s != step);
         last.push((step.to_string(), ev.clone()));
     }
-    last.into_iter()
-        .filter(|(_, ev)| matches!(ev.get("status").and_then(Value::as_str), Some("done" | "skipped")))
-        .map(|(_, ev)| ev)
-        .collect()
+    last.into_iter().filter(|(_, ev)| matches!(ev.get("status").and_then(Value::as_str), Some("done" | "skipped"))).map(|(_, ev)| ev).collect()
 }
 
 /// The job error of a stopped install: the Problem (`code`, `message`, `details`, `actions`) plus
 /// `kept`, `log_path`, `failed_step` and `resume: true` (`POST /installs/{job}/resume` works).
-fn stopped_error(job: &str, problem: Problem, kept: &[String], log_path: Option<&std::path::Path>, failed_step: Option<&str>) -> String {
+fn stopped_error(job: &str, problem: Problem, kept: &[String], log_path: Option<&std::path::Path>, failed_step: Option<&str>) -> kora_core::api::JobFailure {
     let path = log_path.map(|p| p.to_string_lossy().into_owned());
     let problem = problem.with_action(Action::OpenLog { job: Some(job.to_string()), path: path.clone() });
-    let mut err = problem.to_json();
-    err["kept"] = json!(kept);
-    err["resume"] = json!(true);
+    let mut err = kora_core::api::JobFailure::new(problem).with("kept", json!(kept)).with("resume", json!(true));
     if let Some(p) = path {
-        err["log_path"] = json!(p);
+        err = err.with("log_path", json!(p));
     }
     if let Some(s) = failed_step {
-        err["failed_step"] = json!(s);
+        err = err.with("failed_step", json!(s));
     }
-    err.to_string()
+    err
 }
-
-/// The install runs in the privileged helper as `kora install ...` (the same command the user would
-/// have been asked to run). The licence key and the database admin password go in the environment, never
-/// on the command. The helper's output lines become job events and go in the install log.
-/// A failure can be retried (the helper's install continues where it stopped), not skipped: the
-/// helper's install state belongs to the administrator account.
-fn install_via_helper(h: &kora_core::api::JobHandle, id: &str, req: &InstallRequest) -> Result<Value, String> {
-    let env = crate::elevated::secret_env(req.license_key.as_deref(), req.db_admin.as_ref().and_then(|a| a.password.as_deref()));
-    let r = crate::elevated::privileged(core::install_command(req), env, &mut |line| {
-        h.event(json!({"type": "status", "message": line}));
-        log_push(id, line.to_string());
-    });
-    log_finish(id, None);
-    match r {
-        Ok(_) => Ok(json!({
-            "name": req.name,
-            "dir": req.dir,
-            "txadmin_url": format!("http://127.0.0.1:{}", req.ports.txadmin),
-            "notes": ["Installed by the Kora helper."],
-        })),
-        Err(e) => {
-            let mut p = e.to_problem();
-            if p.code == "bad_request" || p.code == "internal" {
-                p.code = kora_core::problem::codes::FAILED.to_string();
-            }
-            let p = p.with_action(Action::Retry).with_action(Action::ChangeAnswers { section: None });
-            pause(id, Paused { req: req.clone(), via_helper: true, windows_admin: false, failed_step: None, finished: vec![], at: Instant::now() });
-            Err(stopped_error(id, p, &[], None, None))
-        }
-    }
-}
-
-/// The progress row of "Windows is asking for permission" (not an installer step).
-pub const ADMIN_STEP: &str = "admin";
 
 /// How an install gets its administrator rights.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AdminMode {
     /// It needs none, it has them, or the person chose to go on without them.
     None,
-    /// Linux: the whole install runs in the privileged helper.
-    Helper,
-    /// Windows: the person's own install, with its administrator steps done by the elevated
-    /// worker. `eager`: ask before the first step (a new install), else when a step needs it.
-    Worker { ask: AdminAsk, eager: bool },
+    /// The person's own install, with its administrator steps done by the administrator service
+    /// (each step is one request, no prompt). `eager`: check the service is there before the first step
+    /// (a new install), so a missing service is reported at the start with the choices.
+    Service { eager: bool },
 }
 
-/// What the person reads when Windows did not give permission, and what they can do.
-fn admin_context(req: &InstallRequest, reasons: &[String]) -> worker::Context {
+/// What the person reads when the administrator service cannot do the administrator parts, and what they can do.
+fn admin_context(req: &InstallRequest, reasons: &[String]) -> kora_core::privsvc::problems::Context {
     let what = if reasons.is_empty() { "do the parts of this install that need administrator rights".to_string() } else { kora_core::elevate::join_reasons(reasons) };
-    worker::Context { what, command: core::install_command(req), can_skip_admin: true }
-}
-
-fn admin_event(status: &str, detail: &str) -> Value {
-    json!({"step": ADMIN_STEP, "title": "Administrator permission", "status": status, "detail": detail, "percent": 0})
+    kora_core::privsvc::problems::Context { what, command: core::install_command(req), can_skip_admin: true }
 }
 
 /// Start the install job (a first run, or a resumed one that replays `finished` first).
@@ -503,30 +413,27 @@ fn spawn_install(st: &AppState, e: Arc<dyn InstallEnv>, req: InstallRequest, mod
         for ev in &finished {
             h.event(ev.clone());
         }
-        if mode == AdminMode::Helper {
-            return install_via_helper(h, &id, &req);
+        // Written down (without any secret, and only when the key is a SAVED one) so that a panel that dies
+        // mid-install leaves something to carry on from; see `PausedStore::save_in_progress`.
+        if !req.dry_run {
+            let _ = PausedStore::default().save_in_progress(&id, &req, false, &finished);
         }
-        let windows_admin = matches!(mode, AdminMode::Worker { .. });
+        let service_admin = matches!(mode, AdminMode::Service { .. });
         let admin = match mode {
-            AdminMode::Worker { ask, eager } => {
-                let wa = WorkerAdmin::new(ask, admin_context(&req, &e.admin_reasons(&req)));
+            AdminMode::Service { eager } => {
+                let sa = ServiceAdmin::new(admin_context(&req, &e.admin_reasons(&req)));
                 if eager {
-                    h.event(admin_event("running", "Windows is asking for permission on the computer that runs Kora. Choose Yes to carry on. If you do not see the prompt, look for a flashing shield icon in the taskbar."));
-                    log_push(&id, "Asking Windows for administrator permission".into());
-                    if let Err(p) = wa.open() {
-                        h.event(admin_event("failed", &p.message));
-                        log_push(&id, format!("Administrator permission: {}", p.message));
+                    if let Err(p) = sa.open() {
+                        log_push(&id, format!("Administrator service: {}", p.message));
                         log_finish(&id, None);
                         let p = p.with_action(Action::ChangeAnswers { section: None });
-                        pause(&id, Paused { req: req.clone(), via_helper: false, windows_admin, failed_step: None, finished: finished.clone(), at: Instant::now() });
+                        pause(&id, Paused { req: req.clone(), via_helper: false, windows_admin: service_admin, failed_step: None, finished: finished.clone(), at: Instant::now() });
                         return Err(stopped_error(&id, p, &[], None, None));
                     }
-                    h.event(admin_event("done", "Permission given: Kora does the administrator steps when the install reaches them"));
-                    log_push(&id, "Administrator permission given".into());
                 }
-                Some(SharedAdmin(Arc::new(wa)))
+                Some(SharedAdmin(Arc::new(sa)))
             }
-            _ => None,
+            AdminMode::None => None,
         };
         let mut events: Vec<Value> = finished.clone();
         let fin = core::run_install_with(&*e, &req, admin, |ev| {
@@ -537,11 +444,17 @@ fn spawn_install(st: &AppState, e: Arc<dyn InstallEnv>, req: InstallRequest, mod
         });
         log_finish(&id, fin.log_path.clone());
         match fin.outcome {
-            Ok(out) => Ok(core::outcome_json(&out)),
+            Ok(out) => {
+                PausedStore::default().remove(&id);
+                Ok(core::outcome_json(&out))
+            }
             Err(msg) => {
-                let problem = fin.problem.unwrap_or_else(|| Problem::decode(&msg));
+                let problem = fin.problem.unwrap_or_else(|| msg.clone());
                 if !req.dry_run {
-                    pause(&id, Paused { req: req.clone(), via_helper: false, windows_admin, failed_step: fin.failed_step.clone(), finished: finished_events(&events), at: Instant::now() });
+                    pause(
+                        &id,
+                        Paused { req: req.clone(), via_helper: false, windows_admin: service_admin, failed_step: fin.failed_step.clone(), finished: finished_events(&events), at: Instant::now() },
+                    );
                 }
                 Err(stopped_error(&id, problem, &fin.kept, fin.log_path.as_deref(), fin.failed_step.as_deref()))
             }
@@ -558,13 +471,7 @@ fn spawn_install(st: &AppState, e: Arc<dyn InstallEnv>, req: InstallRequest, mod
 /// Problem's fields (`code`, `message`, `details`, `actions`) plus `kept`, `log_path`,
 /// `failed_step` and `resume` (see [`install_resume`]). Without administrator rights for what the
 /// install needs: `needs_elevation` with the `kora install ...` command (no secrets on it).
-pub async fn install_start(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<Response, ApiError> {
-    let ask = AdminAsk::of(&caller, &headers);
+pub async fn install_start(State(st): State<AppState>, Extension(caller): Extension<Caller>, Json(body): Json<Value>) -> Result<Response, ApiError> {
     let wire: WireInstall = parse(body)?;
     // Pasting a new key (or saving one) is for admins; every role that may install can pick a saved key.
     if wire.license_key.as_deref().is_some_and(|k| !k.trim().is_empty()) || wire.save_license_key_as.is_some() {
@@ -596,15 +503,14 @@ pub async fn install_start(
         }
         let servers = st2.backend().list().map_err(ApiError::internal)?;
         if servers.iter().any(|s| slug(&s.name) == slug(&req.name) || s.dir == req.dir) {
-            return Err(ApiError::conflict(format!("A server called '{}' (or in that folder) already exists. Choose another name or folder.", req.name))
-                .with_action(Action::change_answers("name")));
+            return Err(ApiError::conflict(format!("A server called '{}' (or in that folder) already exists. Choose another name or folder.", req.name)).with_action(Action::change_answers("name")));
         }
-        if req.mode == Mode::Development {
-            let owner = super::github::env().resolve_owner(req.github_owner.as_deref()).map_err(|m| {
-                if Problem::is_encoded(&m) {
-                    ApiError::core(m)
+        if req.source() == kora_core::installer::Source::Fork {
+            let owner = super::github::env().resolve_owner(req.github_owner.as_deref()).map_err(|p| {
+                if p.code != codes::FAILED || p.details.is_some() || !p.actions.is_empty() {
+                    ApiError::core(p)
                 } else {
-                    ApiError::bad_request(m).with_action(Action::change_answers("github"))
+                    ApiError::bad_request(p).with_action(Action::change_answers("github"))
                 }
             })?;
             ProfileStore::default().remember_github_owner(&owner);
@@ -612,8 +518,7 @@ pub async fn install_start(
         }
         if !core::already_installed(&req) {
             let avoid = core::avoid_ports(&servers, &req.name, Some(&req.dir));
-            core::settle_ports(&mut req, false, e2.prober(), &avoid)
-                .map_err(|m| ApiError::conflict(format!("{m} Go back and pick other ports.")).with_action(Action::change_answers("ports")))?;
+            core::settle_ports(&mut req, false, e2.prober(), &avoid).map_err(|m| ApiError::conflict(format!("{m} Go back and pick other ports.")).with_action(Action::change_answers("ports")))?;
         }
         // The person chose to save a pasted key: it is kept under that name (an already saved key is just
         // reused, saying nothing twice). From here on the install can be written down without the key.
@@ -630,13 +535,11 @@ pub async fn install_start(
         }
         let reasons = e2.admin_reasons(&req);
         if !reasons.is_empty() && !e2.is_elevated() {
-            // Windows: one permission prompt when the install starts (not for a remote session
-            // unless the person asked). Linux: the helper when installed, otherwise the command.
-            crate::elevated::precheck(ask, &admin_context(&req, &reasons), &core::elevation_message(&req, &reasons))?;
-            if crate::elevated::worker_supported() {
-                return Ok((req, AdminMode::Worker { ask, eager: true }));
-            }
-            return Ok((req, AdminMode::Helper));
+            // With the administrator service its steps just happen (no prompt, local or remote); Windows
+            // still shows one prompt when the install starts (not for a remote session unless asked).
+            // Without the service the answer carries the choices: install it, continue without, the command.
+            crate::elevated::precheck(&admin_context(&req, &reasons), &core::elevation_message(&req, &reasons))?;
+            return Ok((req, AdminMode::Service { eager: true }));
         }
         Ok((req, AdminMode::None))
     })
@@ -653,14 +556,7 @@ pub async fn install_start(
 /// [`Paused`]). Without `skip` the failed step runs again; with it, that step is skipped first
 /// (only steps that are safe to skip, see `kora_core::installer::SKIPPABLE`). Answers `202 {job}`:
 /// a new job, which first replays the steps that had finished.
-pub async fn install_resume(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    headers: HeaderMap,
-    Path(job): Path<String>,
-    Json(body): Json<Value>,
-) -> Result<Response, ApiError> {
-    let ask = AdminAsk::of(&caller, &headers);
+pub async fn install_resume(State(st): State<AppState>, Path(job): Path<String>, Json(body): Json<Value>) -> Result<Response, ApiError> {
     let without_admin = match body.get("without_admin") {
         None | Some(Value::Null) => false,
         Some(Value::Bool(b)) => *b,
@@ -685,7 +581,7 @@ pub async fn install_resume(
                     req.license_key = Some(KeyStore::default().get(&n).map_err(super::keys::api)?);
                 }
                 // Not written down: on Windows its administrator steps go to the worker again (asked when needed).
-                let windows_admin = crate::elevated::worker_supported() && !s.via_helper;
+                let windows_admin = crate::elevated::service_ready();
                 Ok(Some(Paused { req, via_helper: s.via_helper, windows_admin, failed_step: s.failed_step, finished: s.finished, at: Instant::now() }))
             })
             .await?
@@ -704,26 +600,9 @@ pub async fn install_resume(
     let e = env();
     let id = job.clone();
     let (paused, e) = blocking(move || {
-        if without_admin && paused.via_helper {
-            let p = Problem::new(codes::INSTALL_CANNOT_RESUME, "This install runs with administrator rights, so it cannot carry on without them from here. Change your answers instead.")
-                .with_action(Action::ChangeAnswers { section: None });
-            pause(&id, paused);
-            return Err(ApiError::problem(StatusCode::CONFLICT, p));
-        }
-        // A remote session does not make Windows ask on a desktop nobody may be watching.
-        if paused.windows_admin && !without_admin && !crate::elevated::may_prompt(ask) {
-            let p = kora_core::helper::worker::remote_problem(&admin_context(&paused.req, &e.admin_reasons(&paused.req)));
-            pause(&id, paused);
-            return Err(crate::elevated::admin_error(p));
-        }
         if let Some(step) = &skip {
-            let refused = if paused.via_helper {
-                Some(Problem::new(codes::INSTALL_CANNOT_RESUME, "This install ran with administrator rights, so its steps cannot be skipped from here. Try it again, or change your answers.")
-                    .with_action(Action::Retry)
-                    .with_action(Action::ChangeAnswers { section: None }))
-            } else if paused.failed_step.as_deref() != Some(step.as_str()) {
-                Some(Problem::new(codes::INSTALL_CANNOT_RESUME, "Only the step that failed can be skipped. Try it again, or change your answers.")
-                    .with_action(Action::ChangeAnswers { section: None }))
+            let refused = if paused.failed_step.as_deref() != Some(step.as_str()) {
+                Some(Problem::new(codes::INSTALL_CANNOT_RESUME, "Only the step that failed can be skipped. Try it again, or change your answers.").with_action(Action::ChangeAnswers { section: None }))
             } else {
                 e.skip_step(&paused.req, step).err()
             };
@@ -740,10 +619,8 @@ pub async fn install_resume(
     let again = Paused { req: req.clone(), via_helper, windows_admin, failed_step, finished: finished.clone(), at: Instant::now() };
     let (req, mode) = if without_admin {
         (core::without_admin(&req), AdminMode::None)
-    } else if via_helper {
-        (req, AdminMode::Helper)
     } else if windows_admin {
-        (req, AdminMode::Worker { ask, eager: false })
+        (req, AdminMode::Service { eager: false })
     } else {
         (req, AdminMode::None)
     };

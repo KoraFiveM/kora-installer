@@ -52,11 +52,7 @@ pub struct CommandSpec {
 
 impl CommandSpec {
     pub fn new(program: &str, args: &[&str]) -> Self {
-        Self {
-            program: program.into(),
-            args: args.iter().map(|s| s.to_string()).collect(),
-            ..Self::default()
-        }
+        Self { program: program.into(), args: args.iter().map(|s| s.to_string()).collect(), ..Self::default() }
     }
     /// Human readable, redacted command line.
     pub fn display(&self) -> String {
@@ -108,25 +104,16 @@ impl CommandRunner for SystemRunner {
         use std::io::Write;
         use std::process::Stdio;
         let mut cmd = crate::sysexe::command(&spec.program);
-        cmd.args(&spec.args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(if spec.stdin.is_some() { Stdio::piped() } else { Stdio::null() });
+        cmd.args(&spec.args).stdout(Stdio::piped()).stderr(Stdio::piped()).stdin(if spec.stdin.is_some() { Stdio::piped() } else { Stdio::null() });
         for (k, v) in &spec.env {
             cmd.env(k, v);
         }
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| DbError::Command(format!("{}: {e}", spec.program)))?;
+        let mut child = cmd.spawn().map_err(|e| DbError::Command(format!("{}: {e}", spec.program)))?;
         if let (Some(input), Some(mut stdin)) = (&spec.stdin, child.stdin.take()) {
             stdin.write_all(input.as_bytes())?;
         }
         let out = child.wait_with_output()?;
-        Ok(CommandOutput {
-            status: out.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-        })
+        Ok(CommandOutput { status: out.status.code().unwrap_or(-1), stdout: String::from_utf8_lossy(&out.stdout).into_owned(), stderr: String::from_utf8_lossy(&out.stderr).into_owned() })
     }
 }
 
@@ -205,29 +192,17 @@ pub fn detect(runner: &dyn CommandRunner, os: Os) -> DbResult<Vec<DetectedServic
 fn detect_linux(runner: &dyn CommandRunner) -> DbResult<Vec<DetectedService>> {
     let mut found = Vec::new();
     for unit in ["mariadb", "mysql", "mysqld"] {
-        let listed = runner.run(&CommandSpec::new(
-            "systemctl",
-            &["list-unit-files", &format!("{unit}.service"), "--no-legend"],
-        ))?;
+        let listed = runner.run(&CommandSpec::new("systemctl", &["list-unit-files", &format!("{unit}.service"), "--no-legend"]))?;
         if !listed.ok() || listed.stdout.trim().is_empty() {
             continue;
         }
         let active = runner.run(&CommandSpec::new("systemctl", &["is-active", unit]))?;
         let running = active.stdout.trim() == "active";
-        let mut svc = DetectedService {
-            name: unit.into(),
-            running,
-            version: None,
-            port: DEFAULT_PORT,
-            socket: Some(DEFAULT_SOCKET.into()),
-        };
+        let mut svc = DetectedService { name: unit.into(), running, version: None, port: DEFAULT_PORT, socket: Some(DEFAULT_SOCKET.into()) };
         if running {
             // Best effort: needs socket auth (root) to succeed.
             let client = if unit == "mariadb" { "mariadb" } else { "mysql" };
-            let q = CommandSpec::new(
-                client,
-                &["-N", "-B", "-e", "SELECT @@version, @@port, IFNULL(@@socket,'')"],
-            );
+            let q = CommandSpec::new(client, &["-N", "-B", "-e", "SELECT @@version, @@port, IFNULL(@@socket,'')"]);
             if let Ok(out) = runner.run(&q) {
                 if out.ok() {
                     apply_query_info(&mut svc, &out.stdout);
@@ -261,11 +236,7 @@ fn apply_query_info(svc: &mut DetectedService, out: &str) {
 /// Extract a version like `10.11.6` from `--version` output.
 pub fn parse_version(s: &str) -> Option<String> {
     let after = s.split("Ver ").nth(1).unwrap_or(s);
-    let tok: String = after
-        .trim_start()
-        .chars()
-        .take_while(|c| c.is_ascii_digit() || *c == '.')
-        .collect();
+    let tok: String = after.trim_start().chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
     (tok.contains('.') && !tok.starts_with('.')).then_some(tok.trim_end_matches('.').to_string())
 }
 
@@ -288,18 +259,8 @@ pub fn parse_windows_services(text: &str) -> Vec<DetectedService> {
             if name.is_empty() {
                 return None;
             }
-            let port = path
-                .split_whitespace()
-                .find_map(|a| a.strip_prefix("--port="))
-                .and_then(|p| p.parse().ok())
-                .unwrap_or(DEFAULT_PORT);
-            Some(DetectedService {
-                name: name.into(),
-                running: state.eq_ignore_ascii_case("running"),
-                version: None,
-                port,
-                socket: None,
-            })
+            let port = path.split_whitespace().find_map(|a| a.strip_prefix("--port=")).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
+            Some(DetectedService { name: name.into(), running: state.eq_ignore_ascii_case("running"), version: None, port, socket: None })
         })
         .collect()
 }
@@ -355,10 +316,7 @@ pub fn generate_name(taken: &HashSet<String>) -> DbResult<String> {
 
 /// Strict identifier check: `[A-Za-z0-9_]{1,64}`, not purely numeric.
 pub fn validate_identifier(name: &str) -> DbResult<&str> {
-    let ok = !name.is_empty()
-        && name.len() <= MAX_IDENT
-        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-        && !name.bytes().all(|b| b.is_ascii_digit());
+    let ok = !name.is_empty() && name.len() <= MAX_IDENT && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') && !name.bytes().all(|b| b.is_ascii_digit());
     if ok {
         Ok(name)
     } else {
@@ -392,9 +350,7 @@ pub fn quote_string(s: &str) -> DbResult<String> {
 
 /// Account host part: `%`, an IPv4/hostname made of `[A-Za-z0-9.%_-]`.
 pub fn validate_host(host: &str) -> DbResult<&str> {
-    let ok = !host.is_empty()
-        && host.len() <= 60
-        && host.bytes().all(|b| b.is_ascii_alphanumeric() || b".%_-".contains(&b));
+    let ok = !host.is_empty() && host.len() <= 60 && host.bytes().all(|b| b.is_ascii_alphanumeric() || b".%_-".contains(&b));
     if ok {
         Ok(host)
     } else {
@@ -411,38 +367,21 @@ pub mod sql {
     use super::*;
 
     pub fn schema_exists(db: &str) -> DbResult<String> {
-        Ok(format!(
-            "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = {};",
-            quote_string(validate_identifier(db)?)?
-        ))
+        Ok(format!("SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = {};", quote_string(validate_identifier(db)?)?))
     }
     pub fn user_exists(user: &str) -> DbResult<String> {
-        Ok(format!(
-            "SELECT COUNT(*) FROM mysql.user WHERE User = {};",
-            quote_string(validate_identifier(user)?)?
-        ))
+        Ok(format!("SELECT COUNT(*) FROM mysql.user WHERE User = {};", quote_string(validate_identifier(user)?)?))
     }
     /// Plain CREATE (no IF NOT EXISTS: an existing DB must be an error).
     pub fn create_database(db: &str) -> DbResult<String> {
-        Ok(format!(
-            "CREATE DATABASE {} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;",
-            quote_ident(db)?
-        ))
+        Ok(format!("CREATE DATABASE {} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;", quote_ident(db)?))
     }
     pub fn create_user(user: &str, host: &str, password: &Secret) -> DbResult<String> {
-        Ok(format!(
-            "CREATE USER {} IDENTIFIED BY {};",
-            account(user, host)?,
-            quote_string(password.expose())?
-        ))
+        Ok(format!("CREATE USER {} IDENTIFIED BY {};", account(user, host)?, quote_string(password.expose())?))
     }
     /// Grant on exactly one database; never global or `*.*`.
     pub fn grant_all(db: &str, user: &str, host: &str) -> DbResult<String> {
-        Ok(format!(
-            "GRANT ALL PRIVILEGES ON {}.* TO {};",
-            quote_ident(db)?,
-            account(user, host)?
-        ))
+        Ok(format!("GRANT ALL PRIVILEGES ON {}.* TO {};", quote_ident(db)?, account(user, host)?))
     }
     pub fn drop_database(db: &str) -> DbResult<String> {
         Ok(format!("DROP DATABASE IF EXISTS {};", quote_ident(db)?))
@@ -459,8 +398,16 @@ pub enum StepAction {
     Run(CommandSpec),
     /// Download one of `sources` (in order) into `dest` and verify it: against a SHA-256 pinned in the program when
     /// there is one for `name`, else against the entry in the `sums_url` list. Never unverified.
-    DownloadVerified { sources: Vec<String>, dest: PathBuf, name: String, sums_url: String },
-    ExtractZip { archive: PathBuf, dest: PathBuf },
+    DownloadVerified {
+        sources: Vec<String>,
+        dest: PathBuf,
+        name: String,
+        sums_url: String,
+    },
+    ExtractZip {
+        archive: PathBuf,
+        dest: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -496,18 +443,8 @@ pub fn plan_install_linux() -> InstallPlan {
     InstallPlan {
         steps: vec![
             step("db.apt-update", "Refresh the package list", true, run("apt-get", &["update"])),
-            step(
-                "db.apt-install",
-                "Install the MariaDB database server (mariadb-server)",
-                true,
-                run("apt-get", &["install", "-y", "mariadb-server"]),
-            ),
-            step(
-                "db.enable",
-                "Start MariaDB now and on boot",
-                true,
-                run("systemctl", &["enable", "--now", "mariadb"]),
-            ),
+            step("db.apt-install", "Install the MariaDB database server (mariadb-server)", true, run("apt-get", &["install", "-y", "mariadb-server"])),
+            step("db.enable", "Start MariaDB now and on boot", true, run("systemctl", &["enable", "--now", "mariadb"])),
         ],
         service_name: None,
         admin_password: None,
@@ -516,12 +453,7 @@ pub fn plan_install_linux() -> InstallPlan {
 
 /// Windows: official zip from archive.mariadb.org, SHA-256 verified, isolated
 /// uniquely named service. `existing_services` guards against name collisions.
-pub fn plan_install_windows(
-    version: &str,
-    root: &Path,
-    port: u16,
-    existing_services: &[String],
-) -> DbResult<InstallPlan> {
+pub fn plan_install_windows(version: &str, root: &Path, port: u16, existing_services: &[String]) -> DbResult<InstallPlan> {
     if version.is_empty() || !version.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
         return Err(DbError::InvalidValue(format!("MariaDB version {version:?}")));
     }
@@ -547,19 +479,22 @@ pub fn plan_install_windows(
 
     let steps = vec![
         // Fastest first: MariaDB's mirror-routed endpoint redirects to a nearby mirror; the archive is the fallback.
-        step("db.download", "Download the official MariaDB zip and verify its SHA-256 checksum", false,
+        step(
+            "db.download",
+            "Download the official MariaDB zip and verify its SHA-256 checksum",
+            false,
             StepAction::DownloadVerified {
-                sources: vec![
-                    format!("https://downloads.mariadb.org/rest-api/mariadb/{version}/{zip_name}"),
-                    format!("{base}{zip_name}"),
-                ],
+                sources: vec![format!("https://downloads.mariadb.org/rest-api/mariadb/{version}/{zip_name}"), format!("{base}{zip_name}")],
                 dest: archive.clone(),
                 name: zip_name,
                 sums_url: format!("{base}sha256sums.txt"),
-            }),
-        step("db.extract", "Unpack MariaDB into the Kora folder", false,
-            StepAction::ExtractZip { archive, dest }),
-        step("db.initialise", &format!("Create the private MariaDB service '{service}' on 127.0.0.1:{port}"), true,
+            },
+        ),
+        step("db.extract", "Unpack MariaDB into the Kora folder", false, StepAction::ExtractZip { archive, dest }),
+        step(
+            "db.initialise",
+            &format!("Create the private MariaDB service '{service}' on 127.0.0.1:{port}"),
+            true,
             StepAction::Run(CommandSpec {
                 program: s(&install_db),
                 args: vec![
@@ -573,9 +508,9 @@ pub fn plan_install_windows(
                     format!("--port={port}"),
                 ],
                 ..CommandSpec::default()
-            })),
-        step("db.start", "Start the MariaDB service", true,
-            StepAction::Run(CommandSpec::new("sc", &["start", &service]))),
+            }),
+        ),
+        step("db.start", "Start the MariaDB service", true, StepAction::Run(CommandSpec::new("sc", &["start", &service]))),
     ];
     Ok(InstallPlan { steps, service_name: Some(service), admin_password: Some(password) })
 }
@@ -629,12 +564,7 @@ pub struct AdminConn {
 
 impl fmt::Debug for AdminConn {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AdminConn")
-            .field("host", &self.host)
-            .field("port", &self.port)
-            .field("user", &self.user)
-            .field("password", &self.password)
-            .finish()
+        f.debug_struct("AdminConn").field("host", &self.host).field("port", &self.port).field("user", &self.user).field("password", &self.password).finish()
     }
 }
 
@@ -703,24 +633,13 @@ pub struct Credentials {
 }
 
 fn pct(s: &str) -> String {
-    s.bytes()
-        .map(|b| {
-            if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
-                (b as char).to_string()
-            } else {
-                format!("%{b:02X}")
-            }
-        })
-        .collect()
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
 }
 
 impl Credentials {
     /// oxmysql URI connection string.
     pub fn connection_string(&self) -> String {
-        format!(
-            "mysql://{}:{}@{}:{}/{}?charset=utf8mb4",
-            pct(&self.user), pct(self.password.expose()), self.host, self.port, pct(&self.database)
-        )
+        format!("mysql://{}:{}@{}:{}/{}?charset=utf8mb4", pct(&self.user), pct(self.password.expose()), self.host, self.port, pct(&self.database))
     }
     /// Line for server.cfg. Contains the password: write only to secrets.cfg.
     pub fn server_cfg_line(&self) -> String {
@@ -730,13 +649,7 @@ impl Credentials {
 
 /// Create a brand-new DB + user. Refuses (never reuses) existing names.
 /// `state_path` is updated after every successful object creation.
-pub fn provision(
-    runner: &dyn CommandRunner,
-    admin: &AdminConn,
-    account_host: &str,
-    conn_host: &str,
-    state_path: &Path,
-) -> DbResult<Credentials> {
+pub fn provision(runner: &dyn CommandRunner, admin: &AdminConn, account_host: &str, conn_host: &str, state_path: &Path) -> DbResult<Credentials> {
     validate_host(account_host)?;
     // Pick names that don't exist yet.
     let mut taken = HashSet::new();
@@ -754,12 +667,7 @@ pub fn provision(
         }
     };
     let password = generate_password()?;
-    let mut state = ProvisionState {
-        database: db.clone(),
-        user: user.clone(),
-        host: account_host.into(),
-        ..Default::default()
-    };
+    let mut state = ProvisionState { database: db.clone(), user: user.clone(), host: account_host.into(), ..Default::default() };
     state.save(state_path)?;
 
     admin.exec(runner, &sql::create_database(&db)?)?;
@@ -800,34 +708,22 @@ pub fn rollback(runner: &dyn CommandRunner, admin: &AdminConn, state: &mut Provi
 
 // ------------------------------------------------------------ secrets file
 
-/// icacls command restricting `path` to `windows_user` only.
+/// icacls command restricting `path` to `windows_user` only: read, write and DELETE (without delete the owner could not
+/// replace the file by a rename or remove it in a folder that gives them only Modify: no "delete child" right).
 pub fn windows_acl_command(path: &Path, windows_user: &str) -> DbResult<CommandSpec> {
-    if windows_user.is_empty()
-        || !windows_user.chars().all(|c| c.is_alphanumeric() || " ._-\\$".contains(c))
-    {
+    if windows_user.is_empty() || !windows_user.chars().all(|c| c.is_alphanumeric() || " ._-\\$".contains(c)) {
         return Err(DbError::InvalidValue("windows user name".into()));
     }
     Ok(CommandSpec {
         program: "icacls".into(),
-        args: vec![
-            path.to_string_lossy().into_owned(),
-            "/inheritance:r".into(),
-            "/grant:r".into(),
-            format!("{windows_user}:(R,W)"),
-        ],
+        args: vec![path.to_string_lossy().into_owned(), "/inheritance:r".into(), "/grant:r".into(), format!("{windows_user}:(R,W,D)")],
         ..CommandSpec::default()
     })
 }
 
 /// Write `contents` so only the owner can read it: 0600 on Unix; on Windows an
 /// empty file is created, locked down with icacls, then filled.
-pub fn write_secret_file(
-    runner: &dyn CommandRunner,
-    os: Os,
-    path: &Path,
-    contents: &str,
-    windows_user: Option<&str>,
-) -> DbResult<()> {
+pub fn write_secret_file(runner: &dyn CommandRunner, os: Os, path: &Path, contents: &str, windows_user: Option<&str>) -> DbResult<()> {
     if os == Os::Windows {
         let user = windows_user.ok_or_else(|| DbError::InvalidValue("windows user required".into()))?;
         std::fs::File::create(path)?;
@@ -852,13 +748,7 @@ pub fn write_secret_file(
 }
 
 /// Write `database.json` (full credentials) and `secrets.cfg` (oxmysql line).
-pub fn write_credentials(
-    runner: &dyn CommandRunner,
-    os: Os,
-    dir: &Path,
-    creds: &Credentials,
-    windows_user: Option<&str>,
-) -> DbResult<()> {
+pub fn write_credentials(runner: &dyn CommandRunner, os: Os, dir: &Path, creds: &Credentials, windows_user: Option<&str>) -> DbResult<()> {
     write_secret_file(runner, os, &dir.join("database.json"), &serde_json::to_string_pretty(creds)?, windows_user)?;
     write_secret_file(runner, os, &dir.join("secrets.cfg"), &creds.server_cfg_line(), windows_user)
 }

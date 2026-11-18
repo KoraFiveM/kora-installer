@@ -20,6 +20,8 @@ use crate::service::{self, account, binary, CommandRunner, ManagedServer, Plan, 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     UpdateTimer,
+    /// The scheduled-backup job of the operating system (`service::backup_job`), found by its Kora name.
+    BackupJob,
     Service,
     Firewall,
     ServiceAccount,
@@ -81,26 +83,14 @@ pub fn binary_used_elsewhere(reg: &Registry, path: &str, excluding: &[&Path]) ->
 /// * `keep_files`: the server folder stays, so its ownership is handed back before the account goes
 ///   (otherwise the files would belong to a number that a future account could reuse).
 /// * `binary_still_used`: another server still runs the shared copy: keep it.
-pub fn items_for(
-    t: &Target,
-    c: &Created,
-    platform: Platform,
-    runner: &dyn CommandRunner,
-    keep_files: bool,
-    binary_still_used: bool,
-) -> super::Result<Vec<Item>> {
-    let err = |e: service::ServiceError| super::InstallError(e.to_string());
+pub fn items_for(t: &Target, c: &Created, platform: Platform, runner: &dyn CommandRunner, keep_files: bool, binary_still_used: bool) -> super::Result<Vec<Item>> {
+    let err = |e: service::ServiceError| super::Problem::generic(e.to_string());
     let account_name = c.service_account.clone().unwrap_or_else(|| account::account_name(&slug(&t.name)));
     let server = t.managed(if account_name == "root" { "kora" } else { &account_name });
     let mut v = Vec::new();
 
     if c.update_timer {
-        v.push(Item {
-            kind: Kind::UpdateTimer,
-            title: "Remove the daily automatic-update schedule".into(),
-            plan: service::scheduler_uninstall_plan(&server, platform).map_err(err)?,
-            note: None,
-        });
+        v.push(Item { kind: Kind::UpdateTimer, title: "Remove the daily automatic-update schedule".into(), plan: service::scheduler_uninstall_plan(&server, platform).map_err(err)?, note: None });
     }
     if c.service_unit.is_some() {
         v.push(Item {
@@ -141,29 +131,39 @@ pub fn items_for(
                     }
                     account::UserStatus::Exists(_) => {
                         let mut steps: Vec<SystemStep> = Vec::new();
-                        if keep_files {
-                            match c.dir_owner.as_deref() {
-                                Some(owner) if valid_owner(owner) => steps.push(SystemStep::run(
-                                    format!("Give the kept server folder back to its previous owner ({owner}) before the account '{name}' is deleted"),
-                                    "chown",
-                                    &["-R", "--", owner, &t.dir.to_string_lossy()],
-                                )),
-                                Some(owner) => v.push(Item {
-                                    kind: Kind::ServiceAccount,
-                                    title: "Give the kept server folder back to its previous owner".into(),
-                                    plan: Plan::default(),
-                                    note: Some(format!("The recorded owner '{owner}' is not a plain uid:gid, so the folder's owner is left as it is.")),
-                                }),
-                                None => {}
-                            }
+                        // In the administrator service the folder goes back to the account that asked
+                        // (the service knows it from the connection; the recorded owner is a file the
+                        // person can edit), always: the person deletes their own files afterwards.
+                        // Run as root directly: back to the recorded owner, when the files are kept.
+                        let service_caller = if crate::privsvc::paths::in_service() {
+                            let id = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<u32>().ok());
+                            id("SUDO_UID").zip(id("SUDO_GID"))
+                        } else {
+                            None
+                        };
+                        let handback = match (service_caller, keep_files, c.dir_owner.as_deref()) {
+                            (Some(ids), _, _) => Some(Ok(ids)),
+                            (None, true, Some(owner)) if valid_owner(owner) => owner.split_once(':').and_then(|(u, g)| u.parse().ok().zip(g.parse().ok())).map(Ok),
+                            (None, true, Some(owner)) => Some(Err(owner.to_string())),
+                            _ => None,
+                        };
+                        match handback {
+                            Some(Ok((uid, gid))) => steps.push(SystemStep::chown_tree(
+                                format!("Give the server folder back to its previous owner ({uid}:{gid}) before the account '{name}' is deleted"),
+                                &t.dir.to_string_lossy(),
+                                uid,
+                                gid,
+                            )),
+                            Some(Err(owner)) => v.push(Item {
+                                kind: Kind::ServiceAccount,
+                                title: "Give the kept server folder back to its previous owner".into(),
+                                plan: Plan::default(),
+                                note: Some(format!("The recorded owner '{owner}' is not a plain uid:gid, so the folder's owner is left as it is.")),
+                            }),
+                            None => {}
                         }
                         steps.extend(account::delete_plan(name).map_err(err)?.steps);
-                        v.push(Item {
-                            kind: Kind::ServiceAccount,
-                            title: format!("Delete the system account '{name}' that Kora created"),
-                            plan: Plan::new(steps),
-                            note: None,
-                        });
+                        v.push(Item { kind: Kind::ServiceAccount, title: format!("Delete the system account '{name}' that Kora created"), plan: Plan::new(steps), note: None });
                     }
                 }
             }
@@ -183,6 +183,17 @@ pub fn items_for(
     Ok(v)
 }
 
+/// The scheduled-backup job of this server, when there is one (found by its Kora name, `kora-backup-<slug>`; nothing else).
+/// Removed by `kora uninstall`; deleting one server removes it through the administrator service (`backup::osjob`).
+pub fn backup_job_item(t: &Target, platform: Platform, runner: &dyn CommandRunner) -> Option<Item> {
+    let slug = slug(&t.name);
+    if !service::backup_job::exists_with(&slug, runner, platform) {
+        return None;
+    }
+    let plan = service::backup_job::uninstall_plan(&slug, platform).ok()?;
+    Some(Item { kind: Kind::BackupJob, title: "Remove the scheduled-backup job".into(), plan, note: None })
+}
+
 /// `uid:gid` in digits, as the installer records the previous owner (nothing `chown` could read as an option).
 fn valid_owner(s: &str) -> bool {
     s.split_once(':').is_some_and(|(u, g)| [u, g].iter().all(|p| !p.is_empty() && p.len() <= 10 && p.bytes().all(|b| b.is_ascii_digit())))
@@ -198,6 +209,7 @@ pub fn clears_record(item: &Item) -> bool {
 pub fn clear_record(c: &mut Created, kind: Kind) {
     match kind {
         Kind::UpdateTimer => c.update_timer = false,
+        Kind::BackupJob => {}
         Kind::Service => c.service_unit = None,
         Kind::Firewall => c.firewall = false,
         Kind::ServiceAccount => {
@@ -234,6 +246,22 @@ mod tests {
 
     fn lines(i: &Item) -> Vec<String> {
         i.plan.steps.iter().map(|s| s.command_line().unwrap_or_else(|| format!("{:?}", s.action))).collect()
+    }
+
+    #[test]
+    fn a_scheduled_backup_job_is_found_by_its_kora_name_and_only_that_is_removed() {
+        let r = FakeRunner::default();
+        let item = backup_job_item(&target(), Platform::Linux, &r).unwrap();
+        assert_eq!(item.kind, Kind::BackupJob);
+        let rn = FakeRunner::default();
+        service::apply_plan(&item.plan, &rn).unwrap();
+        assert!(rn.calls().iter().any(|c| c == "systemctl disable --now kora-backup-my-server.timer"), "{:?}", rn.calls());
+        assert!(rn.calls().iter().filter(|c| c.starts_with("remove ")).all(|c| c.contains("kora-backup-my-server.")));
+        let none = FakeRunner::default();
+        none.respond("cat /etc/systemd/system/kora-backup-my-server.timer", 1, "");
+        assert!(backup_job_item(&target(), Platform::Linux, &none).is_none(), "no job: nothing offered");
+        let w = backup_job_item(&target(), Platform::Windows, &r).unwrap();
+        assert!(w.plan.steps[0].command_line().unwrap().contains("Kora\\Backup my-server"));
     }
 
     #[test]
@@ -294,7 +322,7 @@ mod tests {
         r.respond("id -u", 0, "998\n");
         let c = Created { service_account: Some("kora-my-server".into()), service_account_created: true, dir_owner: Some("1000:1000".into()), ..Created::default() };
         let items = items_for(&target(), &c, Platform::Linux, &r, true, false).unwrap();
-        assert_eq!(lines(&items[0]), ["chown -R -- 1000:1000 /srv/kora/my-server", "userdel kora-my-server"]);
+        assert_eq!(lines(&items[0]), ["ChownTree { path: \"/srv/kora/my-server\", uid: 1000, gid: 1000 }", "pkill -KILL -u kora-my-server", "userdel kora-my-server"]);
     }
 
     #[test]
@@ -319,7 +347,7 @@ mod tests {
         // A recorded owner that chown could read as an option: no chown.
         let c = Created { service_account: Some("kora-my-server".into()), service_account_created: true, dir_owner: Some("--reference=/etc/shadow".into()), ..Created::default() };
         let items = items_for(&target(), &c, Platform::Linux, &r, true, false).unwrap();
-        assert!(!items.iter().flat_map(lines).any(|l| l.starts_with("chown")), "{items:?}");
+        assert!(!items.iter().flat_map(lines).any(|l| l.starts_with("chown") || l.starts_with("ChownTree")), "{items:?}");
         assert!(items.iter().flat_map(lines).any(|l| l == "userdel kora-my-server"));
         // A program path outside Kora's program folder: never deleted.
         for bin in ["/etc/passwd", "/usr/bin/sudo", "/opt/kora/../../etc/0.1.0-0123456789ab/kora", "/opt/kora/v/kora"] {
@@ -370,7 +398,8 @@ mod tests {
             let c = Created { binary: bin.map(String::from), ..Created::default() };
             std::fs::write(d.join(".kora/created.json"), serde_json::to_vec(&c).unwrap()).unwrap();
         }
-        let entry = |n: &str, d: &PathBuf| ServerEntry { name: n.into(), dir: d.clone(), mode: Mode::Production, ports: PortsRecord { game: 1, txadmin: 2 }, created_unix: 0 };
+        let entry =
+            |n: &str, d: &PathBuf| ServerEntry { source: None, versions: None, name: n.into(), dir: d.clone(), mode: Mode::Production, ports: PortsRecord { game: 1, txadmin: 2 }, created_unix: 0 };
         let reg = Registry { servers: vec![entry("a", &a), entry("b", &b)] };
         assert!(binary_used_elsewhere(&reg, "/opt/kora/v/kora", &[b.as_path()]), "a uses it");
         assert!(!binary_used_elsewhere(&reg, "/opt/kora/v/kora", &[a.as_path()]), "only a does, and a is being removed");

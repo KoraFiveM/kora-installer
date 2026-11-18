@@ -35,24 +35,13 @@ pub struct ForkIndex {
 impl ForkIndex {
     /// The owner's fork of `upstream`: a direct fork first, then a fork of a fork of it.
     pub fn find(&self, upstream: &str) -> Option<&ListedFork> {
-        let is = |p: &Option<String>| {
-            p.as_deref()
-                .is_some_and(|p| p.eq_ignore_ascii_case(upstream))
-        };
-        self.forks
-            .iter()
-            .find(|f| is(&f.parent))
-            .or_else(|| self.forks.iter().find(|f| is(&f.grandparent)))
+        let is = |p: &Option<String>| p.as_deref().is_some_and(|p| p.eq_ignore_ascii_case(upstream));
+        self.forks.iter().find(|f| is(&f.parent)).or_else(|| self.forks.iter().find(|f| is(&f.grandparent)))
     }
 
     fn add(&mut self, slug: &str, upstream: &str) {
         if self.find(upstream).is_none() {
-            self.forks.push(ListedFork {
-                slug: slug.to_string(),
-                default_branch: None,
-                parent: Some(upstream.to_string()),
-                grandparent: None,
-            });
+            self.forks.push(ListedFork { slug: slug.to_string(), default_branch: None, parent: Some(upstream.to_string()), grandparent: None });
         }
     }
 
@@ -74,29 +63,12 @@ pub fn list_forks(r: &dyn CommandRunner, owner: &str) -> Result<ForkIndex> {
     }
     let owner_arg = format!("owner={owner}");
     let query_arg = format!("query={LIST_QUERY}");
-    let args = [
-        "api",
-        "graphql",
-        "--paginate",
-        "-f",
-        owner_arg.as_str(),
-        "-f",
-        query_arg.as_str(),
-    ];
+    let args = ["api", "graphql", "--paginate", "-f", owner_arg.as_str(), "-f", query_arg.as_str()];
     let o = run(r, "gh", &args, None)?;
     if !o.ok() {
-        return Err(GitError::Command {
-            cmd: "gh api graphql (list forks)".into(),
-            code: o.code,
-            stderr: o.stderr.trim().to_string(),
-        });
+        return Err(GitError::Command { cmd: "gh api graphql (list forks)".into(), code: o.code, stderr: o.stderr.trim().to_string() });
     }
-    parse_listing(&o.stdout, owner).ok_or_else(|| {
-        GitError::Parse(
-            "gh api graphql (list forks)".into(),
-            o.stdout.chars().take(200).collect(),
-        )
-    })
+    parse_listing(&o.stdout, owner).ok_or_else(|| GitError::Parse("gh api graphql (list forks)".into(), o.stdout.chars().take(200).collect()))
 }
 
 /// Parse the (possibly several, concatenated) pages of the listing. `None` when any page is not
@@ -109,30 +81,19 @@ pub fn parse_listing(text: &str, owner: &str) -> Option<ForkIndex> {
         if doc.get("errors").is_some_and(|e| !e.is_null()) {
             return None;
         }
-        let nodes = doc
-            .pointer("/data/repositoryOwner/repositories/nodes")?
-            .as_array()?;
+        let nodes = doc.pointer("/data/repositoryOwner/repositories/nodes")?.as_array()?;
         pages += 1;
-        let s = |v: &serde_json::Value, p: &str| {
-            v.pointer(p).and_then(|x| x.as_str()).map(str::to_string)
-        };
+        let s = |v: &serde_json::Value, p: &str| v.pointer(p).and_then(|x| x.as_str()).map(str::to_string);
         for n in nodes {
             let Some(slug) = s(n, "/nameWithOwner") else {
                 continue;
             };
             // A user's listing can include repositories they only collaborate on.
-            let mine = slug
-                .split_once('/')
-                .is_some_and(|(o, _)| o.eq_ignore_ascii_case(owner));
+            let mine = slug.split_once('/').is_some_and(|(o, _)| o.eq_ignore_ascii_case(owner));
             if !mine || !valid_repo(&slug) {
                 continue;
             }
-            forks.push(ListedFork {
-                slug,
-                default_branch: s(n, "/defaultBranchRef/name"),
-                parent: s(n, "/parent/nameWithOwner"),
-                grandparent: s(n, "/parent/parent/nameWithOwner"),
-            });
+            forks.push(ListedFork { slug, default_branch: s(n, "/defaultBranchRef/name"), parent: s(n, "/parent/nameWithOwner"), grandparent: s(n, "/parent/parent/nameWithOwner") });
         }
     }
     (pages > 0).then_some(ForkIndex { forks })
@@ -144,14 +105,10 @@ pub fn parse_listing(text: &str, owner: &str) -> Option<ForkIndex> {
 pub fn parse_fork_output(out: &Output, owner: &str) -> Option<String> {
     let text = strip_ansi(&format!("{}\n{}", out.stdout, out.stderr));
     text.split_whitespace().find_map(|t| {
-        let t = t.trim_matches(|c: char| {
-            !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':'))
-        });
+        let t = t.trim_matches(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':')));
         let t = t.strip_prefix("https://github.com/").unwrap_or(t);
         let t = t.trim_end_matches('/').trim_end_matches(".git");
-        let mine = t
-            .split_once('/')
-            .is_some_and(|(o, _)| o.eq_ignore_ascii_case(owner));
+        let mine = t.split_once('/').is_some_and(|(o, _)| o.eq_ignore_ascii_case(owner));
         (mine && valid_repo(t)).then(|| t.to_string())
     })
 }
@@ -191,10 +148,7 @@ struct CacheFile {
 }
 
 fn read_cache(path: &Path) -> CacheFile {
-    std::fs::read(path)
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+    std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
 /// Upstream -> fork for one owner. Only a hint: every entry is checked before it is trusted.
@@ -210,22 +164,12 @@ pub struct ForkCache {
 impl ForkCache {
     pub fn load(path: Option<&Path>, owner: &str) -> ForkCache {
         let owner = owner.to_ascii_lowercase();
-        let entries = path
-            .map(read_cache)
-            .and_then(|mut f| f.owners.remove(&owner))
-            .unwrap_or_default();
-        ForkCache {
-            path: path.map(Path::to_path_buf),
-            owner,
-            entries,
-            changes: BTreeMap::new(),
-        }
+        let entries = path.map(read_cache).and_then(|mut f| f.owners.remove(&owner)).unwrap_or_default();
+        ForkCache { path: path.map(Path::to_path_buf), owner, entries, changes: BTreeMap::new() }
     }
 
     pub fn get(&self, upstream: &str) -> Option<&str> {
-        self.entries
-            .get(&upstream.to_ascii_lowercase())
-            .map(String::as_str)
+        self.entries.get(&upstream.to_ascii_lowercase()).map(String::as_str)
     }
 
     pub fn put(&mut self, upstream: &str, fork: &str) {
@@ -303,54 +247,32 @@ pub fn probe_repo(r: &dyn CommandRunner, slug: &str, owner: &str, upstream: &str
         if o.stderr.contains("HTTP 404") || o.stderr.contains("Not Found") {
             return Ok(Found::Missing);
         }
-        return Err(GitError::Command {
-            cmd: format!("gh api {path}"),
-            code: o.code,
-            stderr: o.stderr,
-        });
+        return Err(GitError::Command { cmd: format!("gh api {path}"), code: o.code, stderr: o.stderr });
     }
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&o.stdout) else {
         // An answer we cannot inspect: the repository is there (old behaviour).
-        return Ok(Found::Present {
-            slug: slug.to_string(),
-            default_branch: None,
-        });
+        return Ok(Found::Present { slug: slug.to_string(), default_branch: None });
     };
     let s = |p: &str| v.pointer(p).and_then(|x| x.as_str()).map(str::to_string);
-    let real = s("/full_name")
-        .filter(|f| valid_repo(f))
-        .unwrap_or_else(|| slug.to_string());
-    if !real
-        .split_once('/')
-        .is_some_and(|(o, _)| o.eq_ignore_ascii_case(owner))
-    {
+    let real = s("/full_name").filter(|f| valid_repo(f)).unwrap_or_else(|| slug.to_string());
+    if !real.split_once('/').is_some_and(|(o, _)| o.eq_ignore_ascii_case(owner)) {
         // Moved to another owner: not this owner's fork any more.
         return Ok(Found::Missing);
     }
     let default_branch = s("/default_branch");
     if let Some(is_fork) = v.get("fork").and_then(|f| f.as_bool()) {
         if !is_fork {
-            return Ok(Found::Foreign(format!(
-                "{real} exists but is not a fork of {upstream}"
-            )));
+            return Ok(Found::Foreign(format!("{real} exists but is not a fork of {upstream}")));
         }
         let parent = s("/parent/full_name");
         let source = s("/source/full_name");
-        let matches = |p: &Option<String>| {
-            p.as_deref()
-                .is_some_and(|p| p.eq_ignore_ascii_case(upstream))
-        };
+        let matches = |p: &Option<String>| p.as_deref().is_some_and(|p| p.eq_ignore_ascii_case(upstream));
         if (parent.is_some() || source.is_some()) && !matches(&parent) && !matches(&source) {
             let from = parent.or(source).unwrap_or_default();
-            return Ok(Found::Foreign(format!(
-                "{real} is a fork of {from}, not {upstream}"
-            )));
+            return Ok(Found::Foreign(format!("{real} is a fork of {from}, not {upstream}")));
         }
     }
-    Ok(Found::Present {
-        slug: real,
-        default_branch,
-    })
+    Ok(Found::Present { slug: real, default_branch })
 }
 
 /// Finds forks for one owner during one run (one listing, refreshed only after a fork request
@@ -364,12 +286,7 @@ pub struct ForkFinder {
 
 impl ForkFinder {
     pub fn new(owner: &str, cache_path: Option<&Path>) -> ForkFinder {
-        ForkFinder {
-            owner: owner.to_string(),
-            index: None,
-            listing_tried: false,
-            cache: ForkCache::load(cache_path, owner),
-        }
+        ForkFinder { owner: owner.to_string(), index: None, listing_tried: false, cache: ForkCache::load(cache_path, owner) }
     }
 
     fn relist(&mut self, r: &dyn CommandRunner) -> bool {
@@ -391,10 +308,7 @@ impl ForkFinder {
         if let Some(idx) = &self.index {
             return Ok(match idx.find(upstream) {
                 Some(f) => {
-                    let found = Found::Present {
-                        slug: f.slug.clone(),
-                        default_branch: f.default_branch.clone(),
-                    };
+                    let found = Found::Present { slug: f.slug.clone(), default_branch: f.default_branch.clone() };
                     self.cache.put(upstream, &f.slug);
                     found
                 }
@@ -407,16 +321,9 @@ impl ForkFinder {
         // No listing: the cached fork, checked first.
         if let Some(slug) = self.cache.get(upstream).map(str::to_string) {
             if valid_repo(&slug) {
-                if let Found::Present {
-                    slug,
-                    default_branch,
-                } = probe_repo(r, &slug, &self.owner, upstream)?
-                {
+                if let Found::Present { slug, default_branch } = probe_repo(r, &slug, &self.owner, upstream)? {
                     self.cache.put(upstream, &slug);
-                    return Ok(Found::Present {
-                        slug,
-                        default_branch,
-                    });
+                    return Ok(Found::Present { slug, default_branch });
                 }
             }
             self.cache.forget(upstream);
@@ -432,12 +339,7 @@ impl ForkFinder {
 
     /// After `gh repo fork` succeeded: which fork did GitHub create or hand back? Read from gh's
     /// answer, else from a fresh listing, else from the same-name lookup. `None`: not found.
-    pub fn after_fork(
-        &mut self,
-        r: &dyn CommandRunner,
-        upstream: &str,
-        out: &Output,
-    ) -> Option<String> {
+    pub fn after_fork(&mut self, r: &dyn CommandRunner, upstream: &str, out: &Output) -> Option<String> {
         let slug = parse_fork_output(out, &self.owner).or_else(|| {
             if self.relist(r) {
                 if let Some(f) = self.index.as_ref().and_then(|i| i.find(upstream)) {

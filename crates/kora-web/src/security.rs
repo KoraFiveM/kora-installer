@@ -11,10 +11,10 @@ use std::time::{Duration, Instant};
 use crate::remote::{self, roles, Caller, Identity, Provider, Role};
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
-use kora_core::api::Op;
-use kora_core::problem::{codes, Action, Problem};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use kora_core::api::Op;
+use kora_core::problem::{codes, Action, Problem};
 
 use crate::error::ApiError;
 use crate::AppState;
@@ -65,11 +65,7 @@ pub struct Limiter {
 
 impl Limiter {
     pub fn new(max: u32, lockout: Duration) -> Self {
-        Self {
-            max,
-            lockout,
-            st: Mutex::new((0, None)),
-        }
+        Self { max, lockout, st: Mutex::new((0, None)) }
     }
     pub fn locked(&self) -> bool {
         let mut g = self.st.lock().unwrap();
@@ -114,15 +110,10 @@ impl Default for LinkCodes {
 
 impl LinkCodes {
     pub fn with_clock(clock: Clock) -> Self {
-        Self {
-            codes: Mutex::new(VecDeque::new()),
-            clock,
-        }
+        Self { codes: Mutex::new(VecDeque::new()), clock }
     }
     fn lock(&self) -> std::sync::MutexGuard<'_, VecDeque<(String, Instant)>> {
-        self.codes
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.codes.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
     /// A new code (128 random bits, hex).
     pub fn mint(&self) -> String {
@@ -197,19 +188,10 @@ impl IpLimiter {
         Self::with_clock(max, window, lockout, cap, Arc::new(Instant::now))
     }
     pub fn with_clock(max: u32, window: Duration, lockout: Duration, cap: usize, clock: Clock) -> Self {
-        Self {
-            max,
-            window,
-            lockout,
-            cap: cap.max(1),
-            map: Mutex::new(HashMap::new()),
-            clock,
-        }
+        Self { max, window, lockout, cap: cap.max(1), map: Mutex::new(HashMap::new()), clock }
     }
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<IpAddr, IpEntry>> {
-        self.map
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.map.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
     pub fn locked(&self, ip: IpAddr) -> bool {
         let key = limiter_key(ip);
@@ -230,11 +212,7 @@ impl IpLimiter {
         if m.len() < self.cap {
             return true;
         }
-        let oldest_unlocked = m
-            .iter()
-            .filter(|(_, e)| e.locked_until.is_none())
-            .min_by_key(|(_, e)| e.since)
-            .map(|(k, _)| *k);
+        let oldest_unlocked = m.iter().filter(|(_, e)| e.locked_until.is_none()).min_by_key(|(_, e)| e.since).map(|(k, _)| *k);
         match oldest_unlocked {
             Some(k) => {
                 m.remove(&k);
@@ -251,17 +229,9 @@ impl IpLimiter {
             // Full of locked addresses: this one is refused anyway (see `locked`).
             return;
         }
-        let e = m.entry(key).or_insert(IpEntry {
-            fails: 0,
-            since: now,
-            locked_until: None,
-        });
+        let e = m.entry(key).or_insert(IpEntry { fails: 0, since: now, locked_until: None });
         if e.stale(now, self.window) {
-            *e = IpEntry {
-                fails: 0,
-                since: now,
-                locked_until: None,
-            };
+            *e = IpEntry { fails: 0, since: now, locked_until: None };
         }
         e.fails += 1;
         if e.fails >= self.max {
@@ -298,31 +268,20 @@ impl Default for StreamLimits {
 
 impl StreamLimits {
     pub fn new(per: usize, total: usize) -> Self {
-        Self {
-            per,
-            total,
-            open: Arc::default(),
-        }
+        Self { per, total, open: Arc::default() }
     }
     pub fn acquire(&self, who: &str) -> Result<StreamPermit, ApiError> {
         let mut g = self.open.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if g.0 >= self.total {
-            return Err(ApiError::rate_limited(
-                "Too many live views are open on this panel right now. Close some panel tabs, or try again in a minute.",
-            ));
+            return Err(ApiError::rate_limited("Too many live views are open on this panel right now. Close some panel tabs, or try again in a minute."));
         }
         let mine = g.1.get(who).copied().unwrap_or(0);
         if mine >= self.per {
-            return Err(ApiError::rate_limited(format!(
-                "You already have {mine} live views open (consoles, job progress, server status). Close some panel tabs, then try again."
-            )));
+            return Err(ApiError::rate_limited(format!("You already have {mine} live views open (consoles, job progress, server status). Close some panel tabs, then try again.")));
         }
         g.0 += 1;
         *g.1.entry(who.to_string()).or_insert(0) += 1;
-        Ok(StreamPermit {
-            open: self.open.clone(),
-            who: who.to_string(),
-        })
+        Ok(StreamPermit { open: self.open.clone(), who: who.to_string() })
     }
     /// Streams open now, in total (tests).
     pub fn open(&self) -> usize {
@@ -356,10 +315,7 @@ pub struct Limited<S> {
 
 impl<S> Limited<S> {
     pub fn new(inner: S, permit: Option<StreamPermit>) -> Self {
-        Self {
-            inner,
-            _permit: permit,
-        }
+        Self { inner, _permit: permit }
     }
 }
 
@@ -374,6 +330,72 @@ impl<S: tokio_stream::Stream + Unpin> tokio_stream::Stream for Limited<S> {
 pub const SESSION_IDLE: Duration = Duration::from_secs(12 * 60 * 60);
 /// A session is dropped this long after sign-in, however busy it is.
 pub const SESSION_MAX: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+/// Remote sessions made with a passkey or one-time code: shorter, because they cross a network and signing in again is
+/// a touch of a finger, not a link to find. The computer's own session and Tailscale sessions keep the long limits.
+pub const STRONG_IDLE: Duration = Duration::from_secs(8 * 60 * 60);
+pub const STRONG_MAX: Duration = Duration::from_secs(3 * 24 * 60 * 60);
+/// A remote session made with a token (the old way): one day at most.
+pub const TOKEN_MAX: Duration = Duration::from_secs(24 * 60 * 60);
+/// How long a passkey or code check counts as recent for the most sensitive actions ([`remote::auth::reauth`]).
+pub const FRESH_FOR: Duration = Duration::from_secs(10 * 60);
+
+/// The limits of a session by how it was proven: (idle, absolute).
+pub fn limits_for(provider: Provider, remote: bool) -> (Duration, Duration) {
+    match (remote, provider) {
+        (true, Provider::Passkey | Provider::Code) => (STRONG_IDLE, STRONG_MAX),
+        (true, Provider::Token) => (SESSION_IDLE, TOKEN_MAX),
+        _ => (SESSION_IDLE, SESSION_MAX),
+    }
+}
+
+/// What the "Signed-in devices" list shows about a session; never the cookie or the secret.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionView {
+    /// A public handle (a hash of the session id): enough to revoke it, useless to use it.
+    pub handle: String,
+    pub device: String,
+    pub address: String,
+    /// Unix seconds.
+    pub signed_in: i64,
+    pub last_seen: i64,
+    pub current: bool,
+}
+
+/// A short, safe description of a browser from its `User-Agent` ("Chrome on Windows"); never the raw header.
+pub fn describe_device(user_agent: &str) -> String {
+    let ua = user_agent;
+    let browser = if ua.contains("Edg/") {
+        "Edge"
+    } else if ua.contains("Firefox/") {
+        "Firefox"
+    } else if ua.contains("Chrome/") || ua.contains("Chromium/") {
+        "Chrome"
+    } else if ua.contains("Safari/") {
+        "Safari"
+    } else if ua.starts_with("curl/") || ua.contains("python") || ua.contains("node") {
+        "A script"
+    } else {
+        "A browser"
+    };
+    let os = if ua.contains("Windows") {
+        "Windows"
+    } else if ua.contains("iPhone") || ua.contains("iPad") {
+        "iOS"
+    } else if ua.contains("Android") {
+        "Android"
+    } else if ua.contains("Mac OS X") || ua.contains("Macintosh") {
+        "macOS"
+    } else if ua.contains("Linux") || ua.contains("X11") {
+        "Linux"
+    } else {
+        ""
+    };
+    if os.is_empty() {
+        browser.to_string()
+    } else {
+        format!("{browser} on {os}")
+    }
+}
 
 /// Where "now" comes from. Tests replace it to step over the timeouts.
 pub type Clock = Arc<dyn Fn() -> Instant + Send + Sync>;
@@ -392,16 +414,17 @@ pub struct SessionInfo {
     secret: String,
     created: Instant,
     last_seen: Instant,
+    /// A recent passkey or code check: until when sensitive actions need no new one.
+    fresh_until: Instant,
+    device: String,
+    address: String,
+    created_unix: i64,
+    last_seen_unix: i64,
 }
 
 impl std::fmt::Debug for SessionInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SessionInfo")
-            .field("provider", &self.provider)
-            .field("name", &self.name)
-            .field("remote", &self.remote)
-            .field("role", &self.role)
-            .finish_non_exhaustive()
+        f.debug_struct("SessionInfo").field("provider", &self.provider).field("name", &self.name).field("remote", &self.remote).field("role", &self.role).finish_non_exhaustive()
     }
 }
 
@@ -425,31 +448,31 @@ impl Default for Sessions {
 
 impl Sessions {
     pub fn with_clock(clock: Clock) -> Self {
-        Self {
-            map: Mutex::new(HashMap::new()),
-            clock,
-        }
+        Self { map: Mutex::new(HashMap::new()), clock }
     }
     fn map(&self) -> std::sync::MutexGuard<'_, HashMap<String, SessionInfo>> {
-        self.map
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.map.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
     fn expired(&self, i: &SessionInfo, now: Instant) -> bool {
-        now.saturating_duration_since(i.created) >= SESSION_MAX
-            || now.saturating_duration_since(i.last_seen) >= SESSION_IDLE
+        let (idle, max) = limits_for(i.provider, i.remote);
+        now.saturating_duration_since(i.created) >= max || now.saturating_duration_since(i.last_seen) >= idle
     }
     /// A local (launch token) session.
     pub fn create(&self) -> NewSession {
         self.create_for(Provider::Local, "local", false, Role::Admin)
     }
     pub fn create_for(&self, provider: Provider, name: &str, remote: bool, role: Role) -> NewSession {
+        self.create_full(provider, name, remote, role, "", "")
+    }
+    /// [`create_for`](Self::create_for) with what the device list shows. A new session counts as freshly checked.
+    pub fn create_full(&self, provider: Provider, name: &str, remote: bool, role: Role, device: &str, address: &str) -> NewSession {
         let id = random_hex();
         let secret = random_hex();
         let now = (self.clock)();
         let mut m = self.map();
         // Keep the table from growing with sessions nobody will use again.
         m.retain(|_, i| !self.expired(i, now));
+        let unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
         m.insert(
             id.clone(),
             SessionInfo {
@@ -460,9 +483,61 @@ impl Sessions {
                 secret: secret.clone(),
                 created: now,
                 last_seen: now,
+                fresh_until: now + FRESH_FOR,
+                device: device.to_string(),
+                address: address.to_string(),
+                created_unix: unix,
+                last_seen_unix: unix,
             },
         );
         NewSession { id, secret }
+    }
+    /// The public handle of a session id (what the device list shows and revokes by).
+    pub fn handle_of(id: &str) -> String {
+        crate::remote::config::hash_token("kora-session-handle", id).chars().take(16).collect()
+    }
+    /// A passkey or code check just happened on this session.
+    pub fn mark_fresh(&self, id: &str) {
+        let now = (self.clock)();
+        if let Some(i) = self.map().get_mut(id) {
+            i.fresh_until = now + FRESH_FOR;
+        }
+    }
+    pub fn is_fresh(&self, id: &str) -> bool {
+        let now = (self.clock)();
+        self.map().get(id).is_some_and(|i| now < i.fresh_until)
+    }
+    /// The live sessions of one remote identity, for its "Signed-in devices" list.
+    pub fn list_for(&self, name: &str, current: Option<&str>) -> Vec<SessionView> {
+        let now = (self.clock)();
+        let m = self.map();
+        let mut v: Vec<SessionView> = m
+            .iter()
+            .filter(|(_, i)| i.remote && i.name.eq_ignore_ascii_case(name) && !self.expired(i, now))
+            .map(|(id, i)| SessionView {
+                handle: Self::handle_of(id),
+                device: i.device.clone(),
+                address: i.address.clone(),
+                signed_in: i.created_unix,
+                last_seen: i.last_seen_unix,
+                current: current == Some(id.as_str()),
+            })
+            .collect();
+        v.sort_by_key(|s| std::cmp::Reverse(s.signed_in));
+        v
+    }
+    /// End one of `name`'s sessions by its public handle. Only that user's own sessions can be named.
+    pub fn revoke_handle(&self, name: &str, handle: &str) -> bool {
+        let mut m = self.map();
+        let found = m.iter().find(|(id, i)| i.remote && i.name.eq_ignore_ascii_case(name) && ct_eq(&Self::handle_of(id), handle)).map(|(id, _)| id.clone());
+        found.is_some_and(|id| m.remove(&id).is_some())
+    }
+    /// End every session of `name` except `keep` (or all of them): after a reset, a removed passkey, a lost device.
+    pub fn revoke_user(&self, name: &str, keep: Option<&str>) -> usize {
+        let mut m = self.map();
+        let before = m.len();
+        m.retain(|id, i| !(i.remote && i.name.eq_ignore_ascii_case(name)) || keep == Some(id.as_str()));
+        before - m.len()
     }
     /// The session, if it exists and has not expired; a use counts as activity (idle timer restarts).
     pub fn get(&self, id: &str) -> Option<SessionInfo> {
@@ -474,6 +549,7 @@ impl Sessions {
             return None;
         }
         info.last_seen = now;
+        info.last_seen_unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
         Some(info.clone())
     }
     /// Like [`get`](Self::get), but only when `secret` is the session's own (constant-time compare). A
@@ -510,10 +586,7 @@ pub(crate) fn cookie_values(h: &HeaderMap, name: &str) -> Vec<String> {
 /// The routes an `EventSource` opens. It cannot set headers, so only these take the secret as `?ks=`;
 /// everywhere else a secret in the address (history, logs) is not accepted.
 fn is_stream(path: &str) -> bool {
-    matches!(
-        roles::op_for("GET", path),
-        Some(kora_core::api::Op::Events | kora_core::api::Op::JobEvents | kora_core::api::Op::ConsoleStream)
-    )
+    matches!(roles::op_for("GET", path), Some(kora_core::api::Op::Events | kora_core::api::Op::JobEvents | kora_core::api::Op::ConsoleStream))
 }
 
 /// The session secret of this request: the header, or for a stream (an `EventSource`) the `ks` parameter.
@@ -534,31 +607,19 @@ fn session_secret<'a>(h: &'a HeaderMap, method: &Method, path: &str, query: Opti
 /// made for this kind of peer. A cookie alone (or a wrong secret) names no session.
 pub(crate) fn current_session(st: &AppState, h: &HeaderMap, remote: bool) -> Option<String> {
     let secret = h.get(SESSION_HEADER)?.to_str().ok()?.trim();
-    cookie_values(h, &cookie_name(st.addr.port()))
-        .into_iter()
-        .find(|id| st.sessions.get_with_secret(id, Some(secret)).is_some_and(|i| i.remote == remote))
+    cookie_values(h, &cookie_name(st.addr.port())).into_iter().find(|id| st.sessions.get_with_secret(id, Some(secret)).is_some_and(|i| i.remote == remote))
 }
 
 /// Headers a reverse proxy (or `tailscale serve`) adds. Behind one, every visitor reaches the panel from
 /// 127.0.0.1 and would be treated as the owner, so such requests are refused outright.
-pub const PROXY_HEADERS: &[&str] = &[
-    "x-forwarded-for",
-    "x-forwarded-host",
-    "x-forwarded-proto",
-    "forwarded",
-    "x-real-ip",
-    "cf-connecting-ip",
-    "true-client-ip",
-    "tailscale-user-login",
-    "tailscale-user-name",
-];
+pub const PROXY_HEADERS: &[&str] =
+    &["x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "forwarded", "x-real-ip", "cf-connecting-ip", "true-client-ip", "tailscale-user-login", "tailscale-user-name"];
 
 pub const PROXY_REFUSED: &str = "Kora Panel must not be put behind a proxy or `tailscale serve`: they make every visitor look like this computer. \
 To reach the panel from your own devices, run `kora panel --tailscale`, or use an SSH tunnel.";
 
 /// For a request from this machine's own Tailscale address (see [`check`]).
-pub const SELF_ADDRESS_REFUSED: &str =
-    "Open the panel from another device, or run `kora panel` on this computer for a sign-in link.";
+pub const SELF_ADDRESS_REFUSED: &str = "Open the panel from another device, or run `kora panel` on this computer for a sign-in link.";
 
 fn bearer(h: &HeaderMap) -> Option<&str> {
     let v = h.get(header::AUTHORIZATION)?.to_str().ok()?;
@@ -567,32 +628,38 @@ fn bearer(h: &HeaderMap) -> Option<&str> {
 }
 
 fn is_public(method: &Method, path: &str) -> bool {
-    (method == Method::GET && path == "/api/v1/meta")
-        || (method == Method::POST && path == "/api/v1/session")
+    (method == Method::GET && (path == "/api/v1/meta" || path == "/api/v1/auth/options")) || (method == Method::POST && matches!(path, "/api/v1/session" | "/api/v1/auth/login" | "/api/v1/auth/enrol"))
 }
 
 pub async fn guard(State(st): State<AppState>, mut req: Request, next: Next) -> Response {
     let api = req.uri().path() == "/api" || req.uri().path().starts_with("/api/");
+    let mut secure = false;
     let mut resp = match check(&st, &req) {
-        Ok(caller) => {
+        Ok((caller, transport)) => {
+            secure = transport.secure;
+            let audit_ctx = st.audit_home.as_ref().and_then(|home| crate::audit::Ctx::begin(home, req.method(), req.uri().path(), &caller));
             req.extensions_mut().insert(caller);
-            next.run(req).await
+            // What the handlers see: how THIS request reached us (a trusted proxy's `X-Forwarded-Proto` counts).
+            req.extensions_mut().insert(transport);
+            let resp = next.run(req).await;
+            if let Some(ctx) = audit_ctx {
+                if let Some(job) = resp.extensions().get::<crate::audit::JobStarted>().cloned() {
+                    ctx.follow_job(&st, &job);
+                }
+                ctx.answered(&resp);
+            }
+            resp
         }
         Err(e) => e.into_response(),
     };
     let h = resp.headers_mut();
-    h.insert(
-        header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(CSP),
-    );
-    h.insert(
-        header::X_CONTENT_TYPE_OPTIONS,
-        HeaderValue::from_static("nosniff"),
-    );
-    h.insert(
-        header::REFERRER_POLICY,
-        HeaderValue::from_static("no-referrer"),
-    );
+    h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP));
+    h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    h.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    // HSTS only over TLS, and only for certificates the person chose or Tailscale vouches for (`tls::CertSource::hsts`).
+    if secure && st.tls.hsts() {
+        h.insert(header::STRICT_TRANSPORT_SECURITY, HeaderValue::from_static(crate::tls::rules::HSTS));
+    }
     if api {
         h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     }
@@ -608,11 +675,12 @@ fn actions_off(op: Op) -> ApiError {
         Op::UninstallRun | Op::AppUninstall => "Uninstalling Kora",
         Op::ConsoleSend => "Sending commands to the server console",
         Op::SelfUpdateApply => "Updating Kora",
+        Op::TxAdminTicket => "Opening txAdmin (full control of the game server)",
         _ => "Changing the schedule",
     };
     let p = Problem::new(
         codes::REMOTE_ACTIONS_OFF,
-        format!("{what} is turned off for sign-ins made with a token. A token is a secret in a link, and anyone who gets hold of it could use it, so this stays off until someone on the computer that runs Kora turns it on."),
+        format!("{what} is turned off for sign-ins that do not come through Tailscale. Anything that can be copied (a token, a stolen browser session) could use it, so this stays off until someone on the computer that runs Kora turns it on."),
     )
     .with_details(format!(
         "To turn it on, run this on the computer that runs Kora (over SSH is fine): {}\n\
@@ -627,53 +695,67 @@ fn actions_off(op: Op) -> ApiError {
 pub const REMOTE_ACTIONS_ON: &str = "kora panel remote-actions on";
 
 /// What a remote session with `id` may do with this request (plan section 1). Loopback never gets here.
-fn authorise(st: &AppState, method: &Method, path: &str, id: &Identity) -> Result<(), ApiError> {
+fn authorise(st: &AppState, method: &Method, path: &str, id: &Identity, session_id: Option<&str>) -> Result<(), ApiError> {
     let safe = method == Method::GET || method == Method::HEAD;
     let Some(op) = roles::op_for(method.as_str(), path) else {
         // No such route: a read falls through to the ordinary 404, anything else is refused.
-        return if safe {
-            Ok(())
-        } else {
-            Err(ApiError::forbidden(
-                "This is not available over remote access.",
-            ))
-        };
+        return if safe { Ok(()) } else { Err(ApiError::forbidden("This is not available over remote access.")) };
     };
     if roles::local_only(op) {
-        return Err(ApiError::forbidden(
-            "This can only be done on the computer that runs Kora, not over remote access.",
-        ));
+        return Err(ApiError::forbidden("This can only be done on the computer that runs Kora, not over remote access."));
     }
     let need = roles::min_role(op);
     if id.role < need {
-        return Err(ApiError::forbidden(format!(
-            "Your account has {} access, so it cannot do this. Ask an administrator for {need} access.",
-            id.role
-        )));
+        return Err(ApiError::forbidden(format!("Your account has {} access, so it cannot do this. Ask an administrator for {need} access.", id.role)));
     }
     if roles::needs_switch(op, id.provider.via()) && !st.remote.config().allow_remote_destructive {
         return Err(actions_off(op));
     }
+    // The most sensitive actions, from a session proven by a passkey or one-time code, need a check made a few minutes ago.
+    if remote::auth::state::needs_fresh(op) && remote::auth::state::reauth_applies(id.provider) && !session_id.is_some_and(|s| st.sessions.is_fresh(s)) {
+        return Err(ApiError::problem(
+            StatusCode::FORBIDDEN,
+            Problem::new(codes::REMOTE_REAUTH, "Confirm it is you first: use your passkey or a one-time code, then try again.").with_action(Action::Retry),
+        ));
+    }
     Ok(())
 }
 
-fn check(st: &AppState, req: &Request) -> Result<Caller, ApiError> {
+/// Is `host` (a `Host` header or the host of an `Origin`) acceptable for a request that came through the trusted
+/// proxy? The proxy forwards the public name without the panel's port, so only the name is compared.
+fn proxied_host_ok(st: &AppState, host: &str) -> bool {
+    let name = crate::tls::selfsigned::host_only(host);
+    st.remote.extra_hosts().iter().any(|e| crate::tls::selfsigned::host_only(e).eq_ignore_ascii_case(name))
+}
+
+fn check(st: &AppState, req: &Request) -> Result<(Caller, crate::tls::serve::Transport), ApiError> {
     let h = req.headers();
-    if PROXY_HEADERS.iter().any(|p| h.contains_key(*p)) {
+    let direct_peer = req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0);
+    let mut transport = req.extensions().get::<crate::tls::serve::Transport>().copied().unwrap_or_default();
+    // A reverse proxy Kora was told to trust (address AND shared secret): then the visitor is the forwarded
+    // address, always a remote one. Anywhere else forwarded headers are refused, as ever.
+    let mut peer = direct_peer;
+    let mut proxied = false;
+    if let (Some(p), Some(pc)) = (direct_peer, st.remote.trusted_proxy()) {
+        match pc.judge(p.ip(), h) {
+            remote::proxy::Verdict::Trusted { client, secure } => {
+                proxied = true;
+                peer = Some(SocketAddr::new(client, 0));
+                transport.secure = secure;
+            }
+            remote::proxy::Verdict::Refused(why) => return Err(ApiError::forbidden(why)),
+            remote::proxy::Verdict::NotProxied => {}
+        }
+    }
+    if !proxied && PROXY_HEADERS.iter().any(|p| h.contains_key(*p)) {
         return Err(ApiError::forbidden(PROXY_REFUSED));
     }
-    let peer = req
-        .extensions()
-        .get::<ConnectInfo<SocketAddr>>()
-        .map(|c| c.0);
     // No peer information (the router called directly, as the tests do) counts as local.
-    let remote = peer.is_some_and(|a| remote::is_remote_peer(a.ip()));
+    let remote = proxied || peer.is_some_and(|a| remote::is_remote_peer(a.ip()));
     // DNS rebinding defence: every route, including static files.
-    let host = h
-        .get(header::HOST)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    if !st.host_ok(host) {
+    let host = h.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or("");
+    let host_ok = |x: &str| if proxied { proxied_host_ok(st, x) } else { st.host_ok(x) };
+    if !host_ok(host) {
         return Err(ApiError::forbidden("host not allowed"));
     }
     let method = req.method();
@@ -687,9 +769,7 @@ fn check(st: &AppState, req: &Request) -> Result<Caller, ApiError> {
         return Err(ApiError::forbidden(SELF_ADDRESS_REFUSED));
     }
     if remote && !st.remote.enabled() {
-        return Err(ApiError::forbidden(
-            "Remote access is turned off on this computer.",
-        ));
+        return Err(ApiError::forbidden("Remote access is turned off on this computer."));
     }
     let safe = method == Method::GET || method == Method::HEAD;
     // The launch token is for the computer itself. Remote callers present a per-user token.
@@ -700,7 +780,7 @@ fn check(st: &AppState, req: &Request) -> Result<Caller, ApiError> {
             if st.remote.limiter.locked(ip) {
                 return Err(ApiError::rate_limited("too many failed attempts, try again later"));
             }
-            let found = st.remote.identity_for_token(t);
+            let found = st.remote.identity_for_bearer(t);
             if found.is_none() {
                 st.remote.limiter.failure(ip);
             }
@@ -713,11 +793,8 @@ fn check(st: &AppState, req: &Request) -> Result<Caller, ApiError> {
     if !safe {
         if let Some(o) = h.get(header::ORIGIN) {
             let o = o.to_str().unwrap_or("");
-            let ok = o
-                .get(..7)
-                .is_some_and(|p| p.eq_ignore_ascii_case("http://"))
-                && st.host_ok(&o[7..]);
-            if !ok {
+            // The scheme must be the one this connection used: a page served over HTTPS never posts from `http://`.
+            if !crate::tls::rules::origin_ok(o, transport.secure, host_ok) {
                 return Err(ApiError::forbidden("origin not allowed"));
             }
         }
@@ -725,12 +802,9 @@ fn check(st: &AppState, req: &Request) -> Result<Caller, ApiError> {
             return Err(ApiError::forbidden("missing X-Kora header"));
         }
     }
-    let mut caller = Caller {
-        remote,
-        peer,
-        identity: None,
-    };
+    let mut caller = Caller { remote, peer, identity: None };
     if path == "/api/v1" || path.starts_with("/api/v1/") {
+        // The session this request is signed in with (for the identity, and to know whether it was checked recently).
         let session_identity = || {
             let secret = session_secret(h, method, path, req.uri().query());
             // Every cookie of that name: a planted one sent first must not hide the real one.
@@ -741,7 +815,7 @@ fn check(st: &AppState, req: &Request) -> Result<Caller, ApiError> {
                 }
                 // A removed user, or a role that changed since sign-in, ends the session.
                 match st.remote.resolve(info.provider, &info.name) {
-                    Some(i) if i.role == info.role => Some(i),
+                    Some(i) if i.role == info.role => Some((i, id)),
                     _ => {
                         st.sessions.remove(&id);
                         None
@@ -749,18 +823,29 @@ fn check(st: &AppState, req: &Request) -> Result<Caller, ApiError> {
                 }
             })
         };
-        caller.identity = bearer_identity.or_else(session_identity);
+        let mut session_id: Option<String> = None;
+        caller.identity = match bearer_identity {
+            Some(i) => Some(i),
+            None => session_identity().map(|(i, sid)| {
+                session_id = Some(sid);
+                i
+            }),
+        };
         if is_public(method, path) {
-            return Ok(caller);
+            return Ok((caller, transport));
         }
         let Some(id) = caller.identity.clone() else {
             return Err(ApiError::unauthorized("missing or invalid session"));
         };
         if remote {
-            authorise(st, method, path, &id)?;
+            authorise(st, method, path, &id, session_id.as_deref()).inspect_err(|_| {
+                if let Some(home) = &st.audit_home {
+                    crate::audit::refused(home, method, path, &id)
+                }
+            })?;
         }
     }
-    Ok(caller)
+    Ok((caller, transport))
 }
 
 #[cfg(test)]

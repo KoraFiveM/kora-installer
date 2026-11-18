@@ -6,8 +6,8 @@ GitHub Windows runner, which is an administrator account with no real desktop. E
 cover: shortcuts, Explorer, UAC, a real browser, a normal user's permissions.
 
 Time: about 30 to 45 minutes for sections 1 to 6 on a clean Windows 11 machine, then section 8 to clean up. Section 7 (the
-upgrade from 0.6.x) is an extra 10 minutes on a machine that has 0.6.x. The section "Administrator prompt (UAC)" belongs
-to the elevated worker and has its own list. Tick a box when the step does what it says. When it
+upgrade from 0.6.x) is an extra 10 minutes on a machine that has 0.6.x. The section about the old UAC prompt
+has been replaced by "Kora's administrator service and the MSI". Tick a box when the step does what it says. When it
 does not, stop on that step, write down its number and collect the items under **If not, copy back**.
 
 ## 0. Before you start
@@ -113,20 +113,27 @@ does not, stop on that step, write down its number and collect the items under *
       "Logged in".
     *If not, copy back:* the Show details text and the output above.
 
-## 4. Saved licence keys and `secrets.json`
+## 4. Saved licence keys and the private data file
 
 19. [ ] **Add a key in Settings.** Settings > Licence keys > add one named "Main" with your real key. The list shows
     "Main" and only the **last four characters**. The full key is nowhere on the page (also not in "Show details").
-20. [ ] **`secrets.json` is private to you.** In a normal PowerShell window run
-    `icacls "$env:LOCALAPPDATA\Kora\secrets.json"`. *Should happen:* exactly one entry, your own account
-    (`<MACHINE>\<you>:(R,W)`); **no** `BUILTIN\Users`, `Everyone`, `Authenticated Users`, and no `(I)` inherited
-    entries. You can still open the file in Notepad (do not paste its contents anywhere).
+20. [ ] **The data file is private to you.** Kora keeps the saved keys in `%LOCALAPPDATA%\Kora\store\kora.db` (there is no
+    `secrets.json` any more). In a normal PowerShell window run `icacls "$env:LOCALAPPDATA\Kora\store"` and
+    `icacls "$env:LOCALAPPDATA\Kora\store\kora.db"`. *Should happen:* exactly one entry, your own account
+    (`<MACHINE>\<you>:(OI)(CI)(F)` for the folder, `<MACHINE>\<you>:(F)` for the file; the file's entry may show `(I)` because it
+    comes from the folder); **no** `BUILTIN\Users`, `Everyone`, `Authenticated Users`. While the panel runs, any `kora.db-wal` /
+    `kora.db-shm` next to it shows the same single entry.
     *If not, copy back:* the `icacls` output only.
+20a. [ ] **An old install is carried over.** If this computer had Kora 0.7 before: after the first start of this version Settings >
+    Licence keys still lists your keys, Settings > Recent jobs and the server list are intact, and
+    `%LOCALAPPDATA%\Kora\store\before-sqlite\` holds the old `secrets.json`, `servers.json` etc. (nothing was deleted).
+    `kora store status` prints the data file, its version and what is in it; `kora store backup` makes a copy in `store\backups`.
+    *If not, copy back:* the output of `kora store status`.
 21. [ ] **Replace, rename and delete work on that private file.** In Settings > Licence keys rename "Main" to "Live", add a
     second key "Test" (any text of the right shape, for example `cfxk_` followed by 20 letters/digits, then `_` and
     four more), replace "Test" with another, delete "Test". Every action succeeds with no "access denied" and
-    `icacls` on the file still shows only your account. (The file is rewritten through a temporary file each time; this
-    is the one place Windows permissions could get in the way.)
+    `icacls` on the file still shows only your account. (SQLite creates and removes `kora.db-wal` and `kora.db-shm` in the
+    private folder each time; this is the one place Windows permissions could get in the way.)
     *If not, copy back:* the error text and the `icacls` output.
 22. [ ] **`kora keys list`** in a normal window shows the same names and last four characters, never a full key.
 
@@ -194,84 +201,110 @@ Do steps 16 and 18 first (the tools and the GitHub sign-in).
 34. [ ] **"Several resources at once".** Type a branch name that exists in only some resources, press **Check which
     resources have it** before anything moves, switch those, then put them all back.
 
-## Administrator prompt (UAC)
+## Kora's administrator service and the MSI (replaces the old UAC / worker checks)
+
+There is no permission prompt any more except the one for the installer itself. Do these on a Windows 10/11 or Server
+2019+ machine with a normal administrator account and at least one standard (non-administrator) account. CI
+(`windows-smoke.yml`, job `msi`) installs the MSI and drives the service from standard test accounts through the Task
+Scheduler; this list is what a real desktop adds (prompts, shortcuts, Apps & features, upgrade over what you have).
+
+Part of this is now checked by CI (`windows-uac.yml`; see [windows-uac-ci.md](windows-uac-ci.md) for which steps and what only a self-hosted VM can do). The list below stays the owner's pass.
 
 Do these on a normal administrator account unless a step says otherwise. The prompt can appear as a flashing shield in
 the taskbar instead of on screen: note where it showed.
 
-A1. [ ] **One prompt.** Default wizard (service, firewall, "set up the database for me"), press Install: exactly **one**
-    Windows prompt; the install carries on in the browser; the service, the firewall rule and MariaDB exist; the files in
-    the server folder are owned by you.
-    *If not, copy back:* how many prompts, the Show details text, the install log.
-A2. [ ] **Say No.** Same install, press **No**: "Windows did not get permission" with **Ask again**, **Continue without
-    the administrator parts** and **Show me the command**. Ask again, then Yes: it finishes. Repeat and pick Continue
-    without: it finishes with no service and no firewall change.
-A3. [ ] **Leave it unanswered** for 5 minutes: "Nobody answered". Answering the stale prompt afterwards starts nothing,
-    and no `kora.exe admin-worker` is left in Task Manager.
-A4. [ ] **Worker killed.** End `kora.exe admin-worker` in Task Manager during the service step: the step fails with
-    "stopped"; **Try this step again** asks again and finishes. During the firewall step, **Skip** works.
-A5. [ ] **Standard (non-administrator) account.** Windows asks for an administrator's password; the install completes;
-    the scheduled task runs as the standard user; the server folder belongs to the standard user.
-A6. [ ] **Folder with spaces and non-English characters** in the server path.
-A7. [ ] **Remote session** (Tailscale or token): install says you are signed in from another device; **no** prompt
-    appears on the desktop until **Ask for administrator permission** is pressed.
-A8. [ ] **One prompt each** for: a schedule change, "Tidy up old shortcuts", Uninstall, deleting a server that has a
-    service, and System check, "Start it for me".
-A9. [ ] **Windows Server 2022** with a normal administrator account. (The built-in Administrator account runs everything
-    elevated, so the panel refuses to start there, as before.)
-A10. [ ] **Restart the panel mid-install** with a saved key: Carry on asks again only when an administrator step runs.
-A11. [ ] **Task Manager:** the worker never shows a window and exits after each action.
+S1. [ ] **Install the MSI** (double-click `kora-windows-x86_64.msi`, or the one-liner `irm ... | iex` and answer Y).
+    *Should happen:* exactly one Windows permission prompt; `C:\Program Files\Kora\kora.exe` exists; Services shows
+    "Kora administrator service" running, startup Automatic, log on as Local System; `kora` works in a new terminal (machine
+    PATH); a Start Menu "Kora" shortcut (and a Desktop one) opens the panel; Settings > Apps lists Kora with Uninstall.
+    *If not, copy back:* what the prompt said (publisher), the MSI log (`msiexec /i ... /l*v log.txt`).
+S2. [ ] **Install a Production server** (service + firewall + "set up the database for me") as the account that
+    installed Kora. *Should happen:* **no** prompt at all; the server's service, the firewall rule and MariaDB exist; the
+    server folder and its files belong to you (not to Administrators or SYSTEM); `kora service status` says "serves this
+    account: yes".
+S3. [ ] **Standard account.** Sign in as a standard user an administrator added with
+    `kora service allow <user>` (run in an administrator terminal). Install a server from that user's panel: no
+    password, no prompt; everything is theirs. A second standard account that was **not** added gets "Kora's
+    administrator service is not turned on for your account" with the command `kora service allow <account>`.
+S3b. [ ] **A standard account approved with an administrator's password at install.** Sign in as a standard user who is
+    NOT yet allowed. Run `kora service install` (or "Install Kora's administrator service" in the panel, or double-click
+    the MSI) and let a *different* administrator type their password in the permission prompt. Afterwards, as the
+    standard user: `kora service status` says "serves this account: yes" without anyone having run
+    `kora service allow`; `kora service list` names both the administrator who typed the password and the standard
+    user. Then repeat as an administrator who runs the MSI from an elevated terminal: only that administrator (and
+    `ALLOWUSERS`) is listed, nobody extra. *If the standard user is not listed:* the installer log
+    (`msiexec /i ... /l*v log.txt`, look for `allow-installer`) says why ("Windows did not say which program asked...").
+    The installer never fails because of this step; the old way (`kora service allow <account>`) always works.
+    *Unverified until this is run on Windows:* that Windows Installer fills `ClientProcessId` for an installation started
+    from a standard account's prompt, and that the elevated installer's parent is the program that asked for it.
+S4. [ ] **Two accounts, one machine.** As account A install server `alpha`; as account B (also allowed) try to delete,
+    change the ports or the schedule of `alpha` (a folder they cannot write is refused by Windows; for a folder B *can*
+    write, the service refuses: "does not belong to you"). Settings of B never list A's servers.
+S5. [ ] **Nothing runs from a user-writable place.** Delete `%LOCALAPPDATA%\Kora\bin` if it exists, put a renamed
+    `notepad.exe` as `kora.exe` there and on your user PATH ahead of Program Files: install a server with a service.
+    *Should happen:* no Notepad window; the install works (the service ran `C:\Program Files\Kora\kora.exe` only).
+S6. [ ] **Environment cannot steer the service.** Set user variables `KORA_MARIADB_HOME`, `KORA_SELF_UPDATE_API`
+    (`http://127.0.0.1:9`), `ProgramFiles`, `TEMP` as in the old W1, sign out and in, install with "set up the database
+    for me" and update Kora. *Should happen:* as without the variables; nothing under `C:\Users\Public`. Remove them.
+S7. [ ] **Remote session.** From another device (Tailscale or token) install a server: no prompt on the desktop, it
+    finishes; the audit log (`C:\Program Files\Kora\data\audit.log`, administrators can read it) has one line per
+    operation with your account and no paths.
+S8. [ ] **Without the service.** On a second machine use the per-user one-liner (answer **n**). Install with a service
+    and firewall: the panel says the service is not installed and offers **Install Kora's administrator service**,
+    **Continue without the administrator parts**, **Show me the command**. The first runs the MSI (one prompt, a checksum
+    check first) and the install then works without asking again; the second finishes the install without a service.
+S9. [ ] **Update through the service.** With an older MSI installed, Settings > Update Kora (or `kora self-update`):
+    *Should happen:* no prompt; the service restarts on the new version; `kora --version` and `kora service status`
+    show it; `kora.previous.exe` is in `C:\Program Files\Kora\data` until the next update.
+S10. [ ] **A broken update rolls back.** (Developer check.) Replace the update source with a program that exits
+    immediately: *Should happen:* "The new program did not work ... the previous one was put back"; the service keeps
+    running the old version.
+S11. [ ] **Upgrade from 0.7.0 / 0.6.x** (see section 7): run the MSI over a machine with the old per-user program, the
+    old machine-wide app and existing servers. *Should happen:* servers, services, firewall rules and databases are
+    untouched and still manageable from the panel; "Tidy up old shortcuts" sets your own old `kora.exe` aside; an old
+    update task that had "Run with highest privileges" no longer has the tick (Task Scheduler > Kora > Update ...).
+S12. [ ] **Uninstall** in Settings > Apps: the service, `C:\Program Files\Kora` (including `data` and `owners.json`),
+    the PATH entry and the shortcuts are gone; your servers, their services and your saved keys are not touched.
+S13. [ ] **Service account narrowing (owner decision).** The service runs as LocalSystem. Review whether a virtual
+    account with only the privileges it uses is worth it (service control, firewall, folder ACL changes, task creation
+    for other users) and write down what failed if you try one.
 
-## Elevated worker safety (things only a real Windows run can settle)
+## Can players reach my server, and txAdmin through the panel (unverified on Windows)
 
-These check the hardening of the administrator worker. Each says what a harmful program running as you might try and
-what must happen now. Use a normal administrator account unless the step says otherwise.
+These were written on Linux; what Windows prints and does is yours to check.
 
-W1. [ ] **Environment variables cannot steer the elevated side.** In a normal PowerShell run
-    `[Environment]::SetEnvironmentVariable('KORA_MARIADB_HOME','C:\Users\Public\evil','User')` and the same for
-    `KORA_SELF_UPDATE_API` (`http://127.0.0.1:9`), `ProgramFiles` (`C:\Users\Public\pf`) and `TEMP`
-    (`C:\Users\Public\t`). Sign out and in, open the panel, and do System check > "Start it for me" and an install
-    with "set up the database for me". *Should happen:* everything works as without the variables; nothing is created
-    under `C:\Users\Public`; Kora's MariaDB stays in `C:\ProgramData\Kora\mariadb`. Remove the four variables afterwards.
-    *If not, copy back:* what appeared under `C:\Users\Public`, and the install log.
-W2. [ ] **A planted database client is never run elevated.** Put any `mysql.exe` and `mariadb.exe` (for example a copy
-    of `notepad.exe` renamed) in a folder on your **user** PATH. Install with "set up the database for me". *Should
-    happen:* no Notepad window and no `mysql.exe` from that folder in Task Manager (Details > Command line); the database
-    is created. Remove the files.
-W3. [ ] **The program cannot be swapped after the prompt.** Start an install; when the prompt shows, try in a normal
-    PowerShell: `Rename-Item "$env:LOCALAPPDATA\Kora\bin\kora.exe" kora-old.exe`. *Should happen:* it fails ("being
-    used by another process") until the install's administrator steps are finished. Answer Yes; the install finishes.
-W4. [ ] **8.3 and subst paths.** `subst K: "$env:LOCALAPPDATA\Kora\bin"`, run `K:\kora.exe` and install from that
-    panel; also start it once through its short name (`dir /x` shows it, for example `KORA~1.EXE`). *Should happen:*
-    one prompt, the install finishes (no "process ... runs ..., which is not this program"). `subst K: /d` afterwards.
-W5. [ ] **Standard account, another administrator's password.** On a standard account, install from the panel and type
-    an administrator's password at the prompt. *Should happen:* the install finishes; Settings > Uninstall and "Tidy up
-    old shortcuts" act on **your** shortcuts and server list, not the administrator's (check that the administrator's
-    own Kora shortcuts, if any, are untouched).
-W6. [ ] **Connecting to the worker's pipe unelevated.** While an install's prompt has been answered, in a normal
-    PowerShell: `[System.IO.Directory]::GetFiles('\\.\pipe\') | Select-String kora-admin` shows the pipe; then
-    `$p = New-Object System.IO.Pipes.NamedPipeClientStream('.', '<name without \\.\pipe\>', 'InOut'); $p.Connect(2000)`.
-    *Should happen:* "Access to the path is denied" (or a timeout); the install is not disturbed.
-W7. [ ] **The update task runs without elevation.** After a Development install, Task Scheduler > `Kora` task >
-    General: "Run with highest privileges" is **not** ticked; it runs as you. Run it (right click > Run): it finishes,
-    and if it restarts the server, the restart works. *Also on an upgraded 0.6.x machine:* an old task still has the
-    tick until the schedule is changed once (Settings or `kora schedule set`); after that it is gone.
-W8. [ ] **Server services keep no "impersonate" right.** `sc.exe qprivs kora-<name>` lists only
-    `SeChangeNotifyPrivilege` and `SeIncreaseWorkingSetPrivilege`; the server starts and txAdmin answers;
-    `sc.exe sdshow kora-<name>` ends with an entry for your SID (you may start and stop it): from a normal window
-    `sc.exe stop kora-<name>` and `sc.exe start kora-<name>` work.
-W9. [ ] **Two administrator actions at once.** During an install's administrator steps, press System check > "Start it
-    for me". *Should happen:* "Kora is already doing administrator work for something else", no second prompt; it works
-    when the install has finished.
-W10. [ ] **Closing the panel mid-step.** During the database or service step, end the panel's `kora.exe` (not the
-    worker) in Task Manager. *Should happen:* within a few seconds no `kora.exe admin-worker` and no `kora.exe
-    admin-step` is left. Start the panel again and **Try this step again**: it finishes (a service made just before is
-    used again, no "already exists").
-W11. [ ] **Uninstall with "delete the server folders".** Settings > Uninstall, tick a server folder. *Should happen:* one
-    prompt; services and rules go; the folder is deleted afterwards **without** a second prompt (by the panel, as you).
-W12. [ ] **Unusual ports.** Make a server with game port `3389` (wizard, advanced ports). *Should happen:* the firewall step
-    stops with "Kora does not open port 3389 in the firewall from the panel" and offers to skip that step; no
-    firewall rule for 3389 exists (`Get-NetFirewallRule -DisplayName "*kora*"`).
+- [ ] **Reachability card.** On a server's Overview press **Check now**. *Should happen:* four lines (Running, Firewall,
+  Router, Internet). With the server running the first is OK; the firewall line says Windows Firewall and "Kora did not
+  open port ..." unless the install opened it (then OK). Nothing outside is contacted (the card says so). Run
+  `kora reach <name>` in a terminal: the same lines.
+- [ ] **Gateway address.** `route print -4 0.0.0.0` shows your default gateway; Kora reads the same row for NAT-PMP/PCP.
+  *Should happen:* with a router that offers UPnP, **Forward port ... for me** turns the line OK, and your router's page
+  lists "Kora <name> game" for TCP and UDP. Stop the server: the entries disappear (within a minute).
+- [ ] **Service host.** With the server running as a service, switch forwarding on, then `sc stop kora-<name>`: the router
+  entries are removed before the service reports stopped.
+- [ ] **txAdmin through the panel.** From another device open the panel and press **Open txAdmin** on a server: a new tab
+  opens txAdmin's sign-in page on the panel's address with port txAdmin + 10000. Sign in to txAdmin; the live console
+  updates. Sign out of the panel: the console tab closes within about 20 seconds and reloading it shows "Open txAdmin
+  from the Kora panel". Windows Firewall may ask about the panel's new port (allow private networks only).
+
+## Saved licence keys with DPAPI, and HTTPS (unverified on Windows)
+
+Written on Linux and type-checked for Windows only; this is what a real run must settle.
+
+1. `kora keys add Main` (key on standard input), then `kora keys keychain status`: it says **Windows (protected for your account)**. Open
+   `%LOCALAPPDATA%\Kora\store\kora.db` in a viewer: the table holds `dpapi1:` followed by hex, not the key. `kora keys list` shows the key
+   ending and "kept in Windows (protected for your account)".
+2. Install a server with that saved key: `secrets.cfg` holds the real key (the privileged side gets the value from the panel, it never reads DPAPI).
+3. Copy `kora.db` to another Windows account (or another PC) and run `kora keys list` there: the key shows the "saved by another Windows account"
+   problem naming it, with Enter it again; entering it again fixes it. `kora store export-json` there names it in `keys-not-exported.txt`.
+4. `kora keys keychain off`: the values come back in clear in the table and the status says "you turned the system keychain off"; `on` seals them again.
+5. A background panel running as the same user (not an administrator) reads the key without any prompt.
+6. `kora panel tls self-signed --name <this PC's name>` then `kora panel --bind <LAN address> --remote`: `https://<name>:47120` works in Edge after installing
+   `kora-local-ca.crt` into Trusted Root Certification Authorities (the printed steps); the fingerprint in Settings > HTTPS matches Edge's certificate viewer.
+   Opening `http://<name>:47120` from another PC redirects to https. Passkeys: invite a user (`kora panel user invite`), open the link from another PC by the **name**
+   (Windows Hello registers a passkey), sign in with it; by the bare IP address the page explains and offers one-time codes.
+7. Private key file check: `kora panel tls set --cert c.pem --key k.pem` with the key in your own folder works (Windows files are not checked for other readers; keep the
+   folder private).
 
 ## 7. Upgrade delta: a machine that has 0.6.x with the old machine-wide app
 
@@ -310,12 +343,75 @@ run `kora app install` (this is how 0.6.x made the machine-wide app, with its ad
     the servers and the panel are untouched; **no UAC prompt**. Make them again with `kora app install`.
 43. [ ] **Panel Uninstall.** Settings > Uninstall Kora shows an item-by-item list that names the shortcuts and Kora's own
     Git/GitHub CLI copies. Do **not** tick the server folders or databases. Run it (type `uninstall`): services, firewall
-    rules and the server-list entries go; **the server folders and `secrets.json` stay**.
+    rules and the server-list entries go; **the server folders and Kora's data file stay**.
 44. [ ] **`kora delete "test dev"`** and **`kora delete "test prod"`** (administrator window if it says so) remove the
     server, its service and its firewall rule: `Get-Service kora-*` and
     `Get-NetFirewallRule -DisplayName "*kora*"` show nothing for them.
 45. [ ] **Tidy the test machine**: delete the test forks on GitHub, run `kora uninstall` in a terminal and answer **yes**
     to removing saved keys and Kora's own tools; the folder `%LOCALAPPDATA%\Kora` is gone or empty apart from the program.
+
+## Backups, moving a server and the support bundle (unverified on Windows: the owner's pass)
+
+Needs a Windows machine with a Production server that has Kora's MariaDB (or MySQL) database and `mariadb-dump.exe` / `mysqldump.exe` next to its client. Use a throw-away server and a fake licence key.
+
+- [ ] **Backups tab, first backup** (no password): it finishes with a path under `%LOCALAPPDATA%\Kora\server-backups\<name>`. The file's **Security** tab shows only your account (no `Users`, `Everyone`, `Authenticated Users`). The database password does not appear in Task Manager's command-line column or in Process Explorer while it runs.
+- [ ] **Check** on that backup says every file matches. **Back up now** with "Stop the server while the backup runs" stops a running server and starts it again.
+- [ ] **A password-protected backup**: the file ends in `.tar.gz.age`; opening **Restore…** asks for the password and a wrong one says it does not open the backup. (Optional: `age -d` opens it.)
+- [ ] **Restore**: change `server.cfg`, delete a row in the game database, restore: the preview lists what changes and what stays, a safety copy appears in the list, the row and `server.cfg` come back, and `secrets.cfg` is still the current one. **Undo this restore** puts the changed `server.cfg` back.
+- [ ] **A chosen folder** on another drive or a mapped network share: the backup lands there and the file has no inherited access for other users (`icacls <file>`); a folder that cannot be written gives a message, not a crash.
+- [ ] **Retention**: set "newest 2", make three backups: only two stay; the safety copy of a restore stays.
+- [ ] **Schedule**: set a time two minutes ahead with `kora panel --background` running: a backup appears by itself, labelled Scheduled, and the Overview says "Last backup just now". Stop the panel, wait past another slot, start it: one backup is made up.
+- [ ] **Failure alert**: stop the database service, run a scheduled backup (or press Back up now): the error offers **Start the database**; a scheduled failure shows in the panel's alerts and in your Discord webhook.
+- [ ] **Move this server out, then in** (same machine is fine, with a different name and ports, after deleting the first server): the export asks for a password; **Bring a server from a backup** shows the preview with the licence-key warning, a clash for the name/ports if the first server is still there (with the "Use ..." fix), and the list of what does not carry over; the import creates a **new** `kora_` database, the row is in it, and `secrets.cfg` holds the new connection string. Break the import (stop the database service in the middle) and run it again: it carries on from the last finished step; **Start over** removes the half-made folder and database.
+- [ ] **From Linux to Windows** (if you have a Linux export): the imported `server.cfg` has no `/home/...` paths and txAdmin's `config.json` points at the new folder; a resource that needs a Linux-only program is the one thing that fails.
+- [ ] **Support bundle** (Settings, and the link under "Show details" of an error): the list shows `about.txt`, `servers/<name>/server.cfg`, `jobs.txt` and so on; **secrets.cfg**, **database.json** and **txData** are listed as left out; `server.cfg` shows `sv_licenseKey "<hidden: licence key>"`; the saved zip contains no part of your licence key, database password or Discord webhook address (search it); nothing was sent anywhere.
+## The desktop app: tray icon, window, notifications (never run on Windows before this pass)
+
+The desktop app (`kora-desktop.exe`) was compiled and smoke-tested only by CI; this is its first real pass. Install it next
+to `kora.exe` (for now copy `kora-desktop-windows-x86_64.exe` from the CI artifact next to `kora.exe` and rename it
+`kora-desktop.exe`), then run `kora app install`. Note for each failure what you saw and, if the window is blank, whether
+the address bar of your browser shows the panel when you run `kora`.
+
+D1. [ ] **Start it** (the Kora shortcut, now pointing at `kora-desktop.exe`; check with `kora app status`). A small Kora
+    window opens, already signed in, showing the servers screen. No console window flashes. An icon appears in the
+    notification area (click the little arrow by the clock if it is hidden; drag it onto the bar to keep it visible).
+D2. [ ] **Tray colour and words.** Hover the icon: "Kora: all N servers are running" with the icon green. Stop one server from
+    its tray submenu: the icon turns amber/red within about 10 seconds and the hover text says "1 of N servers running".
+    Start it again from the menu: green again.
+D3. [ ] **Menu.** Right-click: Open Kora, each server (Open in Kora, Start/Stop/Restart, Open txAdmin when running), Check
+    for updates, Pause notifications, Start with Windows (ticked), a line saying Quit keeps your servers and the background
+    service running, Quit, Quit and turn off Kora's background service. Left-click the icon opens/shows the window.
+D4. [ ] **Close to tray.** Close the window with the X: a notification says Kora is still running in the notification
+    area (once only). The icon stays. Left-click it: the window is back, still signed in, on the same page.
+D5. [ ] **Single instance.** With the window closed to the tray, start Kora from the Start menu again: the existing window
+    appears; no second icon; Task Manager shows one `kora-desktop.exe`.
+D6. [ ] **Notification on a crash.** End a server's process in Task Manager (`FXServer.exe`) with the window closed to the
+    tray and alert rule "stopped" on (server, Monitoring tab): within about a minute a Windows notification says "<name>
+    stopped" and clicking it opens that server's page. With the rule off: no notification. With **Pause notifications**: none;
+    "Turn notifications back on" restores them. Stop 4 servers at once (if you have them): ONE summary notification.
+    *If no notification appears at all, note it: it is the first thing to check (the notification identity `Kora.Desktop`).*
+D7. [ ] **Update notification.** (Only when a newer Kora exists.) "Kora X is ready" once, clicking it opens Settings.
+D8. [ ] **Start with Windows.** Sign out and in: the Kora icon appears with no window; the background panel is running.
+    Untick "Start with Windows" in the tray menu, sign out and in: no icon. Tick it again.
+    Also check Settings > Apps > Startup: Kora is listed; switch it off there and the tray menu shows it unticked.
+D9. [ ] **Browser still works.** Run `kora` in PowerShell with the app running: it opens your browser at the panel as
+    before (the app and the browser can be open at once).
+D10. [ ] **Links.** In the window, click a link to GitHub (or "Open txAdmin" on a local server): it opens in your default
+    browser, and the app window does not navigate away.
+D11. [ ] **Browse.** Servers > Add an existing server > **Browse...**: the Windows folder dialog opens; the chosen folder
+    appears in the box. Cancel leaves the box alone. In a normal browser there is no Browse button.
+D12. [ ] **The administrator prompt in front.** (Needs the privileged-service build.) From the app press "Install Kora's
+    administrator service": the Windows prompt appears **in front of the Kora window** (not a flashing shield in the
+    taskbar). Say No: "Windows asked for permission and it was not given." Compare with the same button in a browser (the
+    old behaviour): note whether it flashes in the taskbar.
+D13. [ ] **WebView2 missing.** On a machine or VM without WebView2 (or after uninstalling "Microsoft Edge WebView2 Runtime"
+    where Windows allows it): starting the app gives one notification explaining it and opens Kora in the browser; the tray
+    icon still works. The message names the Microsoft download link.
+D14. [ ] **Quit.** Quit: the icon disappears (no ghost icon), the game servers and the background panel keep running
+    (`Get-Process kora*`, the browser still reaches the panel). Start the app again, then **Quit and turn off Kora's
+    background service**: the panel stops answering; servers keep running; the next `kora` starts the panel again.
+D15. [ ] **Uninstall.** `kora app uninstall` (or the MSI uninstall) removes the shortcuts and the start-up entry
+    (`reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Kora` finds nothing).
 
 ## 9. Report back
 

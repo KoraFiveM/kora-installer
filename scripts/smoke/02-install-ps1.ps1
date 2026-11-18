@@ -51,7 +51,8 @@ try {
     # makes kora treat this as a computer with no screen, so no browser opens on the runner.
     $env:SSH_CONNECTION = '203.0.113.1 50000 198.51.100.2 22'
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$PWD/scripts/install.ps1" 2>&1 | Out-String
+    # Every line carries the seconds since the start, so a slow launch shows where the time went.
+    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$PWD/scripts/install.ps1" 2>&1 | ForEach-Object { '[{0,3}s] {1}' -f [int]$sw.Elapsed.TotalSeconds, $_ } | Out-String
     $code = $LASTEXITCODE
     $sw.Stop()
     Remove-Item Env:SSH_CONNECTION
@@ -79,7 +80,7 @@ try {
     }
     Assert-That ($out -match 'Sign in to Kora Panel' -and $out -match 'http://127\.0\.0\.1:\d+/#(code|token)=[0-9a-f]+') 'the background panel answers and the sign-in link is printed'
     Assert-That ($out -match 'ssh -L \d+:127\.0\.0\.1:\d+ \S+@198\.51\.100\.2') 'with no screen the SSH tunnel command is printed'
-    Assert-That ($sw.Elapsed.TotalSeconds -lt 60) 'the launch returns instead of keeping the shell busy'
+    Assert-That ($sw.Elapsed.TotalSeconds -lt 60) "the launch returns instead of keeping the shell busy (took $([int]$sw.Elapsed.TotalSeconds) s)"
     $link = Invoke-Native "$default\kora.exe" @('panel', '--print-link')
     Assert-That ($link.Code -eq 0) 'kora panel --print-link works after the install'
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')

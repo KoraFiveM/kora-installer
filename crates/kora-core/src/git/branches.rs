@@ -50,6 +50,7 @@ const FETCH: [&str; 4] = ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedT
 
 /// What is checked out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "SwitchKind"))]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     /// The resource's normal branch.
@@ -63,12 +64,14 @@ pub enum Kind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "SwitchNow"))]
 pub struct Where {
     pub kind: Kind,
     /// Local branch name; `None` when detached.
     pub branch: Option<String>,
     /// The pull request number when `kind` is `pr`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub pr: Option<u32>,
     /// Files with uncommitted changes (at most [`MAX_FILES`]) and the real count.
     pub changed_files: Vec<String>,
@@ -109,6 +112,7 @@ pub fn describe_other(current: &str) -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "BranchLists"))]
 pub struct Branches {
     pub current: Option<String>,
     pub default_branch: String,
@@ -122,6 +126,7 @@ pub struct Branches {
 
 /// A kept-aside set of changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "BranchStash"))]
 pub struct Stash {
     /// Position in git's stash list (`stash@{index}`).
     pub index: u32,
@@ -132,6 +137,7 @@ pub struct Stash {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "ChangesChoice"))]
 #[serde(rename_all = "snake_case")]
 pub enum Changes {
     /// Do nothing and say which files have changes.
@@ -144,6 +150,7 @@ pub enum Changes {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "SwitchStatus"))]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
     Switched,
@@ -154,24 +161,29 @@ pub enum Status {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "SwitchOutcome"))]
 pub struct Outcome {
     pub status: Status,
     /// Where the checkout is now.
     pub now: Where,
     /// When changes were kept aside.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub stashed: Option<Stash>,
     /// When commits that belonged to no branch were saved on a branch of this name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub saved_branch: Option<String>,
     /// For pull requests: its title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub title: Option<String>,
     /// Plain sentence about what happened.
     pub message: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum PrSource {
     /// On the original repository.
@@ -181,6 +193,7 @@ pub enum PrSource {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct PullRequest {
     pub number: u32,
     pub title: String,
@@ -195,6 +208,19 @@ pub struct PullRequest {
     pub draft: bool,
     pub url: String,
     pub updated: String,
+    /// When it was opened.
+    #[serde(default)]
+    pub created: String,
+    /// `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, or empty when GitHub did not say.
+    #[serde(default)]
+    pub review: String,
+    /// Whether its checks pass, fail, are still running, or there are none.
+    #[serde(default = "no_checks")]
+    pub checks: crate::collab::Checks,
+}
+
+fn no_checks() -> crate::collab::Checks {
+    crate::collab::Checks::None
 }
 
 /// A pull request the person named: a number, or an address.
@@ -256,9 +282,9 @@ fn bad_name(what: &str, v: &str) -> Problem {
 pub fn problem_of(e: &GitError) -> Problem {
     match e {
         GitError::Spawn(cmd, why) if cmd.starts_with("gh ") => known::gh_missing().with_details(why.clone()),
-        GitError::Spawn(_, why) => Problem::new(pcodes::INSTALL_TOOL_MISSING, "Git is not installed, or Kora cannot find it.")
-            .with_details(why.clone())
-            .with_action(Action::InstallTool { tool: Tool::Git }),
+        GitError::Spawn(_, why) => {
+            Problem::new(pcodes::INSTALL_TOOL_MISSING, "Git is not installed, or Kora cannot find it.").with_details(why.clone()).with_action(Action::InstallTool { tool: Tool::Git })
+        }
         GitError::Invalid(what, v) => bad_name(what, v),
         GitError::Parse(cmd, _) => Problem::new(pcodes::FAILED, "GitHub or git answered in a way Kora did not understand.").with_details(cmd.clone()).with_action(Action::CopyDetails),
         GitError::Command { cmd, stderr, .. } => {
@@ -270,9 +296,19 @@ pub fn problem_of(e: &GitError) -> Problem {
                 known::github_signed_out()
             } else if super::is_rate_limited(stderr) {
                 Problem::new(pcodes::GH_RATE_LIMITED, "GitHub says to slow down. Wait a minute and try again.").with_action(Action::Retry)
-            } else if ["could not resolve host", "unable to access", "timed out", "connection refused", "network is unreachable", "failed to connect", "operation too slow", "tls connection", "could not connect"]
-                .iter()
-                .any(|m| low.contains(m))
+            } else if [
+                "could not resolve host",
+                "unable to access",
+                "timed out",
+                "connection refused",
+                "network is unreachable",
+                "failed to connect",
+                "operation too slow",
+                "tls connection",
+                "could not connect",
+            ]
+            .iter()
+            .any(|m| low.contains(m))
             {
                 Problem::new(codes::NO_NETWORK, "Kora could not reach GitHub. Check your internet connection and try again.").with_details(stderr.clone()).with_action(Action::Retry)
             } else {
@@ -546,6 +582,35 @@ pub fn back_to_default(r: &dyn CommandRunner, repo: &Path, default_branch: &str,
     switch_branch(r, repo, default_branch, default_branch, None, changes)
 }
 
+/// The commit checked out now.
+pub fn head_commit(r: &dyn CommandRunner, repo: &Path) -> PResult<String> {
+    Ok(pr(run_ok(r, "git", &["rev-parse", "HEAD"], Some(repo)))?.stdout.trim().to_string())
+}
+
+/// Back to the released version a server is pinned to: exactly that commit, on no branch (how a released resource is
+/// installed). Kept changes and commits that belong to no branch are dealt with like in any other switch.
+pub fn back_to_release(r: &dyn CommandRunner, repo: &Path, default_branch: &str, commit: &str, changes: Changes) -> PResult<Outcome> {
+    check_commit(commit)?;
+    let now = locate(r, repo, default_branch)?;
+    let head = head_commit(r, repo)?;
+    if now.kind == Kind::Detached && !head.is_empty() && (head.starts_with(commit) || commit.starts_with(&head)) {
+        return Ok(Outcome { status: Status::Already, message: "Already on the released version.".into(), now, stashed: None, saved_branch: None, title: None });
+    }
+    let (stashed, saved_branch) = match prepare_leave(r, repo, &now, "the released version", changes)? {
+        Prep::NeedsChoice => return Ok(needs_choice(now)),
+        Prep::Ready { stashed, saved_branch } => (stashed, saved_branch),
+    };
+    let spec = format!("{commit}^{{commit}}");
+    if !pr(run(r, "git", &["cat-file", "-e", &spec], Some(repo)))?.ok() {
+        let mut args: Vec<&str> = FETCH.to_vec();
+        args.extend(["fetch", "--tags", "origin"]);
+        pr(run_ok(r, "git", &args, Some(repo)))?;
+    }
+    pr(run_ok(r, "git", &["checkout", "--detach", commit], Some(repo)))?;
+    let what = format!("Back on the released version ({}).", &commit[..commit.len().min(7)]);
+    finish(r, repo, default_branch, stashed, saved_branch, None, &what)
+}
+
 /// Switch the checkout to `name`'s tip only if safe; used by rollback to return to the branch a snapshot was taken on.
 /// `"HEAD"` means "no branch". Never creates branches and never touches changes: a dirty conflict is an error.
 pub(crate) fn switch_to(r: &dyn CommandRunner, repo: &Path, branch: &str) -> super::Result<()> {
@@ -578,7 +643,9 @@ pub(crate) fn current(r: &dyn CommandRunner, repo: &Path) -> super::Result<Optio
 pub fn restore_stash(r: &dyn CommandRunner, repo: &Path, default_branch: &str, index: u32) -> PResult<Outcome> {
     let now = locate(r, repo, default_branch)?;
     if now.dirty() {
-        return Err(Problem::new(codes::STASH_NEEDS_CLEAN, "This resource has changes of its own right now. Put them aside or discard them first, then bring the old ones back.").with_action(Action::Retry));
+        return Err(
+            Problem::new(codes::STASH_NEEDS_CLEAN, "This resource has changes of its own right now. Put them aside or discard them first, then bring the old ones back.").with_action(Action::Retry)
+        );
     }
     let list = stashes(r, repo)?;
     let Some(stash) = list.iter().find(|s| s.index == index).cloned() else {
@@ -590,13 +657,10 @@ pub fn restore_stash(r: &dyn CommandRunner, repo: &Path, default_branch: &str, i
         // Conflicts: put the folder back exactly as it was (it was clean), keep the stash.
         let _ = run(r, "git", &["reset", "--hard"], Some(repo));
         let _ = run(r, "git", &["clean", "-fd"], Some(repo));
-        return Err(Problem::new(
-            codes::STASH_CONFLICT,
-            "Your kept-aside changes don't fit on top of this version (they touch the same lines). Nothing was changed, and they are still kept aside.",
-        )
-        .with_details(first_lines(&o))
-        .with_action(Action::show_command(&["git", "stash", "show", "-p", &reference], false))
-        .with_action(Action::CopyDetails));
+        return Err(Problem::new(codes::STASH_CONFLICT, "Your kept-aside changes don't fit on top of this version (they touch the same lines). Nothing was changed, and they are still kept aside.")
+            .with_details(first_lines(&o))
+            .with_action(Action::show_command(&["git", "stash", "show", "-p", &reference], false))
+            .with_action(Action::CopyDetails));
     }
     let after = locate(r, repo, default_branch)?;
     Ok(Outcome {
@@ -617,12 +681,22 @@ fn first_lines(o: &Output) -> String {
 // Pull requests (through gh)
 // ---------------------------------------------------------------------------------------------
 
+#[cfg(test)]
+pub(crate) fn slugs_for_test(r: &dyn CommandRunner, repo: &Path) -> (Option<String>, Option<String>) {
+    slugs(r, repo).unwrap()
+}
+
 fn slugs(r: &dyn CommandRunner, repo: &Path) -> PResult<(Option<String>, Option<String>)> {
     let get = |remote: &str| -> PResult<Option<String>> {
         let o = pr(run(r, "git", &["remote", "get-url", remote], Some(repo)))?;
         Ok(o.ok().then(|| slug_of_url(o.stdout.trim())).flatten())
     };
-    Ok((get("upstream")?, get("origin")?))
+    let (up, origin) = (get("upstream")?, get("origin")?);
+    // A plain clone has only `origin`, and that IS the original repository.
+    if up.is_none() {
+        return Ok((origin, None));
+    }
+    Ok((up, origin))
 }
 
 /// Open pull requests of the original repository and of the person's fork, labelled by where they are.
@@ -647,7 +721,18 @@ pub fn list_prs(r: &dyn CommandRunner, repo: &Path) -> PResult<(Vec<PullRequest>
     let mut first_error: Option<Problem> = None;
     let mut worked = 0;
     for (source, slug) in &sides {
-        let args = ["pr", "list", "--repo", slug.as_str(), "--state", "open", "--limit", "100", "--json", "number,title,author,headRefName,headRepository,headRepositoryOwner,isDraft,url,updatedAt"];
+        let args = [
+            "pr",
+            "list",
+            "--repo",
+            slug.as_str(),
+            "--state",
+            "open",
+            "--limit",
+            "100",
+            "--json",
+            "number,title,author,headRefName,headRepository,headRepositoryOwner,isDraft,url,updatedAt,createdAt,reviewDecision,statusCheckRollup",
+        ];
         match run_ok(r, "gh", &args, None) {
             Ok(o) => {
                 worked += 1;
@@ -696,6 +781,9 @@ fn pr_from_json(v: &Value, source: PrSource, slug: &str) -> Option<PullRequest> 
         draft: v.get("isDraft").and_then(Value::as_bool).unwrap_or(false),
         url: s("url"),
         updated: s("updatedAt"),
+        created: s("createdAt"),
+        review: s("reviewDecision"),
+        checks: crate::collab::rollup(&v.get("statusCheckRollup").and_then(Value::as_array).cloned().unwrap_or_default()).0,
     })
 }
 
@@ -720,10 +808,14 @@ fn view_pr(r: &dyn CommandRunner, repo_slug: &str, number: u32) -> PResult<Optio
                 head_gone: v.get("headRepository").is_none_or(Value::is_null),
             }))
         }
-        Err(GitError::Command { stderr, .. }) if {
-            let l = stderr.to_ascii_lowercase();
-            l.contains("could not resolve to a pullrequest") || l.contains("no pull requests found") || l.contains("http 404")
-        } => Ok(None),
+        Err(GitError::Command { stderr, .. })
+            if {
+                let l = stderr.to_ascii_lowercase();
+                l.contains("could not resolve to a pullrequest") || l.contains("no pull requests found") || l.contains("http 404")
+            } =>
+        {
+            Ok(None)
+        }
         Err(e) => Err(problem_of(&e)),
     }
 }
@@ -751,8 +843,11 @@ pub fn checkout_pr(r: &dyn CommandRunner, repo: &Path, default_branch: &str, inp
             match known {
                 Some(s) => candidates.push(s.clone()),
                 None => {
-                    return Err(Problem::new(codes::PR_OTHER_REPO, format!("That pull request is on {want}, which is not this resource's repository or your fork of it. Kora can only try pull requests of those two."))
-                        .with_action(Action::open_link(&format!("https://github.com/{want}/pull/{}", input.number))))
+                    return Err(Problem::new(
+                        codes::PR_OTHER_REPO,
+                        format!("That pull request is on {want}, which is not this resource's repository or your fork of it. Kora can only try pull requests of those two."),
+                    )
+                    .with_action(Action::open_link(&format!("https://github.com/{want}/pull/{}", input.number))))
                 }
             }
         }
@@ -781,12 +876,13 @@ pub fn checkout_pr(r: &dyn CommandRunner, repo: &Path, default_branch: &str, inp
     match d.state.as_str() {
         "OPEN" => {}
         "MERGED" => {
-            return Err(Problem::new(codes::PR_CLOSED, format!("Pull request #{} has already been merged, so there is nothing separate to try. Go back to the normal version to get it.", input.number))
-                .with_action(Action::open_link(&d.url)))
+            return Err(Problem::new(
+                codes::PR_CLOSED,
+                format!("Pull request #{} has already been merged, so there is nothing separate to try. Go back to the normal version to get it.", input.number),
+            )
+            .with_action(Action::open_link(&d.url)))
         }
-        _ => {
-            return Err(Problem::new(codes::PR_CLOSED, format!("Pull request #{} was closed without being merged.", input.number)).with_action(Action::open_link(&d.url)))
-        }
+        _ => return Err(Problem::new(codes::PR_CLOSED, format!("Pull request #{} was closed without being merged.", input.number)).with_action(Action::open_link(&d.url))),
     }
     let remote = remote_for(r, repo, &slug)?;
     let n = input.number;
@@ -830,7 +926,14 @@ pub fn checkout_pr(r: &dyn CommandRunner, repo: &Path, default_branch: &str, inp
     };
     let up_to_date = exists && local == base && !fast_forward;
     if up_to_date && now.branch.as_deref() == Some(local.as_str()) {
-        return Ok(Outcome { status: Status::Already, message: format!("Already trying pull request #{n}, and there is nothing new in it."), now, stashed: None, saved_branch: None, title: Some(d.title) });
+        return Ok(Outcome {
+            status: Status::Already,
+            message: format!("Already trying pull request #{n}, and there is nothing new in it."),
+            now,
+            stashed: None,
+            saved_branch: None,
+            title: Some(d.title),
+        });
     }
     let (stashed, saved_branch) = match prepare_leave(r, repo, &now, &format!("pull request #{n}"), changes)? {
         Prep::NeedsChoice => return Ok(needs_choice(now)),

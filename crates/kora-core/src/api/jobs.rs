@@ -1,17 +1,76 @@
 //! Slow operations as jobs: run on a std thread, collect events, keep the result for a while.
 //! No async runtime: a web server polls [`JobRegistry::get`] or reads a [`JobRegistry::subscribe`]
 //! channel (from `spawn_blocking`, or a small bridge thread).
+//!
+//! [`JobRegistry::new`] keeps everything in memory (tests, demos). [`JobRegistry::durable`] also writes
+//! every job, its (bounded) events and its end to the Kora home's store (see [`crate::store::jobs`]), so a
+//! panel restart keeps the history, and a job that was running when the panel died is marked
+//! `interrupted` with a guided problem the next time a panel starts. A failing journal never stops a job:
+//! the job runs on and is simply not remembered.
 
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::ops::Op;
+use crate::problem::Problem;
+
+/// Why a job failed: a [`Problem`] plus the extra fields some failures add (an install adds `kept`,
+/// `log_path`, `failed_step`, `resume`). A job body returns `Err(JobFailure)`; a plain [`Problem`],
+/// `String` or `&str` converts into one. It is kept (and stored, see [`crate::store::jobs`]) as the
+/// JSON text of one flat object: the Problem's fields, then the extras.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JobFailure {
+    pub problem: Problem,
+    pub extra: Box<serde_json::Map<String, Value>>,
+}
+
+impl JobFailure {
+    pub fn new(problem: Problem) -> Self {
+        Self { problem, extra: Box::default() }
+    }
+    /// Add an extra field (never overrides the Problem's own fields).
+    pub fn with(mut self, key: &str, value: Value) -> Self {
+        if !matches!(key, "code" | "message" | "details" | "actions") {
+            self.extra.insert(key.to_string(), value);
+        }
+        self
+    }
+    /// The flat JSON object the panel and the store use.
+    pub fn to_json(&self) -> Value {
+        let mut v = self.problem.to_json();
+        if let Value::Object(m) = &mut v {
+            // The wire shape leaves `actions` out when there are none (as job errors always did).
+            if self.problem.actions.is_empty() {
+                m.remove("actions");
+            }
+            for (k, x) in self.extra.iter() {
+                m.insert(k.clone(), x.clone());
+            }
+        }
+        v
+    }
+    /// The text kept in `JobSnapshot::error` and the store.
+    pub fn to_text(&self) -> String {
+        self.to_json().to_string()
+    }
+}
+
+/// Anything that becomes a [`Problem`] (a Problem, a sentence, an io or JSON error) becomes a failure.
+impl<E: Into<Problem>> From<E> for JobFailure {
+    fn from(e: E) -> Self {
+        Self::new(e.into())
+    }
+}
+
+/// What a job body returns.
+pub type JobResult = Result<Value, JobFailure>;
 
 /// Finished jobs kept at most this many (oldest dropped first).
 pub const MAX_FINISHED: usize = 200;
@@ -30,12 +89,15 @@ impl std::fmt::Display for JobId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum JobState {
     Running,
     Done,
     Failed,
+    /// The panel stopped while it was running (found after a restart).
+    Interrupted,
 }
 
 /// Another mutating job is already running for this server.
@@ -76,6 +138,9 @@ pub struct JobSnapshot {
     pub events: Vec<Value>,
     pub result: Option<Value>,
     pub error: Option<String>,
+    /// Unix seconds.
+    pub started: u64,
+    pub ended: Option<u64>,
 }
 
 struct Job {
@@ -92,10 +157,93 @@ struct Inner {
     next_seq: u64,
 }
 
+/// Events not yet written, per job.
+struct Buf {
+    pending: Vec<Value>,
+    /// Position of the first pending event.
+    next: usize,
+    last_flush: Instant,
+}
+
+/// The durable side of a registry (see the module docs).
+struct Journal {
+    home: PathBuf,
+    instance: String,
+    pid: u32,
+    bufs: Mutex<HashMap<String, Buf>>,
+}
+
+/// Events are written at once when the job has been quiet for this long, else in small batches.
+const FLUSH_AFTER: Duration = Duration::from_millis(300);
+const FLUSH_COUNT: usize = 50;
+
+impl Journal {
+    fn store(&self) -> Option<crate::store::Store> {
+        crate::store::Store::open(&self.home).ok()
+    }
+
+    fn begin(&self, id: &str, op: Op, server: Option<&str>) {
+        if let Some(s) = self.store() {
+            let _ = crate::store::jobs::insert(&s, id, op.name(), server, self.pid, &self.instance);
+        }
+        self.bufs.lock().unwrap_or_else(|p| p.into_inner()).insert(id.to_string(), Buf { pending: vec![], next: 0, last_flush: Instant::now() - FLUSH_AFTER });
+    }
+
+    fn event(&self, id: &str, v: &Value) {
+        let batch = {
+            let mut g = self.bufs.lock().unwrap_or_else(|p| p.into_inner());
+            let Some(b) = g.get_mut(id) else { return };
+            b.pending.push(v.clone());
+            if b.pending.len() >= FLUSH_COUNT || b.last_flush.elapsed() >= FLUSH_AFTER {
+                b.last_flush = Instant::now();
+                let first = b.next;
+                b.next += b.pending.len();
+                Some((first, std::mem::take(&mut b.pending)))
+            } else {
+                None
+            }
+        };
+        if let Some((first, events)) = batch {
+            if let Some(s) = self.store() {
+                let _ = crate::store::jobs::append_events(&s, id, first, &events);
+            }
+        }
+    }
+
+    fn end(&self, id: &str, state: &str, result: Option<&Value>, error: Option<&str>) {
+        let rest = self.bufs.lock().unwrap_or_else(|p| p.into_inner()).remove(id);
+        if let Some(s) = self.store() {
+            if let Some(b) = rest {
+                let _ = crate::store::jobs::append_events(&s, id, b.next, &b.pending);
+            }
+            let _ = crate::store::jobs::finish(&s, id, state, result, error);
+        }
+    }
+}
+
+fn op_from_name(name: &str) -> Option<Op> {
+    Op::ALL.iter().copied().find(|o| o.name() == name)
+}
+
+fn snapshot_of(j: crate::store::jobs::StoredJob) -> Option<JobSnapshot> {
+    let state = match j.state.as_str() {
+        "running" => JobState::Running, // another live panel's job (a dead owner's was already marked interrupted)
+        "done" => JobState::Done,
+        "failed" => JobState::Failed,
+        _ => JobState::Interrupted,
+    };
+    Some(JobSnapshot { id: JobId(j.id), op: op_from_name(&j.op)?, server: j.server, state, events: j.events, result: j.result, error: j.error, started: j.started, ended: j.ended })
+}
+
+fn unix_now() -> u64 {
+    crate::monitor::now_unix()
+}
+
 /// All jobs of this process. Cheap to clone; clones share the same jobs.
 #[derive(Clone, Default)]
 pub struct JobRegistry {
     inner: Arc<Mutex<Inner>>,
+    journal: Option<Arc<Journal>>,
 }
 
 /// Given to the job body to report progress.
@@ -104,6 +252,9 @@ pub struct JobHandle {
     id: JobId,
 }
 
+/// Is this process alive? A seam for [`JobRegistry::durable_with`].
+pub type Alive = dyn Fn(u32) -> bool;
+
 impl JobHandle {
     pub fn id(&self) -> &JobId {
         &self.id
@@ -111,6 +262,10 @@ impl JobHandle {
 
     /// Append an event (kept for replay and sent to live subscribers).
     pub fn event(&self, value: Value) {
+        // Written down BEFORE anyone can see it, so whatever a viewer saw is also in the store if the panel dies now.
+        if let Some(j) = &self.reg.journal {
+            j.event(&self.id.0, &value);
+        }
         let mut g = self.reg.lock();
         if let Some(j) = g.jobs.get_mut(&self.id.0) {
             if j.snap.events.len() < MAX_EVENTS {
@@ -141,6 +296,52 @@ impl JobRegistry {
         Self::default()
     }
 
+    /// A registry that also keeps its jobs in the store of this process's Kora home. On creation it marks
+    /// the jobs of dead processes as interrupted.
+    pub fn durable() -> Self {
+        Self::durable_in(crate::installer::registry::kora_home())
+    }
+
+    pub fn durable_in(home: PathBuf) -> Self {
+        Self::durable_with(home, &crate::store::jobs::pid_alive)
+    }
+
+    /// [`durable_in`](Self::durable_in) with the "is this process alive" check given (tests).
+    pub fn durable_with(home: PathBuf, alive: &Alive) -> Self {
+        let mut instance = [0u8; 8];
+        let _ = getrandom::fill(&mut instance);
+        let journal = Journal { home, instance: hex::encode(instance), pid: std::process::id(), bufs: Mutex::new(HashMap::new()) };
+        if let Some(s) = journal.store() {
+            let _ = crate::store::jobs::recover(&s, alive, journal.pid, &journal.instance);
+        }
+        Self { inner: Arc::default(), journal: Some(Arc::new(journal)) }
+    }
+
+    /// The jobs started by a PREVIOUS run that are still known (newest first, without events): what a Jobs
+    /// page shows after a restart, together with this run's own. At most `limit`.
+    pub fn history(&self, limit: usize) -> Vec<JobSnapshot> {
+        let mut all: Vec<JobSnapshot> = self
+            .list()
+            .into_iter()
+            .map(|mut j| {
+                j.events.clear();
+                j
+            })
+            .collect();
+        if let Some(s) = self.journal.as_ref().and_then(|j| j.store()) {
+            for j in crate::store::jobs::list(&s, limit).unwrap_or_default() {
+                if !all.iter().any(|a| a.id.0 == j.id) {
+                    if let Some(snap) = snapshot_of(j) {
+                        all.push(snap);
+                    }
+                }
+            }
+        }
+        all.sort_by_key(|a| std::cmp::Reverse(a.started));
+        all.truncate(limit);
+        all
+    }
+
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|p| p.into_inner())
     }
@@ -149,7 +350,7 @@ impl JobRegistry {
     /// op is refused while another mutating job of the same server is running.
     pub fn spawn<F>(&self, op: Op, server: Option<String>, f: F) -> Result<JobId, Conflict>
     where
-        F: FnOnce(&JobHandle) -> Result<Value, String> + Send + 'static,
+        F: FnOnce(&JobHandle) -> JobResult + Send + 'static,
     {
         self.spawn_with(op, server, !op.is_read_only_job(), f)
     }
@@ -157,7 +358,7 @@ impl JobRegistry {
     /// Like [`spawn`](Self::spawn) with the "mutating" decision made by the caller.
     pub fn spawn_with<F>(&self, op: Op, server: Option<String>, mutating: bool, f: F) -> Result<JobId, Conflict>
     where
-        F: FnOnce(&JobHandle) -> Result<Value, String> + Send + 'static,
+        F: FnOnce(&JobHandle) -> JobResult + Send + 'static,
     {
         let id = JobId(new_id());
         {
@@ -173,25 +374,37 @@ impl JobRegistry {
             Self::prune(&mut g);
             g.next_seq += 1;
             let seq = g.next_seq;
-            let snap = JobSnapshot { id: id.clone(), op, server, state: JobState::Running, events: vec![], result: None, error: None };
+            let snap = JobSnapshot { id: id.clone(), op, server, state: JobState::Running, events: vec![], result: None, error: None, started: unix_now(), ended: None };
             g.jobs.insert(id.0.clone(), Job { snap, mutating, finished_at: None, seq, subscribers: vec![] });
+        }
+        if let Some(j) = &self.journal {
+            let server = self.lock().jobs.get(&id.0).and_then(|j| j.snap.server.clone());
+            j.begin(&id.0, op, server.as_deref());
         }
         let reg = self.clone();
         let handle = JobHandle { reg: self.clone(), id: id.clone() };
         let spawned = std::thread::Builder::new().name(format!("job-{}", op.name())).spawn(move || {
             let out = match catch_unwind(AssertUnwindSafe(|| f(&handle))) {
                 Ok(r) => r,
-                Err(p) => Err(panic_text(p)),
+                Err(p) => Err(panic_text(p).into()),
             };
             reg.finish(&handle.id, out);
         });
         if let Err(e) = spawned {
-            self.finish(&id, Err(format!("could not start the operation: {e}")));
+            self.finish(&id, Err(format!("could not start the operation: {e}").into()));
         }
         Ok(id)
     }
 
-    fn finish(&self, id: &JobId, out: Result<Value, String>) {
+    fn finish(&self, id: &JobId, out: JobResult) {
+        let out = out.map_err(|f| f.to_text());
+        // Written down BEFORE anyone is told it ended, so whoever sees "done" can rely on the store having it.
+        if let Some(journal) = &self.journal {
+            match &out {
+                Ok(v) => journal.end(&id.0, "done", Some(v), None),
+                Err(e) => journal.end(&id.0, "failed", None, Some(e)),
+            }
+        }
         let mut g = self.lock();
         let Some(j) = g.jobs.get_mut(&id.0) else { return };
         let msg = match out {
@@ -207,6 +420,7 @@ impl JobRegistry {
             }
         };
         j.finished_at = Some(Instant::now());
+        j.snap.ended = Some(unix_now());
         for s in j.subscribers.drain(..) {
             let _ = s.send(msg.clone());
         }
@@ -225,8 +439,13 @@ impl JobRegistry {
         }
     }
 
+    /// A job of this run, or (with a journal) one remembered from before.
     pub fn get(&self, id: &str) -> Option<JobSnapshot> {
-        self.lock().jobs.get(id).map(|j| j.snap.clone())
+        if let Some(j) = self.lock().jobs.get(id).map(|j| j.snap.clone()) {
+            return Some(j);
+        }
+        let s = self.journal.as_ref()?.store()?;
+        crate::store::jobs::get(&s, id).ok()?.and_then(snapshot_of)
     }
 
     /// All jobs, oldest first.
@@ -241,7 +460,23 @@ impl JobRegistry {
     /// For a finished job the channel already holds the final message.
     pub fn subscribe(&self, id: &str) -> Option<(Vec<Value>, Receiver<JobMessage>)> {
         let mut g = self.lock();
-        let j = g.jobs.get_mut(id)?;
+        let Some(j) = g.jobs.get_mut(id) else {
+            drop(g);
+            // Not of this run: replay what was remembered.
+            let snap = self.get(id)?;
+            let (tx, rx) = channel();
+            match snap.state {
+                JobState::Done => {
+                    let _ = tx.send(JobMessage::Done(snap.result.clone().unwrap_or(Value::Null)));
+                }
+                // another live panel's job: its end is not ours to report (the stream just closes)
+                JobState::Running => {}
+                _ => {
+                    let _ = tx.send(JobMessage::Failed(snap.error.clone().unwrap_or_default()));
+                }
+            }
+            return Some((snap.events, rx));
+        };
         let (tx, rx) = channel();
         let past = j.snap.events.clone();
         match j.snap.state {
@@ -249,7 +484,7 @@ impl JobRegistry {
             JobState::Done => {
                 let _ = tx.send(JobMessage::Done(j.snap.result.clone().unwrap_or(Value::Null)));
             }
-            JobState::Failed => {
+            JobState::Failed | JobState::Interrupted => {
                 let _ = tx.send(JobMessage::Failed(j.snap.error.clone().unwrap_or_default()));
             }
         }
@@ -266,7 +501,7 @@ mod tests {
     const T: Duration = Duration::from_secs(5);
 
     /// A job body that blocks until `gate` is sent to.
-    fn gated() -> (Sender<()>, impl FnOnce(&JobHandle) -> Result<Value, String> + Send + 'static) {
+    fn gated() -> (Sender<()>, impl FnOnce(&JobHandle) -> JobResult + Send + 'static) {
         let (tx, rx) = channel::<()>();
         (tx, move |_h: &JobHandle| {
             let _ = rx.recv_timeout(T);
@@ -309,7 +544,7 @@ mod tests {
         let reg = JobRegistry::new();
         let id = reg.spawn(Op::ServerControl, Some("a".into()), |_| Err("nope".into())).unwrap();
         let s = wait_done(&reg, &id);
-        assert_eq!((s.state, s.error.as_deref(), s.result), (JobState::Failed, Some("nope"), None));
+        assert_eq!((s.state, s.error.as_deref(), s.result), (JobState::Failed, Some(r#"{"code":"failed","message":"nope"}"#), None));
     }
 
     #[test]
@@ -359,7 +594,7 @@ mod tests {
         let id = reg.spawn(Op::ServerDelete, Some("a".into()), move |h| body(h).and(Err("bad".into()))).unwrap();
         let (_, rx) = reg.subscribe(&id.0).unwrap();
         gate.send(()).unwrap();
-        assert_eq!(rx.recv_timeout(T).unwrap(), JobMessage::Failed("bad".into()));
+        assert_eq!(rx.recv_timeout(T).unwrap(), JobMessage::Failed(r#"{"code":"failed","message":"bad"}"#.into()));
     }
 
     #[test]
@@ -420,5 +655,191 @@ mod tests {
         let id = a.spawn(Op::ServersScan, None, |_| Ok(Value::Null)).unwrap();
         wait_done(&b, &id);
         assert!(b.get(&id.0).is_some());
+    }
+
+    // ---- durable jobs -------------------------------------------------------------------------
+
+    fn home() -> tempfile::TempDir {
+        tempfile::tempdir().unwrap()
+    }
+
+    fn alive_none(_: u32) -> bool {
+        false
+    }
+
+    #[test]
+    fn a_finished_job_is_still_there_after_a_restart_with_its_events_result_and_error() {
+        let h = home();
+        let reg = JobRegistry::durable_in(h.path().to_path_buf());
+        let ok = reg
+            .spawn(Op::UpdateApply, Some("a".into()), |j| {
+                j.event(json!({"step": "one", "status": "done"}));
+                j.event(json!({"step": "two", "status": "done"}));
+                Ok(json!({"updated": 2}))
+            })
+            .unwrap();
+        wait_done(&reg, &ok);
+        let bad = reg.spawn(Op::ServerControl, Some("b".into()), |_| Err("the server did not start".into())).unwrap();
+        wait_done(&reg, &bad);
+        drop(reg);
+
+        let after = JobRegistry::durable_in(h.path().to_path_buf());
+        let s = after.get(&ok.0).unwrap();
+        assert_eq!((s.state, s.op, s.server.as_deref()), (JobState::Done, Op::UpdateApply, Some("a")));
+        assert_eq!(s.events, [json!({"step": "one", "status": "done"}), json!({"step": "two", "status": "done"})]);
+        assert_eq!(s.result, Some(json!({"updated": 2})));
+        assert!(s.started > 0 && s.ended.is_some());
+        let b = after.get(&bad.0).unwrap();
+        assert_eq!((b.state, b.error.as_deref()), (JobState::Failed, Some(r#"{"code":"failed","message":"the server did not start"}"#)));
+        // the event stream of an old job replays and ends
+        let (past, rx) = after.subscribe(&ok.0).unwrap();
+        assert_eq!(past.len(), 2);
+        assert_eq!(rx.recv_timeout(T).unwrap(), JobMessage::Done(json!({"updated": 2})));
+        let hist = after.history(10);
+        assert_eq!(hist.len(), 2);
+        assert!(hist.iter().all(|j| j.events.is_empty()), "history rows are light");
+        assert!(after.get("nope").is_none());
+    }
+
+    #[test]
+    fn a_job_that_was_running_when_the_panel_died_is_interrupted_with_a_guided_problem() {
+        let h = home();
+        {
+            let reg = JobRegistry::durable_in(h.path().to_path_buf());
+            let (_gate, body) = gated();
+            let id = reg.spawn(Op::UpdateApply, Some("a".into()), move |j| {
+                j.event(json!({"step": "x", "status": "running"}));
+                body(j)
+            });
+            let id = id.unwrap();
+            while reg.get(&id.0).unwrap().events.is_empty() {
+                std::thread::yield_now();
+            }
+            // the "panel dies": nothing more is written. Another registry (the next panel) opens the store.
+            let store = crate::store::Store::open(h.path()).unwrap();
+            // pretend the owner is another, now dead, process
+            store
+                .write(|tx| {
+                    tx.execute("UPDATE jobs SET owner_pid = 999999, owner_instance = 'old'", [])?;
+                    Ok(())
+                })
+                .unwrap();
+            let next = JobRegistry::durable_with(h.path().to_path_buf(), &alive_none);
+            let s = next.get(&id.0).unwrap();
+            assert_eq!(s.state, JobState::Interrupted);
+            let e: Value = serde_json::from_str(s.error.as_deref().unwrap()).unwrap();
+            assert_eq!(e["code"], "job.interrupted");
+            assert!(e["message"].as_str().unwrap().contains("did not finish"));
+            assert!(e.get("resume").is_none(), "an update is not resumable");
+            assert!(!s.events.is_empty(), "what it had shown is kept");
+            let (_, rx) = next.subscribe(&id.0).unwrap();
+            assert!(matches!(rx.recv_timeout(T).unwrap(), JobMessage::Failed(_)));
+        }
+    }
+
+    #[test]
+    fn a_running_job_of_another_live_panel_is_left_alone() {
+        let h = home();
+        let reg = JobRegistry::durable_in(h.path().to_path_buf());
+        let (gate, body) = gated();
+        let id = reg.spawn(Op::UpdateApply, Some("a".into()), body).unwrap();
+        // the job belongs to ANOTHER panel process that is alive (a second panel on the same Kora home)
+        let store = crate::store::Store::open(h.path()).unwrap();
+        store
+            .write(|tx| {
+                tx.execute("UPDATE jobs SET owner_pid = ?1 WHERE id = ?2", rusqlite::params![std::process::id() as i64 + 1, id.0])?;
+                Ok(())
+            })
+            .unwrap();
+        let third = JobRegistry::durable_with(h.path().to_path_buf(), &|pid| pid == std::process::id() + 1);
+        assert_eq!(third.get(&id.0).unwrap().state, JobState::Running, "its owner is alive");
+        gate.send(()).unwrap();
+        wait_done(&reg, &id);
+    }
+
+    #[test]
+    fn an_installs_stopped_state_carries_on_after_the_interruption() {
+        let h = home();
+        let paused = crate::installer::paused::PausedStore::at(h.path().join("paused-installs"));
+        let reg = JobRegistry::durable_in(h.path().to_path_buf());
+        let (_gate, body) = gated();
+        let id = reg.spawn(Op::InstallStart, Some("Dev Den".into()), body).unwrap();
+        let mut req: crate::installer::InstallRequest = serde_json::from_value(json!({
+            "mode": "production", "name": "Dev Den", "dir": "/srv/dev-den", "hostname": "Dev Den", "license_key_name": "Main",
+            "ports": {"game": 30120, "txadmin": 40120}, "txadmin_public": false, "resources": "All", "db": "InstallIfMissing",
+            "service": true, "firewall": true, "dry_run": false, "start": true
+        }))
+        .unwrap();
+        req.license_key = Some("cfxk_SECRET_SECRET_SECRET".into());
+        assert!(paused.save_in_progress(&id.0, &req, false, &[]).unwrap());
+        assert!(paused.list().is_empty(), "not offered while it runs");
+        let store = crate::store::Store::open(h.path()).unwrap();
+        store
+            .write(|tx| {
+                tx.execute("UPDATE jobs SET owner_pid = 999999, owner_instance = 'old'", [])?;
+                Ok(())
+            })
+            .unwrap();
+        let next = JobRegistry::durable_with(h.path().to_path_buf(), &alive_none);
+        let s = next.get(&id.0).unwrap();
+        assert_eq!(s.state, JobState::Interrupted);
+        let e: Value = serde_json::from_str(s.error.as_deref().unwrap()).unwrap();
+        assert_eq!(e["resume"], true);
+        assert!(e["message"].as_str().unwrap().contains("Carry on"));
+        let list = paused.list();
+        assert_eq!(list.len(), 1, "now it can be continued");
+        assert_eq!(list[0].req.license_key, None, "never the key");
+    }
+
+    #[test]
+    fn events_are_bounded_and_secrets_never_reach_the_rows() {
+        let h = home();
+        let reg = JobRegistry::durable_in(h.path().to_path_buf());
+        let id = reg
+            .spawn(Op::InstallStart, Some("a".into()), |j| {
+                for i in 0..(crate::store::jobs::MAX_EVENTS + 250) {
+                    j.event(json!({"step": "chatty", "n": i}));
+                }
+                j.event(json!({"step": "x", "detail": "key cfxk_ABCDEFGHIJKLMNOP_1234 was used", "license_key": "cfxk_ABCDEFGHIJKLMNOP_1234", "db_admin": {"password": "hunter2"}}));
+                Ok(json!({"admin_password": "hunter2", "ok": true}))
+            })
+            .unwrap();
+        wait_done(&reg, &id);
+        let next = JobRegistry::durable_in(h.path().to_path_buf());
+        let s = next.get(&id.0).unwrap();
+        assert_eq!(s.events.len(), crate::store::jobs::MAX_EVENTS, "the newest are kept");
+        assert_eq!(s.events.last().unwrap()["step"], "x");
+        assert_eq!(s.events[0]["n"], 251 - 1 + 1, "the oldest were dropped");
+        let text = serde_json::to_string(&s).unwrap();
+        assert!(!text.contains("hunter2") && !text.contains("ABCDEFGHIJKLMNOP"), "{text}");
+        assert_eq!(s.result.unwrap()["ok"], true);
+        // and not in the database file either
+        let bytes: Vec<u8> = std::fs::read_dir(crate::store::store_dir(h.path())).unwrap().flatten().filter(|e| e.path().is_file()).flat_map(|e| std::fs::read(e.path()).unwrap()).collect();
+        assert!(!bytes.windows(7).any(|w| w == b"hunter2") && !bytes.windows(16).any(|w| w == b"ABCDEFGHIJKLMNOP"));
+    }
+
+    #[test]
+    fn old_finished_jobs_are_dropped_beyond_the_limit() {
+        let h = home();
+        let s = crate::store::Store::open(h.path()).unwrap();
+        for i in 0..(crate::store::jobs::KEEP_JOBS + 20) {
+            crate::store::jobs::insert(&s, &format!("job{i:04}"), "servers_scan", None, 1, "x").unwrap();
+            crate::store::jobs::finish(&s, &format!("job{i:04}"), "done", Some(&json!(i)), None).unwrap();
+        }
+        let all = crate::store::jobs::list(&s, 10_000).unwrap();
+        assert!(all.len() <= crate::store::jobs::KEEP_JOBS + 1, "{}", all.len());
+        assert!(crate::store::jobs::get(&s, "job0000").unwrap().is_none());
+        assert!(crate::store::jobs::get(&s, &format!("job{:04}", crate::store::jobs::KEEP_JOBS + 19)).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_broken_store_never_stops_a_job() {
+        // the Kora home is a file: nothing can be opened there
+        let h = home();
+        let file = h.path().join("not-a-folder");
+        std::fs::write(&file, "x").unwrap();
+        let reg = JobRegistry::durable_in(file);
+        let id = reg.spawn(Op::ServersScan, None, |_| Ok(json!(1))).unwrap();
+        assert_eq!(wait_done(&reg, &id).state, JobState::Done);
     }
 }

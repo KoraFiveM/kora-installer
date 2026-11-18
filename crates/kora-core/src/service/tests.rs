@@ -219,7 +219,15 @@ fn systemd_units_for_installing_user_and_system() {
 #[test]
 fn config_validation_table() {
     let c = |preset, time: &str, weekday| ScheduleConfig { preset, time: time.into(), weekday, run_as: RunAs::InstallingUser, enabled: true };
-    let ok = [(Preset::Daily, "04:00", None), (Preset::Daily, "00:00", None), (Preset::Daily, "23:59", Some(3)), (Preset::Weekly, "04:00", Some(0)), (Preset::Weekly, "12:30", Some(6)), (Preset::Custom, "05:05", Some(2)), (Preset::Custom, "05:05", None)];
+    let ok = [
+        (Preset::Daily, "04:00", None),
+        (Preset::Daily, "00:00", None),
+        (Preset::Daily, "23:59", Some(3)),
+        (Preset::Weekly, "04:00", Some(0)),
+        (Preset::Weekly, "12:30", Some(6)),
+        (Preset::Custom, "05:05", Some(2)),
+        (Preset::Custom, "05:05", None),
+    ];
     for (p, t, d) in ok {
         assert!(c(p, t, d).validate().is_ok(), "{p:?} {t} {d:?}");
     }
@@ -304,7 +312,15 @@ fn stored_config_is_the_source_of_truth_and_a_missing_job_reads_as_off() {
 
 #[test]
 fn set_args_rebuild_the_cli_call_for_elevation() {
-    let rec = ServerRecord { name: "main".into(), dir: "/srv/kora/main".into(), mode: crate::installer::Mode::Development, ports: crate::installer::registry::PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 0 };
+    let rec = ServerRecord {
+        source: None,
+        versions: None,
+        name: "main".into(),
+        dir: "/srv/kora/main".into(),
+        mode: crate::installer::Mode::Development,
+        ports: crate::installer::registry::PortsRecord { game: 30120, txadmin: 40120 },
+        created_unix: 0,
+    };
     let w = ScheduleConfig { preset: Preset::Weekly, time: "03:30".into(), weekday: Some(6), run_as: RunAs::System, enabled: true };
     assert_eq!(set_args(&rec, &w), ["schedule", "set", "/srv/kora/main", "--weekly", "Sun", "03:30", "--as-system"].map(String::from));
     assert_eq!(set_args(&rec, &ScheduleConfig::default_for_install()), ["schedule", "set", "/srv/kora/main", "--daily", "04:00", "--as-user"].map(String::from));
@@ -380,10 +396,7 @@ fn windows_service_keeps_only_ordinary_user_privileges_and_grants_are_a_separate
 #[test]
 fn copy_and_rmdir_actions_go_through_the_runner() {
     let r = FakeRunner::default();
-    let p = Plan::new(vec![
-        SystemStep::copy("copy", "/home/me/kora", "/opt/kora/v/kora", 0o755),
-        SystemStep::remove_dir_if_empty("rmdir", "/opt/kora/v"),
-    ]);
+    let p = Plan::new(vec![SystemStep::copy("copy", "/home/me/kora", "/opt/kora/v/kora", 0o755), SystemStep::remove_dir_if_empty("rmdir", "/opt/kora/v")]);
     apply_plan(&p, &r).unwrap();
     assert_eq!(r.calls(), ["copy /home/me/kora /opt/kora/v/kora", "rmdir /opt/kora/v"]);
 }
@@ -444,10 +457,18 @@ impl CommandRunner for Sequence {
         };
         Ok(CommandOutput { code: 0, stdout: out, stderr: String::new() })
     }
-    fn write_file(&self, _: &str, _: &str, _: Option<u32>) -> std::io::Result<()> { Ok(()) }
-    fn remove_file(&self, _: &str) -> std::io::Result<()> { Ok(()) }
-    fn copy_file(&self, _: &str, _: &str, _: Option<u32>) -> std::io::Result<()> { Ok(()) }
-    fn remove_empty_dir(&self, _: &str) -> std::io::Result<()> { Ok(()) }
+    fn write_file(&self, _: &str, _: &str, _: Option<u32>) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn remove_file(&self, _: &str) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn copy_file(&self, _: &str, _: &str, _: Option<u32>) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn remove_empty_dir(&self, _: &str) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 #[test]
@@ -566,8 +587,11 @@ fn a_forged_binary_in_created_json_never_becomes_the_root_update_job() {
     let t = tempfile::tempdir().unwrap();
     let dir = t.path().join("srv");
     std::fs::create_dir_all(dir.join(".kora")).unwrap();
-    std::fs::write(dir.join(".kora/created.json"), r#"{"created_dir":false,"resources":[],"artifacts":false,"files":[],"service_unit":null,"firewall":false,"registered":true,"binary":"/tmp/evil"}"#).unwrap();
+    std::fs::write(dir.join(".kora/created.json"), r#"{"created_dir":false,"resources":[],"artifacts":false,"files":[],"service_unit":null,"firewall":false,"registered":true,"binary":"/tmp/evil"}"#)
+        .unwrap();
     let rec = crate::installer::registry::ServerEntry {
+        source: None,
+        versions: None,
         name: "main".into(),
         dir: dir.clone(),
         mode: crate::installer::Mode::Production,

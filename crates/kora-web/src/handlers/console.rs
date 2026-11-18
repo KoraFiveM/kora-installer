@@ -79,21 +79,12 @@ impl Follower {
     }
 }
 
-pub async fn console_stream(
-    State(st): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    Path(s): Path<String>,
-) -> Result<Sse<Limited<ReceiverStream<Result<Event, Infallible>>>>, ApiError> {
+pub async fn console_stream(State(st): State<AppState>, Extension(caller): Extension<Caller>, Path(s): Path<String>) -> Result<Sse<Limited<ReceiverStream<Result<Event, Infallible>>>>, ApiError> {
     let permit = st.stream_permit(&caller)?;
     let e = blocking(move || st.entry(&s)).await?;
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
     tokio::spawn(async move {
-        let mut f = Some(Follower {
-            dir: e.dir,
-            source: None,
-            pos: 0,
-            partial: String::new(),
-        });
+        let mut f = Some(Follower { dir: e.dir, source: None, pos: 0, partial: String::new() });
         let mut first = true;
         loop {
             let mut fol = f.take().expect("follower");
@@ -110,9 +101,7 @@ pub async fn console_stream(
             // Nothing to replay on a server with no log yet: stay "first" until a file appears.
             first = first && f.as_ref().is_some_and(|x| x.source.is_none());
             for line in lines {
-                let ev = Event::default()
-                    .event("line")
-                    .data(json!({"line": line}).to_string());
+                let ev = Event::default().event("line").data(json!({"line": line}).to_string());
                 if tx.send(Ok(ev)).await.is_err() {
                     return;
                 }
@@ -123,8 +112,7 @@ pub async fn console_stream(
             }
         }
     });
-    Ok(Sse::new(Limited::new(ReceiverStream::new(rx), permit))
-        .keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
+    Ok(Sse::new(Limited::new(ReceiverStream::new(rx), permit)).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
 }
 
 #[derive(Deserialize)]
@@ -132,11 +120,7 @@ pub struct SendBody {
     command: String,
 }
 
-pub async fn console_send(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-    Json(body): Json<SendBody>,
-) -> Result<Response, ApiError> {
+pub async fn console_send(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<SendBody>) -> Result<Response, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
         // Same rules as the manager: control characters dropped, not empty, not too long. A line
@@ -149,9 +133,7 @@ pub async fn console_send(
             return Err(ApiError::conflict("The server is not running, so it cannot take commands."));
         }
         if !console::is_installed(&e.dir) {
-            return Err(ApiError::conflict(
-                "The live console is not switched on for this server yet. Turn it on first (it needs a restart).",
-            ));
+            return Err(ApiError::conflict("The live console is not switched on for this server yet. Turn it on first (it needs a restart)."));
         }
         if console::waiting_for_restart(&e.dir) {
             return Err(ApiError::conflict(console::NEEDS_RESTART));
@@ -162,10 +144,7 @@ pub async fn console_send(
     .await
 }
 
-pub async fn console_enable(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-) -> Result<Response, ApiError> {
+pub async fn console_enable(State(st): State<AppState>, Path(s): Path<String>) -> Result<Response, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
         if !e.dir.is_dir() {

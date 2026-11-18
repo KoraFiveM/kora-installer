@@ -12,11 +12,11 @@ import { actionLabel } from '@/lib/problemActions'
 beforeAll(() => history.replaceState(null, '', '/'))
 afterEach(() => vi.restoreAllMocks())
 
-const declined = () =>
+const missing = () =>
   new ApiError(403, {
-    code: 'admin.declined',
-    message: 'Windows did not get permission to change the automatic updates, so nothing that needs administrator rights was changed.',
-    actions: [{ kind: 'request_admin' }, { kind: 'show_command', command: ['kora', 'schedule', 'off', 'kora-dev'], elevated: true }],
+    code: 'needs_elevation',
+    message: "Kora needs administrator rights to change the automatic updates, and its administrator service is not installed on this computer.",
+    actions: [{ kind: 'install_admin_service' }, { kind: 'show_command', command: ['kora', 'schedule', 'off', 'kora-dev'], elevated: true }],
   })
 
 /** The app's banner messages (the shell draws them; here a plain list). */
@@ -24,20 +24,16 @@ function Banners() {
   return <ul>{useAlerts().alerts.map((a) => <li key={a.id}>{a.text}</li>)}</ul>
 }
 
-describe('Asking Windows for permission from any page', () => {
-  it('labels: "Ask again" once Windows was asked, "Ask for administrator permission" before', () => {
-    expect(actionLabel({ kind: 'request_admin' }, { code: 'admin.declined' })).toBe('Ask again')
-    expect(actionLabel({ kind: 'request_admin' }, { code: 'admin.timed_out' })).toBe('Ask again')
-    expect(actionLabel({ kind: 'request_admin' }, { code: 'admin.remote' })).toBe('Ask for administrator permission')
-    expect(actionLabel({ kind: 'request_admin' })).toBe('Ask for administrator permission')
+describe("Installing Kora's administrator service from any page", () => {
+  it('the button says what it does', () => {
+    expect(actionLabel({ kind: 'install_admin_service' })).toBe("Install Kora's administrator service")
   })
 
-  it('on Windows, "Ask again" repeats what failed, telling Kora the person asked', async () => {
+  it('on Windows the button runs the installer, then repeats what failed (which now works without asking)', async () => {
     installMock({ scenario: 'windows', speed: 0 })
     const user = userEvent.setup()
-    const fetchSpy = vi.spyOn(window, 'fetch')
     const replay = vi.fn(() => api.schedule.remove('kora-dev'))
-    const err = declined()
+    const err = missing()
     err.replay = replay
     renderApp(
       <AdminActions>
@@ -45,27 +41,52 @@ describe('Asking Windows for permission from any page', () => {
         <ErrorNotice error={err} />
       </AdminActions>,
     )
-    const alert = (await screen.findByText('Windows did not get permission')).closest('[role="alert"]') as HTMLElement
-    const again = await within(alert).findByRole('button', { name: 'Ask again' })
+    const alert = (await screen.findByText('This needs administrator rights')).closest('[role="alert"]') as HTMLElement
+    const install = await within(alert).findByRole('button', { name: "Install Kora's administrator service" })
     expect(within(alert).getByText('Show me the command')).toBeInTheDocument()
-    await user.click(again)
-    await waitFor(() => expect(replay).toHaveBeenCalledTimes(1))
-    const sent = fetchSpy.mock.calls.find(([u, i]) => String(u).includes('/schedule') && i?.method === 'DELETE')
-    expect(new Headers(sent?.[1]?.headers).get('X-Kora-Admin')).toBe('ask')
-    expect(await screen.findByText('Windows gave permission and Kora made the change.')).toBeInTheDocument()
-    // Used once: the next change does not ask by itself.
-    await api.schedule.remove('kora-dev')
-    const last = fetchSpy.mock.calls.at(-1)
-    expect(new Headers(last?.[1]?.headers).get('X-Kora-Admin')).toBeNull()
+    await user.click(install)
+    expect(await screen.findByText(/Windows asks for administrator permission on the computer that runs Kora/)).toBeInTheDocument()
+    await waitFor(() => expect(replay).toHaveBeenCalledTimes(1), { timeout: 5000 })
+    expect(await screen.findByText("Kora's administrator service is installed. Kora can now do this without asking.")).toBeInTheDocument()
+    const system = await api.system()
+    expect(system.admin_service?.state).toBe('ready')
   })
 
-  it('on Linux there is nothing to ask: the command is shown as before', async () => {
-    installMock({ scenario: 'default', speed: 0 })
-    const err = new ApiError(403, { code: 'needs_elevation', message: 'Changing the automatic updates needs administrator rights.', command: ['kora', 'schedule', 'off', 'x'], actions: [{ kind: 'request_admin' }, { kind: 'show_command', command: ['kora', 'schedule', 'off', 'x'], elevated: true }] })
-    renderApp(<AdminActions><ErrorNotice error={err} /></AdminActions>)
+  it('on Linux there is no installer to launch: the command is shown', async () => {
+    installMock({ scenario: 'noservice', speed: 0 })
+    renderApp(<AdminActions><ErrorNotice error={missing()} /></AdminActions>)
     const alert = await screen.findByRole('alert')
-    await waitFor(() => expect(within(alert).getByText(/Run the command below as administrator/)).toBeInTheDocument())
-    expect(within(alert).queryByRole('button', { name: /Ask/ })).toBeNull()
-    expect(within(alert).queryByText('Show me the command')).toBeNull()
+    await waitFor(() => expect(within(alert).getByText(/open a terminal as administrator/)).toBeInTheDocument())
+    expect(within(alert).queryByRole('button', { name: /Install Kora's administrator service/ })).toBeNull()
+    expect(within(alert).getAllByText(/kora service install/).length).toBeGreaterThan(0)
+  })
+
+  it('inside the desktop app the app launches the installer (prompt in front) and the page waits for the service', async () => {
+    installMock({ scenario: 'windows', speed: 0 })
+    const user = userEvent.setup()
+    let asked = 0
+    ;(window as unknown as { koraShell: unknown }).koraShell = {
+      hello: async () => ({ features: { elevate: true } }),
+      elevate: async (what: string) => {
+        asked++
+        expect(what).toBe('install_service')
+        // the installer finishes on its own: the mock's install job stands in for it
+        await api.adminService.install()
+        return { started: true }
+      },
+    }
+    try {
+      const replay = vi.fn(() => api.schedule.remove('kora-dev'))
+      const err = missing()
+      err.replay = replay
+      renderApp(<AdminActions><Banners /><ErrorNotice error={err} /></AdminActions>)
+      const alert = (await screen.findByText('This needs administrator rights')).closest('[role="alert"]') as HTMLElement
+      await user.click(await within(alert).findByRole('button', { name: "Install Kora's administrator service" }))
+      await waitFor(() => expect(replay).toHaveBeenCalledTimes(1), { timeout: 8000 })
+      expect(asked).toBe(1)
+      expect(await screen.findByText(/in front of this window/)).toBeInTheDocument()
+    } finally {
+      delete (window as unknown as { koraShell?: unknown }).koraShell
+    }
   })
 })

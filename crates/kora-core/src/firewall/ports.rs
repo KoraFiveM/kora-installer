@@ -27,7 +27,9 @@ pub struct SystemProber;
 pub enum PortStatus {
     Free,
     /// In use (or reserved, or claimed by another Kora server); `suggestion` = next free port.
-    InUse { suggestion: Option<u16> },
+    InUse {
+        suggestion: Option<u16>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,9 +62,7 @@ impl PortProber for SystemProber {
                 return false;
             }
         }
-        [Ipv6Addr::UNSPECIFIED, Ipv6Addr::LOCALHOST]
-            .iter()
-            .all(|a| !matches!(TcpListener::bind((*a, port)), Err(e) if v6_blocked(&e)))
+        [Ipv6Addr::UNSPECIFIED, Ipv6Addr::LOCALHOST].iter().all(|a| !matches!(TcpListener::bind((*a, port)), Err(e) if v6_blocked(&e)))
     }
 
     fn udp_free(&self, port: u16) -> bool {
@@ -74,9 +74,7 @@ impl PortProber for SystemProber {
                 return false;
             }
         }
-        [Ipv6Addr::UNSPECIFIED, Ipv6Addr::LOCALHOST]
-            .iter()
-            .all(|a| !matches!(UdpSocket::bind((*a, port)), Err(e) if v6_blocked(&e)))
+        [Ipv6Addr::UNSPECIFIED, Ipv6Addr::LOCALHOST].iter().all(|a| !matches!(UdpSocket::bind((*a, port)), Err(e) if v6_blocked(&e)))
     }
 }
 
@@ -134,10 +132,7 @@ fn ports_of(servers: &[ServerEntry], own_name: &str, own_dir: Option<&Path>) -> 
 /// looking at most [`SEARCH_LIMIT`] candidates. `need_udp`: the game port (TCP and UDP).
 pub fn suggest_free_port(start: u16, avoid: &[u16], need_udp: bool, prober: &dyn PortProber) -> Option<u16> {
     let first = (u32::from(start) + 1).max(u32::from(MIN_PORT));
-    (first..=u32::from(u16::MAX))
-        .take(SEARCH_LIMIT)
-        .map(|p| p as u16)
-        .find(|p| !avoid.contains(p) && free_for(prober, *p, need_udp))
+    (first..=u32::from(u16::MAX)).take(SEARCH_LIMIT).map(|p| p as u16).find(|p| !avoid.contains(p) && free_for(prober, *p, need_udp))
 }
 
 /// Check both ports; suggestions never collide with each other or with `avoid`.
@@ -184,7 +179,6 @@ pub fn conflict_messages(game: u16, txadmin: u16, report: &PortReport, avoid: &[
     }
     v
 }
-
 
 /// Everything wrong with the ports of an install (other Kora servers of this computer count as
 /// taken), as plain sentences naming the port, who uses it and the next free port. Empty = fine.
@@ -328,7 +322,7 @@ mod tests {
     }
 
     fn entry(name: &str, dir: &str, g: u16, t: u16) -> ServerEntry {
-        ServerEntry { name: name.into(), dir: dir.into(), mode: Mode::Production, ports: PortsRecord { game: g, txadmin: t }, created_unix: 0 }
+        ServerEntry { source: None, versions: None, name: name.into(), dir: dir.into(), mode: Mode::Production, ports: PortsRecord { game: g, txadmin: t }, created_unix: 0 }
     }
 
     #[test]

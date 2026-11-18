@@ -11,21 +11,28 @@ publish.workspace = true
 bcrypt = "0.19.3"
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 getrandom = "0.4.3"
+regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-perl", "unicode-case"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 hex = "0.4.3"
 serde.workspace = true
 serde_json.workspace = true
 sevenz-rust2 = "0.25"
 sha2 = "0.11.1"
 tar = "0.4.46"
+# Build-time only: TypeScript for the API types (feature `ts`, enabled by the web crate's tests, never in a release build).
+ts-rs = { version = "12", optional = true, features = ["serde-json-impl", "no-serde-warnings"] }
 thiserror.workspace = true
 ureq = "2"
 url = "2"
 xz2 = "0.1.7"
 zip = { version = "9.5.1", default-features = false, features = ["deflate"] }
+age = { version = "0.12", default-features = false }
 
 [features]
 # `kora_core::api::fake::FakeBackend` for other crates' tests.
 fake = []
+# `#[derive(TS)]` on the wire types, `api::spec` and the TypeScript generator (docs/api-codegen in CONTRIBUTING.md).
+ts = ["dep:ts-rs"]
 
 [dev-dependencies]
 tempfile.workspace = true
@@ -36,3 +43,10 @@ signal-hook = "0.4.6"
 
 [target."cfg(windows)".dependencies]
 windows-service = "0.8"
+# DPAPI for saved licence keys (src/store/keychain/dpapi.rs): thin FFI, ~40 lines.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
+
+# Saved licence keys in the system keychain (src/store/keychain): the Linux Secret Service (GNOME Keyring, KWallet, ...) over
+# D-Bus with `secret-service` (zbus, pure Rust: no libdbus or libsecret to install, the static Linux build is unaffected).
+[target.'cfg(target_os = "linux")'.dependencies]
+secret-service = { version = "5.2", default-features = false, features = ["rt-async-io-crypto-rust"] }

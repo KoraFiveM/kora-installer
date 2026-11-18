@@ -71,11 +71,7 @@ pub fn pick_tag<'a>(releases: &'a [Release], want: &str) -> Option<&'a Release> 
 pub fn select_assets<'a>(rel: &'a Release, name: &str) -> Result<(&'a Asset, &'a Asset), String> {
     let bin = rel.assets.iter().find(|a| a.name == name).ok_or_else(|| format!("release {} has no {name} file", rel.tag_name))?;
     let sum_name = format!("{name}.sha256");
-    let sum = rel
-        .assets
-        .iter()
-        .find(|a| a.name == sum_name)
-        .ok_or_else(|| format!("release {} has no {sum_name} checksum, so it cannot be verified", rel.tag_name))?;
+    let sum = rel.assets.iter().find(|a| a.name == sum_name).ok_or_else(|| format!("release {} has no {sum_name} checksum, so it cannot be verified", rel.tag_name))?;
     Ok((bin, sum))
 }
 

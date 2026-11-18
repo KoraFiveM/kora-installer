@@ -9,24 +9,10 @@
 use std::path::Path;
 
 /// `ensure` order of the folders of a new install.
-pub const ENSURE_ORDER: [&str; 7] = [
-    "[cfx-default]",
-    "[compat]",
-    "[kora]",
-    "[bridges]",
-    "[creators]",
-    "[addons]",
-    "[streamedassets]",
-];
+pub const ENSURE_ORDER: [&str; 7] = ["[cfx-default]", "[compat]", "[kora]", "[bridges]", "[creators]", "[addons]", "[streamedassets]"];
 
 /// Empty folders every new install gets (relative to `resources/`).
-pub const EMPTY_DIRS: [&str; 5] = [
-    "[addons]",
-    "[streamedassets]/[cars]",
-    "[streamedassets]/[maps]",
-    "[streamedassets]/[props]",
-    "[streamedassets]/[peds]",
-];
+pub const EMPTY_DIRS: [&str; 5] = ["[addons]", "[streamedassets]/[cars]", "[streamedassets]/[maps]", "[streamedassets]/[props]", "[streamedassets]/[peds]"];
 
 /// The `ensure` argument of a resource folder (`[kora]/kora_core` -> `[kora]`). A path without a
 /// leading `[folder]` is a loose resource and is ensured by its own name.
@@ -102,11 +88,7 @@ fn has_ensure(cfg: &str, name: &str) -> bool {
 
 /// The folders of `folders` that `cfg` does not ensure yet.
 pub fn missing_ensures(cfg: &str, folders: &[String]) -> Vec<String> {
-    folders
-        .iter()
-        .filter(|f| !has_ensure(cfg, f))
-        .cloned()
-        .collect()
+    folders.iter().filter(|f| !has_ensure(cfg, f)).cloned().collect()
 }
 
 /// `cfg` with an `ensure <folder>` line added for every folder not already ensured, in the order
@@ -130,11 +112,7 @@ pub fn append_ensures(cfg: &str, folders: &[String]) -> Option<String> {
 /// The folders (in [`ENSURE_ORDER`] order, other ones after) that the given relative paths live in.
 pub fn folders_for<'a>(rels: impl IntoIterator<Item = &'a str>) -> Vec<String> {
     let tops: Vec<String> = rels.into_iter().map(top_folder).collect();
-    let mut out: Vec<String> = ENSURE_ORDER
-        .iter()
-        .filter(|f| tops.iter().any(|t| t == *f))
-        .map(|f| f.to_string())
-        .collect();
+    let mut out: Vec<String> = ENSURE_ORDER.iter().filter(|f| tops.iter().any(|t| t == *f)).map(|f| f.to_string()).collect();
     for t in tops {
         if !out.contains(&t) {
             out.push(t);
@@ -149,13 +127,7 @@ mod tests {
 
     #[test]
     fn new_install_ensures_folders_in_order() {
-        let v = ensure_for_new([
-            "[cfx-default]/a",
-            "[compat]/b",
-            "[kora]/kora_core",
-            "[bridges]/c",
-            "[creators]/[x]/d",
-        ]);
+        let v = ensure_for_new(["[cfx-default]/a", "[compat]/b", "[kora]/kora_core", "[bridges]/c", "[creators]/[x]/d"]);
         assert_eq!(v, ENSURE_ORDER.map(String::from));
     }
 
@@ -173,17 +145,8 @@ mod tests {
 
     #[test]
     fn older_catalog_folders_load_before_kora() {
-        let v = ensure_for_new([
-            "[pre]/kora_lib",
-            "[default-maps]/x",
-            "[standalone]/y",
-            "[kora]/z",
-            "[pre]/other",
-        ]);
-        assert_eq!(
-            &v[..4],
-            ["[pre]", "[default-maps]", "[standalone]", "[kora]"]
-        );
+        let v = ensure_for_new(["[pre]/kora_lib", "[default-maps]/x", "[standalone]/y", "[kora]/z", "[pre]/other"]);
+        assert_eq!(&v[..4], ["[pre]", "[default-maps]", "[standalone]", "[kora]"]);
         assert_eq!(v.last().unwrap(), "[streamedassets]");
         assert!(ensure_for_new(["loose_res"]).contains(&"loose_res".to_string()));
     }
@@ -207,24 +170,11 @@ mod tests {
     #[test]
     fn append_only_missing_and_never_reorders() {
         let cfg = "exec x\nensure [kora]\nensure [compat] # hi\n";
-        let new = append_ensures(
-            cfg,
-            &["[compat]".into(), "[bridges]".into(), "[creators]".into()],
-        )
-        .unwrap();
-        assert_eq!(
-            new,
-            "exec x\nensure [kora]\nensure [compat] # hi\nensure [bridges]\nensure [creators]\n"
-        );
+        let new = append_ensures(cfg, &["[compat]".into(), "[bridges]".into(), "[creators]".into()]).unwrap();
+        assert_eq!(new, "exec x\nensure [kora]\nensure [compat] # hi\nensure [bridges]\nensure [creators]\n");
         assert!(append_ensures(&new, &["[bridges]".into()]).is_none());
-        assert_eq!(
-            append_ensures("a", &["[x]".into()]).unwrap(),
-            "a\nensure [x]\n"
-        );
-        assert!(
-            append_ensures("# ensure [x]\n", &["[x]".into()]).is_some(),
-            "a comment does not count"
-        );
+        assert_eq!(append_ensures("a", &["[x]".into()]).unwrap(), "a\nensure [x]\n");
+        assert!(append_ensures("# ensure [x]\n", &["[x]".into()]).is_some(), "a comment does not count");
     }
 
     #[test]

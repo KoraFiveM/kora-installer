@@ -74,13 +74,13 @@ impl InstallEnv for Env {
     fn disk(&self) -> &dyn DiskInfo {
         &self.d
     }
-    fn db_login(&self, _: Option<&DbAdmin>) -> Result<(), String> {
+    fn db_login(&self, _: Option<&DbAdmin>) -> Result<(), kora_core::problem::Problem> {
         Ok(())
     }
-    fn artifacts(&self) -> Result<ArtifactList, String> {
+    fn artifacts(&self) -> Result<ArtifactList, kora_core::problem::Problem> {
         Err("offline".into())
     }
-    fn cfx_lookup(&self, name: &str) -> Result<kora_core::cfx::CfxAccount, String> {
+    fn cfx_lookup(&self, name: &str) -> Result<kora_core::cfx::CfxAccount, kora_core::problem::Problem> {
         Ok(kora_core::cfx::CfxAccount { id: 4242, username: name.to_string() })
     }
     fn is_elevated(&self) -> bool {
@@ -101,13 +101,13 @@ impl InstallEnv for Env {
     fn saved_clear(&self) {
         self.st().saved = None;
     }
-    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, String> {
+    fn run(&self, req: &InstallRequest, sink: &mut dyn ProgressSink) -> Result<InstallOutcome, kora_core::problem::Problem> {
         self.st().runs.push(req.clone());
         let ev = |step: &str, status, pct| ProgressEvent { step: step.into(), title: format!("Title of {step}"), status, detail: "detail".into(), percent: pct };
         sink.event(ev("prepare.dir", StepStatus::Done, 30));
         if let Some(m) = self.st().fail.clone() {
             sink.event(ev("build.db", StepStatus::Failed, 50));
-            return Err(m);
+            return Err(m.into());
         }
         sink.event(ev("finalize", StepStatus::Done, 100));
         Ok(InstallOutcome { dir: req.dir.clone(), name: req.name.clone(), ..Default::default() })
@@ -180,8 +180,21 @@ impl Rig {
         self.ok("POST", "/keys", Some(json!({"name": name, "license_key": key}))).await;
     }
 
+    /// Everything in the store's folder (the database, its log and any backups) as lossy text, to look for secrets in.
     fn file(&self) -> String {
-        std::fs::read_to_string(self.home.join("secrets.json")).unwrap()
+        let store = self.home.join("store");
+        let mut all = String::new();
+        // Fold the log into the database file first, so a key cannot hide in the log only.
+        if let Ok(s) = kora_core::store::Store::open(&self.home) {
+            let _ = s.read(|c| {
+                let _ = c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+                Ok(())
+            });
+        }
+        for e in std::fs::read_dir(&store).unwrap().flatten().filter(|e| e.path().is_file()) {
+            all.push_str(&String::from_utf8_lossy(&std::fs::read(e.path()).unwrap()));
+        }
+        all
     }
 }
 
@@ -225,12 +238,12 @@ async fn keys_are_added_listed_renamed_and_deleted_and_only_ever_masked() {
     assert_eq!(list["can_manage"], true);
     assert!(list["keys"][0].get("license_key").is_none() && list["keys"][0].get("key").is_none());
 
-    // The file holds the keys, privately.
+    // The private database holds the keys.
     assert!(r.file().contains(MAIN));
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        assert_eq!(std::fs::metadata(r.home.join("secrets.json")).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::metadata(kora_core::store::db_path(&r.home)).unwrap().permissions().mode() & 0o777, 0o600);
     }
 
     // Duplicates: by name (any case) and by value.
@@ -359,16 +372,18 @@ async fn a_stopped_install_with_a_saved_key_carries_on_after_a_restart_without_a
     r.add("Main", MAIN).await;
     let dir = new_dir(&r, "resume");
     r.env.st().fail = Some("download failed".into());
-    let (_, v) = r.call("POST", "/installs", Some(install_body(&dir, json!({"license_key_name": "Main", "db_admin": {"host": "127.0.0.1", "port": 3306, "user": "root", "password": "hunter2-db"}})))).await;
+    let (_, v) =
+        r.call("POST", "/installs", Some(install_body(&dir, json!({"license_key_name": "Main", "db_admin": {"host": "127.0.0.1", "port": 3306, "user": "root", "password": "hunter2-db"}})))).await;
     let first = v["job"].as_str().unwrap().to_string();
     let job = r.job(&first).await;
     assert_eq!(job["state"], "failed", "{job}");
     assert_eq!(job["error"]["resume"], true);
-    // Written down, without the key or the database password.
-    let file = r.home.join("paused-installs").join(format!("{first}.json"));
-    let text = std::fs::read_to_string(&file).unwrap();
+    // Written down in the store, without the key or the database password.
+    let text: String =
+        kora_core::store::Store::open(&r.home).unwrap().read(|c| Ok(c.query_row("SELECT req_json FROM paused_installs WHERE job = ?1", [&first], |row| row.get::<_, String>(0)).unwrap())).unwrap();
     assert!(!text.contains("MAINKEY") && !text.contains("hunter2-db"), "{text}");
-    assert!(text.contains("\"license_key_name\": \"Main\""), "{text}");
+    assert!(text.contains("\"license_key_name\":\"Main\""), "{text}");
+    assert!(!r.file().contains("hunter2-db"), "not even in the database file");
     // The wizard is told it can carry on.
     let d = r.ok("GET", "/installs/defaults", None).await;
     assert_eq!(d["resumable"][0]["job"], first.as_str(), "{d}");
@@ -383,7 +398,7 @@ async fn a_stopped_install_with_a_saved_key_carries_on_after_a_restart_without_a
     let job = r.job(&second).await;
     assert_eq!(job["state"], "done", "{job}");
     assert_eq!(r.env.st().runs.last().unwrap().license_key.as_deref(), Some(MAIN), "the key was looked up by name");
-    assert!(!file.exists(), "a continued install is not offered again");
+    assert!(kora_core::installer::paused::PausedStore::at(r.home.join("paused-installs")).load(&first).is_none(), "a continued install is not offered again");
     assert_eq!(r.ok("GET", "/installs/defaults", None).await["resumable"], json!([]));
 }
 
@@ -437,7 +452,9 @@ async fn a_pasted_key_that_was_not_saved_is_only_in_memory() {
     let (_, v) = r.call("POST", "/installs", Some(install_body(&dir, json!({"license_key": PASTED})))).await;
     let id = v["job"].as_str().unwrap().to_string();
     r.job(&id).await;
-    assert!(!r.home.join("paused-installs").exists() && !r.home.join("secrets.json").exists());
+    let paused = kora_core::installer::paused::PausedStore::at(r.home.join("paused-installs"));
+    assert!(paused.list().is_empty() && kora_core::keystore::KeyStore::at(r.home.join("secrets.json")).list().unwrap().is_empty());
+    assert!(!r.file().contains("PASTEDKEY"), "a pasted key that was not saved is nowhere on disk");
     assert!(!r.env.st().saved.as_ref().is_some_and(|s| s.license_key.is_some()));
     // Works while the panel runs ...
     r.env.st().fail = None;
@@ -515,8 +532,9 @@ async fn the_cfx_name_and_github_owner_are_remembered_in_a_separate_non_secret_f
     assert_eq!(v["ok"], true);
     let d = r.ok("GET", "/installs/defaults", None).await;
     assert_eq!((d["profile"]["cfx_username"].as_str(), d["profile"]["cfx_identifier"].as_str()), (Some("JSixty"), Some("fivem:4242")), "{d}");
-    let p = std::fs::read_to_string(r.home.join("profile.json")).unwrap();
-    assert!(p.contains("JSixty") && !r.home.join("secrets.json").exists());
+    let p = kora_core::profile::ProfileStore::at(r.home.join("profile.json")).load();
+    assert_eq!(p.cfx_username.as_deref(), Some("JSixty"));
+    assert!(kora_core::keystore::KeyStore::at(r.home.join("secrets.json")).list().unwrap().is_empty(), "the profile is not in the keys table");
     // Editing and forgetting.
     let v = r.ok("PUT", "/profile", Some(json!({"github_owner": "KoraFiveM", "cfx_username": null, "cfx_identifier": null}))).await;
     assert_eq!(v, json!({"cfx_username": null, "cfx_identifier": null, "github_owner": "KoraFiveM"}));

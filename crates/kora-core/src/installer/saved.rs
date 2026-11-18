@@ -1,41 +1,74 @@
 //! Answers from an install that failed, kept so the next run does not ask everything again.
 //!
-//! `<kora home>/last-install.json` holds the wizard's answers WITHOUT any secret: the license key is
+//! The store (`saved_answers`; `<kora home>/last-install.json` before v0.8) holds the wizard's answers WITHOUT any secret: the license key is
 //! removed and `DbAdmin::password` is never serialised. The step engine separately keeps what was
 //! already done inside the server folder (`.kora/plan-state.json`), so running the install again
 //! continues where it stopped.
 
 use super::registry::kora_home;
 use super::InstallRequest;
+use crate::store::Store;
 use std::path::PathBuf;
 
+/// Which Kora home the answers belong to (`<home>/last-install.json` was the file before v0.8; they are
+/// in the store now and this path only names the home).
 pub fn path() -> PathBuf {
     kora_home().join("last-install.json")
 }
 
 /// Remember `req` (without secrets). Best effort: a failure to save never hides the real error.
-pub fn save(req: &InstallRequest) -> std::io::Result<PathBuf> {
+pub fn save(req: &InstallRequest) -> crate::problem::Res<PathBuf> {
+    let p = path();
+    save_beside(&p, req)?;
+    Ok(p)
+}
+
+pub(crate) fn save_beside(file: &std::path::Path, req: &InstallRequest) -> crate::problem::Res<()> {
     let mut r = req.clone();
     r.license_key = None;
     r.catalog = None;
     r.dry_run = false;
-    let p = path();
-    let text = serde_json::to_string_pretty(&r).map_err(std::io::Error::other)?;
-    // Written to a fresh file and renamed over the old one (a crash never leaves half a file), and never
-    // through a link: a failed install can run as root (through the helper) inside the user's own folder.
-    crate::fsutil::write_no_follow(&p, text.as_bytes(), 0o644)?;
-    Ok(p)
+    let text = serde_json::to_string(&r)?;
+    let s = Store::open_beside(file)?;
+    s.write(|tx| {
+        tx.execute(
+            "INSERT INTO saved_answers (id, req_json, saved_at) VALUES (1, ?1, ?2) ON CONFLICT(id) DO UPDATE SET req_json = excluded.req_json, saved_at = excluded.saved_at",
+            rusqlite::params![text, crate::monitor::now_unix() as i64],
+        )?;
+        Ok(())
+    })
+}
+
+/// The saved answers in the Kora home beside `file`, if there are any and they can be read.
+pub(crate) fn load_beside(file: &std::path::Path) -> Option<InstallRequest> {
+    let s = Store::open_existing_beside(file).ok()??;
+    let text: String = s.read(|c| Ok(c.query_row("SELECT req_json FROM saved_answers WHERE id = 1", [], |r| r.get::<_, String>(0)).ok())).ok()??;
+    serde_json::from_str(&text).ok()
 }
 
 /// The saved answers, if there are any and they can be read.
 pub fn load() -> Option<InstallRequest> {
-    let text = std::fs::read_to_string(path()).ok()?;
-    serde_json::from_str(&text).ok()
+    load_beside(&path())
+}
+
+pub(crate) fn store_beside(file: &std::path::Path, r: &InstallRequest) -> bool {
+    let Ok(text) = serde_json::to_string(r) else { return false };
+    let Ok(s) = Store::open_beside(file) else { return false };
+    s.write(|tx| {
+        tx.execute("UPDATE saved_answers SET req_json = ?1 WHERE id = 1", [text])?;
+        Ok(())
+    })
+    .is_ok()
 }
 
 /// Forget the saved answers (after a successful install, or when the user starts over).
 pub fn clear() {
-    let _ = std::fs::remove_file(path());
+    if let Ok(Some(s)) = Store::open_existing_beside(&path()) {
+        let _ = s.write(|tx| {
+            tx.execute("DELETE FROM saved_answers", [])?;
+            Ok(())
+        });
+    }
 }
 
 #[cfg(test)]
@@ -45,6 +78,8 @@ mod tests {
 
     fn req() -> InstallRequest {
         InstallRequest {
+            source: None,
+            versions: None,
             mode: Mode::Production,
             name: "Dev Den".into(),
             dir: "/tmp/dev-den".into(),
@@ -65,16 +100,20 @@ mod tests {
             dry_run: false,
             db_admin: Some(DbAdmin { host: "127.0.0.1".into(), port: 3306, user: "root".into(), password: Some("hunter2".into()) }),
             start: true,
+            container: None,
             app: None,
         }
     }
 
     #[test]
     fn saves_answers_but_never_the_license_key_or_the_database_password() {
-        let home = tempfile::tempdir().unwrap();
-        std::env::set_var("KORA_HOME", home.path());
-        let p = save(&req()).unwrap();
-        let text = std::fs::read_to_string(&p).unwrap();
+        // The test process's own Kora folder. Never point `KORA_HOME` at a folder that goes away with this test:
+        // the variable is shared by every test in the process, and the others would lose their home mid-run.
+        let home = crate::installer::registry::use_test_home();
+        save(&req()).unwrap();
+        // not a single secret anywhere in the database file or its write-ahead log
+        let s = Store::open(&home).unwrap();
+        let text: String = s.read(|c| Ok(c.query_row("SELECT req_json FROM saved_answers", [], |r| r.get(0))?)).unwrap();
         assert!(!text.contains("SECRETKEY") && !text.contains("hunter2"), "{text}");
         let back = load().unwrap();
         assert_eq!(back.name, "Dev Den");

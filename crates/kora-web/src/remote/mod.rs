@@ -1,17 +1,20 @@
 //! Optional remote access (plan section 1, phase 6): who is asking, what role they have, and what a
 //! remote session may do. Local-only (loopback, launch token) stays the default and is not affected.
 //!
-//! * [`config`]: `panel.json`, hashed per-user tokens.
+//! * [`config`]: remote access settings (in the store), hashed per-user tokens.
 //! * [`tailscale`]: the `whois` seam (identity comes from the local tailscaled, never from headers).
+//! * [`proxy`]: the opt-in trusted reverse proxy.
 //! * [`roles`]: viewer / operator / admin, the exhaustive Op classification and request → Op lookup.
+pub mod auth;
 pub mod config;
+pub mod proxy;
 pub mod roles;
 pub mod tailscale;
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use serde::Serialize;
 
@@ -28,7 +31,15 @@ pub enum Provider {
     /// The launch token, from the computer itself.
     Local,
     Tailscale,
+    /// The old per-user token link (kept working, and for scripts).
     Token,
+    /// A passkey (WebAuthn).
+    Passkey,
+    /// A password and a one-time code.
+    Code,
+    /// A token made for a script (`Authorization: Bearer` only, never a session).
+    #[serde(rename = "api_token")]
+    ApiToken,
 }
 
 impl Provider {
@@ -37,7 +48,7 @@ impl Provider {
     pub fn via(self) -> roles::Via {
         match self {
             Provider::Tailscale => roles::Via::Tailscale,
-            Provider::Local | Provider::Token => roles::Via::Token,
+            Provider::Local | Provider::Token | Provider::Passkey | Provider::Code | Provider::ApiToken => roles::Via::Token,
         }
     }
 }
@@ -52,11 +63,7 @@ pub struct Identity {
 
 impl Identity {
     pub fn local() -> Self {
-        Self {
-            name: "local".into(),
-            provider: Provider::Local,
-            role: Role::Admin,
-        }
+        Self { name: "local".into(), provider: Provider::Local, role: Role::Admin }
     }
 }
 
@@ -73,11 +80,7 @@ pub struct Caller {
 
 impl Caller {
     pub fn local() -> Self {
-        Self {
-            remote: false,
-            peer: None,
-            identity: Some(Identity::local()),
-        }
+        Self { remote: false, peer: None, identity: Some(Identity::local()) }
     }
 }
 
@@ -88,15 +91,16 @@ pub fn is_remote_peer(ip: IpAddr) -> bool {
 struct Store {
     cfg: RemoteConfig,
     path: Option<PathBuf>,
-    stamp: Option<(SystemTime, u64)>,
+    /// The version of the saved settings `cfg` was read at (`None`: nothing saved).
+    stamp: Option<u64>,
 }
 
-fn stamp_of(path: &std::path::Path) -> Option<(SystemTime, u64)> {
-    let m = std::fs::metadata(path).ok()?;
-    Some((m.modified().ok()?, m.len()))
+/// The version of the saved settings now. `Err`: cannot tell (the store is busy): keep what we have.
+fn stamp_of(path: &std::path::Path) -> Result<Option<u64>, String> {
+    RemoteConfig::stored_rev(path).map(|r| (r > 0).then_some(r))
 }
 
-/// Shared remote-access state: the settings (reloaded when `panel.json` changes on disk, so
+/// Shared remote-access state: the settings (reloaded when they change in the store, so
 /// `kora panel user add` works while the panel runs), the whois seam and a failed-attempt limiter.
 pub struct Remote {
     store: Mutex<Store>,
@@ -122,7 +126,7 @@ impl Remote {
     }
 
     pub fn new(path: Option<PathBuf>, cfg: RemoteConfig) -> Self {
-        let stamp = path.as_deref().and_then(stamp_of);
+        let stamp = path.as_deref().and_then(|p| stamp_of(p).ok().flatten());
         Self {
             store: Mutex::new(Store { cfg, path, stamp }),
             forced: false,
@@ -155,19 +159,15 @@ impl Remote {
     }
 
     fn lock(&self) -> MutexGuard<'_, Store> {
-        let mut g = self
-            .store
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut g = self.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(p) = g.path.clone() {
-            let now = stamp_of(&p);
+            // A new version of the saved settings (a `kora panel user add` in another process, say) is picked up here.
+            // Cannot tell, or half-way/damaged: keep what we had until it reads again.
+            let Ok(now) = stamp_of(&p) else { return g };
             if now != g.stamp {
-                match (now, RemoteConfig::load(&p)) {
-                    (Some(_), Ok(c)) => g.cfg = c,
-                    // File deleted: forget its users (removing the file revokes everything).
-                    (None, _) => g.cfg = RemoteConfig::default(),
-                    // Half-written or damaged: keep what we had until it reads again.
-                    (Some(_), Err(_)) => return g,
+                match RemoteConfig::load(&p) {
+                    Ok(c) => g.cfg = c,
+                    Err(_) => return g,
                 }
                 g.stamp = now;
             }
@@ -179,12 +179,13 @@ impl Remote {
         self.lock().cfg.clone()
     }
 
+    /// The trusted reverse proxy, if one was configured.
+    pub fn trusted_proxy(&self) -> Option<proxy::ProxyConfig> {
+        self.lock().cfg.trusted_proxy.clone()
+    }
+
     pub fn path(&self) -> Option<PathBuf> {
-        self.store
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .path
-            .clone()
+        self.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner).path.clone()
     }
 
     pub fn enabled(&self) -> bool {
@@ -192,17 +193,17 @@ impl Remote {
     }
 
     /// Change the settings and save them (when there is a file). The change is not kept if saving fails.
-    pub fn update<R>(
-        &self,
-        f: impl FnOnce(&mut RemoteConfig) -> Result<R, String>,
-    ) -> Result<R, String> {
+    pub fn update<R>(&self, f: impl FnOnce(&mut RemoteConfig) -> Result<R, String>) -> Result<R, String> {
         let mut g = self.lock();
+        if let Some(p) = g.path.clone() {
+            // One transaction in the store: read the saved settings, change them, write them.
+            let (r, saved) = RemoteConfig::update_at_cfg(&p, f)?;
+            g.stamp = stamp_of(&p).ok().flatten();
+            g.cfg = saved;
+            return Ok(r);
+        }
         let mut next = g.cfg.clone();
         let r = f(&mut next)?;
-        if let Some(p) = g.path.clone() {
-            next.save(&p)?;
-            g.stamp = stamp_of(&p);
-        }
         g.cfg = next;
         Ok(r)
     }
@@ -220,10 +221,7 @@ impl Remote {
     /// own Tailscale addresses (see [`is_self_ip`](Self::is_self_ip)).
     pub fn learn_self_names(&self) {
         let names = self.whois.self_names();
-        *self
-            .dynamic_hosts
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = names;
+        *self.dynamic_hosts.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = names;
         if let Some(s) = self.whois.status() {
             self.set_self_ips(s.ips);
         }
@@ -231,18 +229,14 @@ impl Remote {
 
     /// This machine's own Tailscale addresses (kept up to date while the panel listens on Tailscale).
     pub fn set_self_ips(&self, ips: Vec<IpAddr>) {
-        *self.self_ips.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-            ips.into_iter().map(|i| i.to_canonical()).collect();
+        *self.self_ips.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = ips.into_iter().map(|i| i.to_canonical()).collect();
     }
 
     /// Is `ip` one of this machine's own Tailscale addresses? Such a caller is a program on this computer
     /// (any account, a game server resource), not one of the owner's devices.
     pub fn is_self_ip(&self, ip: IpAddr) -> bool {
         let ip = ip.to_canonical();
-        self.self_ips
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .contains(&ip)
+        self.self_ips.lock().unwrap_or_else(std::sync::PoisonError::into_inner).contains(&ip)
     }
 
     /// The panel now listens on Tailscale; `url` is what to open there.
@@ -255,22 +249,13 @@ impl Remote {
     }
 
     pub fn set_dynamic_hosts(&self, names: Vec<String>) {
-        *self
-            .dynamic_hosts
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = names;
+        *self.dynamic_hosts.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = names;
     }
 
     /// Names allowed in the `Host` header besides the bound address: from the settings and tailscale.
     pub fn extra_hosts(&self) -> Vec<String> {
         let mut v = self.lock().cfg.allowed_hosts.clone();
-        v.extend(
-            self.dynamic_hosts
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .iter()
-                .cloned(),
-        );
+        v.extend(self.dynamic_hosts.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().cloned());
         v
     }
 
@@ -279,38 +264,44 @@ impl Remote {
     pub fn resolve(&self, provider: Provider, name: &str) -> Option<Identity> {
         match provider {
             Provider::Local => Some(Identity::local()),
-            Provider::Token => {
+            Provider::Token | Provider::Passkey | Provider::Code => {
                 let g = self.lock();
                 let u = g.cfg.user(name)?;
-                Some(Identity {
-                    name: u.name.clone(),
-                    provider,
-                    role: u.role,
-                })
+                Some(Identity { name: u.name.clone(), provider, role: u.role })
             }
+            // Never a session: an API token is looked up on every request ([`identity_for_bearer`](Self::identity_for_bearer)).
+            Provider::ApiToken => None,
             Provider::Tailscale => {
                 let g = self.lock();
                 if !g.cfg.tailscale {
                     return None;
                 }
                 let role = g.cfg.tailscale_role(name)?;
-                Some(Identity {
-                    name: name.to_string(),
-                    provider,
-                    role,
-                })
+                Some(Identity { name: name.to_string(), provider, role })
             }
         }
+    }
+
+    /// The settings store of this panel, for the sign-in tables. `Err` when the panel keeps its settings in memory only.
+    pub fn auth_store(&self) -> Result<kora_core::store::Store, String> {
+        let path = self.path().ok_or_else(|| "Remote sign-in needs the panel's saved settings; this panel keeps none.".to_string())?;
+        kora_core::store::Store::open_beside(&path).map_err(crate::error::store_text)
+    }
+
+    /// Who an `Authorization: Bearer` token is: an old per-user token link, or an API token. Never a session.
+    pub fn identity_for_bearer(&self, token: &str) -> Option<Identity> {
+        if let Some(i) = self.identity_for_token(token) {
+            return Some(i);
+        }
+        let store = self.auth_store().ok()?;
+        let t = auth::db::api_token_for(&store, token).ok().flatten()?;
+        Some(Identity { name: t.name, provider: Provider::ApiToken, role: t.role })
     }
 
     pub fn identity_for_token(&self, token: &str) -> Option<Identity> {
         let g = self.lock();
         let u = g.cfg.user_for_token(token)?;
-        Some(Identity {
-            name: u.name.clone(),
-            provider: Provider::Token,
-            role: u.role,
-        })
+        Some(Identity { name: u.name.clone(), provider: Provider::Token, role: u.role })
     }
 
     pub fn identity_for_tailscale(&self, login: &str) -> Option<Identity> {
@@ -353,8 +344,7 @@ pub fn extra_host_allowed(host: &str, names: &[String], port: u16) -> bool {
     })
 }
 
-pub const PLAIN_HTTP_WARNING: &str =
-    "Warning: remote access is on. Traffic to this panel is plain HTTP (not encrypted). \
+pub const PLAIN_HTTP_WARNING: &str = "Warning: remote access is on. Traffic to this panel is plain HTTP (not encrypted). \
 Only use it over a private network such as Tailscale or WireGuard, or through an SSH tunnel.";
 
 /// An address only a private network can reach: a private LAN range (`10/8`, `172.16/12`,
@@ -373,13 +363,7 @@ pub fn is_private_address(ip: IpAddr) -> bool {
 /// refused unless `allow_public` (`--allow-public`): the panel is plain HTTP, so on the internet the
 /// sign-in tokens could be read on the way. "All interfaces" also needs the names people will use,
 /// because the `Host` check cannot guess them.
-pub fn bind_plan(
-    bind: IpAddr,
-    remote_enabled: bool,
-    allow_public: bool,
-    cfg: &RemoteConfig,
-    learned_names: &[String],
-) -> Result<Vec<String>, String> {
+pub fn bind_plan(bind: IpAddr, remote_enabled: bool, allow_public: bool, cfg: &RemoteConfig, learned_names: &[String]) -> Result<Vec<String>, String> {
     if bind.to_canonical().is_loopback() {
         return Ok(Vec::new());
     }
@@ -392,9 +376,9 @@ Using Tailscale? `kora panel --tailscale` sets everything up for you."
     }
     if !allow_public && (bind.is_unspecified() || !is_private_address(bind)) {
         return Err(format!(
-            "Kora will not listen on {bind}: other people on the internet could reach it, and the panel is plain HTTP, \
-so sign-in tokens could be read on the way. Use `kora panel --tailscale` (recommended), a private address \
-(Tailscale, WireGuard, your home network) or an SSH tunnel. If you really mean it, add --allow-public."
+            "Kora will not listen on {bind}: other people on the internet could reach it. Use `kora panel --tailscale` (recommended), \
+a private address (Tailscale, WireGuard, your home network) or an SSH tunnel. If you really mean it, add --allow-public, \
+which also needs HTTPS (`kora panel tls self-signed`, or your own certificate) or a reverse proxy you tell Kora to trust."
         ));
     }
     let mut warnings = vec![PLAIN_HTTP_WARNING.to_string()];
@@ -423,11 +407,7 @@ mod tests {
             Err("no".into())
         }
         fn status(&self) -> Option<TsSelf> {
-            Some(TsSelf {
-                running: true,
-                ips: vec!["100.64.0.5".parse().unwrap()],
-                ..TsSelf::default()
-            })
+            Some(TsSelf { running: true, ips: vec!["100.64.0.5".parse().unwrap()], ..TsSelf::default() })
         }
     }
 
@@ -449,12 +429,8 @@ mod tests {
     #[test]
     fn loopback_binds_need_nothing() {
         let c = RemoteConfig::default();
-        assert!(bind_plan("127.0.0.1".parse().unwrap(), false, false, &c, &[])
-            .unwrap()
-            .is_empty());
-        assert!(bind_plan("::1".parse().unwrap(), false, false, &c, &[])
-            .unwrap()
-            .is_empty());
+        assert!(bind_plan("127.0.0.1".parse().unwrap(), false, false, &c, &[]).unwrap().is_empty());
+        assert!(bind_plan("::1".parse().unwrap(), false, false, &c, &[]).unwrap().is_empty());
     }
 
     #[test]
@@ -464,20 +440,12 @@ mod tests {
         assert!(e.contains("--remote"), "{e}");
         let w = bind_plan("100.64.0.5".parse().unwrap(), true, false, &c, &[]).unwrap();
         assert!(w[0].contains("plain HTTP") && w[0].contains("Tailscale"));
-        assert_eq!(
-            w.len(),
-            1,
-            "a user exists, so no 'nobody can sign in' warning"
-        );
+        assert_eq!(w.len(), 1, "a user exists, so no 'nobody can sign in' warning");
     }
 
     #[test]
     fn warns_when_nobody_can_sign_in() {
-        let w = bind_plan("100.64.0.5".parse().unwrap(), true, false,
-            &RemoteConfig::default(),
-            &[],
-        )
-        .unwrap();
+        let w = bind_plan("100.64.0.5".parse().unwrap(), true, false, &RemoteConfig::default(), &[]).unwrap();
         assert!(w.iter().any(|m| m.contains("kora panel user add")));
     }
 
@@ -515,11 +483,7 @@ mod tests {
 
     #[test]
     fn extra_hosts_need_the_panel_port() {
-        let names = vec![
-            "box.tail.ts.net".to_string(),
-            "100.64.0.9:47120".to_string(),
-            "fd7a::1".to_string(),
-        ];
+        let names = vec!["box.tail.ts.net".to_string(), "100.64.0.9:47120".to_string(), "fd7a::1".to_string()];
         assert!(extra_host_allowed("box.tail.ts.net:47120", &names, 47120));
         assert!(extra_host_allowed("BOX.tail.ts.net:47120", &names, 47120));
         assert!(!extra_host_allowed("box.tail.ts.net:9999", &names, 47120));
@@ -531,7 +495,7 @@ mod tests {
     }
 
     #[test]
-    fn config_file_changes_are_picked_up() {
+    fn saved_settings_changes_are_picked_up() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join(config::FILE_NAME);
         let r = Remote::from_file(p.clone()).unwrap();
@@ -541,8 +505,15 @@ mod tests {
         let tok = c.add_user("zed", Role::Operator).unwrap();
         c.save(&p).unwrap();
         assert_eq!(r.identity_for_token(&tok).unwrap().role, Role::Operator);
-        // Removing the file revokes everyone.
-        std::fs::remove_file(&p).unwrap();
+        // Removing the user (another process again) revokes them at once.
+        RemoteConfig::update_at(&p, |c| Ok(c.remove_user("zed"))).unwrap();
         assert!(r.identity_for_token(&tok).is_none());
+        // And so does deleting the whole store.
+        let mut c = RemoteConfig::load(&p).unwrap();
+        let tok2 = c.add_user("amy", Role::Viewer).unwrap();
+        c.save(&p).unwrap();
+        assert!(r.identity_for_token(&tok2).is_some());
+        std::fs::remove_dir_all(dir.path().join("store")).unwrap();
+        assert!(r.identity_for_token(&tok2).is_none());
     }
 }

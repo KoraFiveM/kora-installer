@@ -116,6 +116,19 @@ On your own computer, open a second terminal and run the `ssh -L` line it printe
 Leave it open, then paste the full link, including the `#code=...` part, into your browser. The tunnel carries the page
 over SSH, so nothing is exposed to the network.
 
+### The desktop app (optional)
+
+Instead of a browser tab you can use the **Kora desktop app**: a tray icon (notification area on Windows) with a small
+window that shows this same panel. Start `kora-desktop` or the Kora shortcut (`kora app install` points the shortcut at it
+when it is installed next to `kora`). The icon is green when every server runs, amber when something deserves a look, red
+when something needs attention and grey when the panel is not reachable; its menu opens Kora, starts, stops and restarts a
+server, opens txAdmin, checks for updates, pauses notifications and switches "Start with Windows" on and off. Closing the
+window keeps it in the tray; **Quit** closes the icon only: your servers and Kora's background panel keep running. It
+notifies you when a server stops unexpectedly or an update is ready, using the alert rules of the Monitoring and
+Notifications tabs (a rule that is off never notifies). Inside the app, "Add an existing server" has a **Browse...** button
+for the folder. The panel itself is unchanged (still `127.0.0.1` only), and the browser route keeps working. Details:
+[desktop-app.md](desktop-app.md).
+
 ## 2. Signing in
 
 The link that `kora panel` prints contains a one-time code: it works once, within 10 minutes. When you open it:
@@ -153,52 +166,163 @@ If a server's folder has gone missing, the list says so rather than hiding it.
 
 Each server in the list (and its Overview) has three buttons:
 
-- **Open txAdmin:** opens txAdmin in a new tab. From the computer that runs Kora it uses `localhost`; from another
-  computer it uses the name you reached the panel by plus txAdmin's port. txAdmin's port is closed to other computers by
-  default, so if the page does not load, forward it like the panel's own (`ssh -L 40120:localhost:40120 ...`). Through an
-  SSH tunnel to the panel, `localhost` is your own computer, so add that port to the tunnel too.
+- **Open txAdmin:** opens txAdmin in a new tab. From the computer that runs Kora it goes straight to `localhost` and
+  txAdmin's own port. From anywhere else (Tailscale, a LAN address, an SSH tunnel) it goes **through the panel**: the
+  panel opens one more port for that server's txAdmin on the same address you reached the panel at (txAdmin's port +
+  10000: 40120 becomes 50120), checks your panel sign-in, and passes everything on to txAdmin on the computer. txAdmin's
+  own port does not have to be open for that. Details and limits:
+  - It is for **administrators** only (txAdmin can run code on the server), and a sign-in made with a token also needs
+    `kora panel remote-actions on`, like console input. Signing out of the panel ends it.
+  - The panel-side port is only opened where the panel itself listens. Through an SSH tunnel add it to the tunnel
+    (`-L 50120:localhost:50120`); with Tailscale and a firewall, allow that TCP port for your devices (for ufw:
+    `sudo ufw allow in on tailscale0 to any port 50120 proto tcp`).
+  - txAdmin has its own sign-in; the panel cannot sign you in to it (txAdmin has no single sign-on). The button's note
+    names the account Kora made at install and where the password is saved.
+  - Why not `/txadmin/<server>/` on the panel's own port? txAdmin's web app cannot live under a path: it calls `/auth/...`
+    and `/socket.io` from the root and has no base-path setting (checked against txAdmin 8.1.2).
 - **Open folder** / **Copy path:** at the computer that runs Kora, with a desktop in front of it, it opens the server's
   folder in the file manager. From anywhere else (Tailscale, a token sign-in, an SSH tunnel, a computer with no desktop)
   it is **Copy path** instead, because opening a window nobody is looking at would do nothing useful.
 - **Copy connect address:** this computer's address on your network with the server's game port, for players on the same
-  network. Players on the internet need your public address (or domain name) with the same port, and the port forwarded
-  on your router or opened with your hosting provider. Kora cannot see your public address.
+  network. For players on the internet use the **Can players reach this server?** card on the Overview (below): it finds
+  your public address, checks the firewall and the router, and shows the address and the Cfx.re join link to give out.
+
+### Can players reach this server?
+
+The card on a server's Overview (and on the install wizard's last page; `kora reach <server>` on the command line) is a
+checklist with one line per step, each **OK**, **Probably OK**, **Problem** or **Not known**:
+
+1. **Running:** the server answers on its game port over TCP and UDP (FiveM needs both), and on this computer's network
+   address, not only on its own loopback address.
+2. **Firewall:** this computer's firewall lets the port in. Kora knows what it opened itself; where it cannot see (a
+   firewall that needs administrator rights to read, or your hosting provider's), it says so. **Open port ...** opens it
+   (needs administrator rights: the card shows the command if Kora cannot ask).
+3. **Router:** is there a router in between, is it the kind that cannot forward at all (carrier-grade NAT: the card
+   explains and lists the alternatives), and is the port forwarded. If your router answers UPnP, PCP or NAT-PMP, **Forward
+   port ... for me** sets it up; otherwise the card lists the exact values to enter on the router's "Port forwarding" page.
+4. **Internet:** only a computer outside your network can say. Kora can look your server up on Cfx.re's public server list
+   (your server's own join code, read from its log) and, to learn your public address when the router cannot tell it,
+   ask a "what is my address" website. **Nothing is contacted unless you allow it**; each lookup has its own switch (at the
+   bottom of the card, and `kora reach --cfx-list --remember`), the card says what it contacts and what that learns before
+   the first use, and each check lists what it contacted. Being listed is "Probably OK", never proof (only a player joining
+   shows the UDP part works), so the line always ends with the manual test: ask a friend who is not on your network to
+   press F8 in FiveM and type `connect <your public address>:<port>`.
+
+**Automatic port forwarding** is optional and off by default, per server. A router that programs can reconfigure is a small
+risk (any program on your network can do the same), so turning it on asks first. Kora then forwards only that server's game
+port (TCP and UDP) to this computer, renews it while the server runs (the server's background service does, or the open
+panel for servers started without a service) and removes it when the server stops, when you turn the option off and when
+the server is deleted. Turn it off again with `kora reach <server> --forward off`.
 
 ## 4. A server's tabs
 
 | Tab | What it is for |
 |---|---|
-| Overview | State, ports, the update badge, start / stop / restart, the server's folder (Open folder on that computer, Copy path elsewhere), Open txAdmin and the connect address. **Licence key:** which saved key the server uses and **Change licence key** (pick a saved key or add a new one; it says whether a restart is needed and offers it). Same as `kora keys use`. |
+| Overview | State, ports, the update badge, start / stop / restart, the server's folder (Open folder on that computer, Copy path elsewhere), Open txAdmin, the connect address and the **Can players reach this server?** checklist. **Licence key:** which saved key the server uses and **Change licence key** (pick a saved key or add a new one; it says whether a restart is needed and offers it). Same as `kora keys use`. |
 | Console | Live server output and a box to send commands. The first time, Kora offers to add a small resource called `kora_console`; it loads on the next server start. |
 | Logs | Pick a log file and read its latest lines. |
 | Resources | **Updates** at the top: check for newer versions, pick what to update, choose what happens about restarts, and roll back to an earlier snapshot (same as `kora update`). Below it the installed resources, each with buttons to check it for updates and to start, stop or restart it on a running server (needs the live console from the Console tab), and the catalogue of resources you can add (same as `kora add-resources`). What the tab shows stays when you open another tab and come back. |
-| Schedule | Development servers only: when the server updates itself. Changing it needs administrator rights. Same as `kora schedule`. |
+| Backups | Back up the server (database, settings, txAdmin data, resources), check, restore and undo, delete or download a backup, choose where backups go and how many are kept, schedule them, and **Move this server** to another computer. See [Backups](#backups-and-moving-a-server). Same as `kora backup`. |
+| Schedule | When the server updates itself (off until you turn it on). Changing it needs administrator rights. Same as `kora schedule`. |
 | Notifications | The Discord webhook for update reports: set, test, remove. The address is never shown back to you. Same as `kora webhook`. |
 | Ports | Change the game and txAdmin ports. The server must be stopped. Kora checks the ports are free. Firewall rules are not changed: open the new ports and close the old ones yourself. |
-| GitHub | Development servers only: sign in to GitHub, **change a resource's branch or try a pull request** (see below), report an issue about a resource, or open a pull request. |
+| GitHub | Sign in to GitHub and see where each resource is (each name opens its page); the pull requests, changes, issues and releases are on the resource's page (see below). |
 | Danger zone | Delete the server. You choose whether to keep the files and the database, then type the server's name to confirm. |
 
-### Branches and pull requests (Development servers)
+### Backups and moving a server
 
-On a Development server every resource is a clone of your own fork. The GitHub tab's **Branches and pull requests** card lets you move a resource onto another version of its code without using git yourself. The same operations are `kora branch ...` and `kora pr ...` in a terminal.
+**What a backup is.** One archive file (`.tar.gz`, or `.tar.gz.age` when it has a password) and a small listing file beside it. It holds the server's own database (a consistent copy: one snapshot, with routines, triggers and events), `server.cfg`, `permissions.cfg`, the secret files, txAdmin's data, Kora's records for the server, and the resources. A resource is saved **by reference** (where it comes from and the exact version, so the file stays small and is fetched again on restore) unless it cannot be fetched again: changes you made, changes kept aside, commits that exist only on your computer, paid assets and folders that are not git copies are saved **in full**. "Keep every resource in full" saves them all (bigger, needs no internet to restore). The FXServer program is not in a backup (it is downloaded again).
 
-- **See where each resource is.** Each resource shows "Normal version (dev)", "Branch fix-hud", "Trying PR #12" or "A single commit", plus how many files you changed and how many sets of changes are kept aside. The Resources tab shows the same next to the name.
-- **Switch to a branch.** Pick it from the list (branches already in the folder, on your fork, on the original repository; "Refresh list" asks GitHub for the newest) and press Switch.
-- **Try a pull request.** Paste its number or its GitHub address, or pick one from the list. The list holds the open pull requests of the original repository *and* of your fork, each marked "Original repository" or "Your fork" with its title, number and author. The pull request is downloaded onto a branch called `pr/<number>`; trying it again later fetches its new commits (fast-forward only; if the author rewrote it, it goes on a new branch and your earlier copy stays). A pull request that was merged or closed, a number that does not exist, an address on some other repository and a pull request whose fork was deleted each get a plain explanation.
-- **Back to the normal version** puts the resource back on its normal branch (the one Kora updates). In the bulk section, "Back to the normal version, for all" does it for every resource.
-- **Several resources at once.** Type a branch name, "Check which resources have it" shows who has it and who does not, then "Switch the N that have it" moves those and leaves the others as they are.
-- **Your own changes are never lost.** A resource with changes you have not saved is not touched until you choose: *Keep my changes aside* (recommended), *Throw my changes away* (asked a second time, with a warning that it cannot be undone) or *Cancel*. Kept-aside changes are listed in that resource's window with *Bring my changes back*; if they no longer fit, nothing changes and they stay kept aside. In git they are an ordinary stash starting with "Kora:", so `git stash list` in the resource folder shows them too. Kora never deletes a stash, not even after bringing the changes back.
-- **After a switch** the files on disk have changed but a running server still has the old version loaded. Kora says so and offers "Restart <resource> now" (needs the live console) or tells you to restart the server.
+**Secrets.** A backup contains your licence key, the database login and the txAdmin admin: it has to, or it could not restore the server. The file is readable only by your account, only an administrator can download it, and you can lock it with a password (the standard `age` format, so `age -d file.age` opens it). **Kora does not keep the password and nobody can recover it**: a lost password means a backup that cannot be opened. Passwords are off by default for backups kept on this computer (the same secrets already sit in plain text beside them) and **required** for a file made to move a server (it travels). Scheduled backups cannot use a password (nobody is there to type it); put them on a disk only you can read.
 
-What updates do with a switched resource: **they leave it alone.** The update check shows it as "Not updated: on another branch" with the reason ("on branch fix-hud", "trying pull request #12"), the scheduled daily update skips it with the same words, and neither counts it as a problem or reports it "up to date". Nothing is ever pulled into your branch. Going back to the normal version makes updates work for it again. Snapshots record each resource's branch; a rollback first returns the resource to the branch it was on when the snapshot was taken and only then resets it, so it never rewrites a branch you moved to afterwards. Switching waits while an update is running (and the other way round). Production servers have none of this: they stay on their pinned releases.
+**While the server runs.** The database copy is one consistent snapshot. The other files are copied one by one, so two of them can be from slightly different moments (Kora notes a file it saw change). For a strictly consistent copy choose "Stop the server while the backup runs": players are disconnected and the server starts again afterwards.
 
-Sign-in: listing and trying pull requests uses the GitHub CLI (`gh`); if you are not signed in, or `gh` is missing, the panel offers the usual sign-in and install buttons. Switching between branches that are already downloaded needs no GitHub sign-in. Switching branches needs the **admin** role, because it changes the code the server runs.
+**Where they go.** Kora's own backups folder (in the Kora folder, outside every server folder, so deleting a server does not delete its backups), or a folder you choose, such as another disk or a mounted share. A backup on the same disk does not survive that disk dying: keep one somewhere else too. Kora checks there is room first. **How many to keep:** the newest N, and optionally one per day for D days; older ones are removed after each backup. A safety copy from a restore is kept 30 days; a copy made for moving is never removed.
+
+**Scheduled backups** are a job of your operating system when Kora's administrator service is installed for your account (a systemd timer on Linux, a Task Scheduler task on Windows, named `kora-backup-<server>`): they run as **you**, never as root or the server's service account, whether or not the panel is open, and a slot missed while the computer was off is made up when it is next on (`Persistent=true` / "run as soon as possible after a missed start"). The Backups tab says which one is in charge, and the panel's own scheduler then stands down for that server so a backup never runs twice. Without the service they run **only while Kora's background service runs** (`kora panel --background`, set up in [section 1](#1-starting-the-panel)): they are made by the panel, and a slot missed while it was off is made up once when it starts again. Deleting a server removes its job; `kora uninstall` removes any left. A failed backup raises an alert (and goes to your Discord and webhook), and the servers list and Overview show "Last backup 3 days ago" with a warning when the newest is older than the schedule says.
+
+**Restoring.** Pick a backup, press **Restore…**, read what will change and what stays, and confirm. Kora checks every file against its checksums first (nothing is touched until the file proves good), makes a **safety copy** of the server as it is now, stops the server, puts the database back, then the files, then the resources (fetched back to the saved versions; one that cannot be fetched is listed and left as it is), and starts the server again. `secrets.cfg` and `database.json` of the running server are kept (they hold today's licence key and login). **Undo this restore** puts the safety copy back. A backup made by a newer Kora is refused; a wrong password, a damaged file and a backup of another server are explained.
+
+**Who can do what.** Operators can make a backup (into the usual folder), check one and preview a restore. Administrators can restore, undo, delete, change the settings, choose another folder and download a backup; a remote sign-in made with a token also needs `kora panel remote-actions on` for those. Downloads and restores are in the activity log.
+
+**Moving a server to another computer (Linux or Windows).**
+1. On the old computer open the server's **Backups** tab and use **Move this server**: choose a password and make the file.
+2. Copy the file to the new computer (USB stick, a share), or download it from the old panel.
+3. On the new computer open Kora, go to **Install a new server** and use **Bring a server from a backup or another machine** (or run `kora backup import <file>`). Upload the file (or give its path on that computer), enter the password, and read the preview: what the server is, what will be created, what does not come along, and anything in the way (the name, ports or folder are already used; each comes with a fix).
+4. Kora builds the server in steps. If one fails, run the same import again to carry on from where it stopped (or **Start over** to remove what was made).
+5. Afterwards: open the ports (the Overview's reachability check helps), set up the background service if you want one, and when the new server works, stop it on the old computer and remove it there (Danger zone). Kora never acts on the other computer for you.
+
+*Clone or fork:* the backup records whether the server follows plain copies of the original repositories or your own copies (forks), which versions it follows, and for every resource whether it is on its normal version, on a branch or trying a pull request. A restore puts every resource back exactly so, and marks them all as changed ("Restart needed" shows for what the running server has not loaded). If the server follows copies in a GitHub account the new computer's sign-in cannot use, the import asks: keep the remotes as recorded, make your own copies here, or use the originals.
+
+*Deleted servers:* when you delete a server, its backup settings go and its backups are kept; the import page lists them under "Backups of servers that no longer exist" so one can be restored as a new server.
+
+*Restores and imports and the server's own account:* when a server runs under an account of its own (Linux `kora-<name>`, the Windows service's account), the files a restore wrote as you are handed to that account again at the end, through the administrator service. If the service is not there, the result says so and shows `sudo kora hand-over <folder>` (Windows: `kora hand-over <folder>` in an administrator terminal), which does the same.
+
+*What does not carry over:* the operating-system service, firewall rules and port forwarding, the automatic-update timer and the backup schedule, your GitHub sign-in, and the FXServer program (downloaded again). Folders in the settings and txAdmin's files and line endings are converted for the new system; a resource that runs a program only one system has will not work on the other. The database goes into a **new** database and login on the new computer; the old login is not reused.
+
+*The licence key:* it moves with the server, but it is yours and Cfx.re ties it to your account and the address the server runs on. Kora cannot make Cfx.re accept it on a new computer. If the server says the licence is not valid, check the key at portal.cfx.re (Keymaster) and its server address, or pick another saved key while importing.
+
+### Getting help: the support bundle
+
+**Settings → Get help → Create a support bundle** (also a small link in every error's details, and `kora support bundle [<server>]`) makes one zip to give to whoever is helping you: Kora's version, your system, the System check, tool versions, your servers' settings, recent jobs and problems, the activity log, install and update logs, the service, firewall and disk state. **Every secret is removed** (licence keys, database logins, txAdmin accounts and tokens, webhook addresses, Git and GitHub tokens, passwords, people's identifiers, user names in folder paths) and files that hold secrets (`secrets.cfg`, `database.json`, txAdmin's data) are never read, only listed as left out. You see the list and can read any file before it is saved; **it is never uploaded**, it only leaves your computer if you send it. Not removed: server names, ports, folder names, public IP addresses, resource names and ordinary log text: look through the files you are shown. The GitHub tab's **Report an issue** can add a short cleaned summary (never the file).
+
+### Branches and pull requests
+### The page of one resource
+
+Every resource name in the Resources tab opens its own page (`/servers/<server>/resources/<resource>`, so it can be bookmarked and the back link returns to the list). It shows where the resource's files are and has **Check for update**, **Update** (only this resource; it does not restart anything), and **Start**, **Stop**, **Restart** on the running server. The last three send the command through the live console, so they need the server running and the console switched on: when they cannot work the page says why and offers the fix (start the server, or open the Console tab). Checking and the three buttons need the operator role, updating needs admin.
+
+**Restart needed.** After anything that changes a resource's files (update, switching branch, trying a pull request, going back to the normal version, bringing kept-aside changes back, rollback) the page says "Restart needed: the running server still has the old version." with a restart button. Kora remembers this on the server in `kora-resource-state.json` in the server folder, as a change number per resource against the number of its last restart and of the last start of the whole server, so reloading the page, another user or `kora resource show` all see the same thing. It goes away when the resource is restarted from the page or the whole server is started or restarted through Kora. A server that is not running has nothing old loaded, so it shows no notice. A restart outside Kora (for example from txAdmin) clears it too on Linux, because Kora reads when the game server process started; on Windows it does not read that yet, so restart from the page or Kora. Delete the file to clear it.
+
+### The GitHub work of one resource
+
+Everything you do with a resource's code is on its page; the GitHub tab is only the sign-in, the list of where each resource is (each name opens its page) and a pointer. Every server has all of it, whatever it follows: some parts need your own copy of the resource (a fork) and say so, with a **Make my own copy (fork)** button.
+
+- **Which version of the code.** The resource's page header and the Resources list show **where its files are**. On its normal version nothing is shown but a quiet "Normal version (dev)" (or "Released version (abc1234)"); on anything else a warning badge in one colour with words and an icon: "On branch fix-hud", "Trying pull request #12", "On a single commit". The same badge is in the servers list ("2 resources not on their normal version"), the Overview, the GitHub tab, the bulk dialogs, the snapshot list and the update check, and in `kora status`, `kora branch list` and `kora resource show` (lines starting with `!`).
+  - Switch to a branch (branches already in the folder, on your own copy, on the original; "Refresh list" asks GitHub), start a **new branch** from where it is, or go **back to the normal version**. For a server on released versions "normal" is exactly the pinned release (on no branch), and **Back to the released version** returns to that commit in one click.
+  - Several resources at once: type a branch name, check which have it, switch those.
+  - **Your own changes are never lost.** A resource with changes you have not saved is not touched until you choose *Keep my changes aside* (recommended), *Throw my changes away* (asked twice) or *Cancel*. Kept-aside changes are an ordinary git stash starting with "Kora:", listed with *Bring my changes back*. Kora never deletes a stash.
+  - **A server on released versions** shows: "This server follows released versions. This resource will run unreleased code until you put it back on its released version", with a box to tick before any switch or pull request. Switching needs the admin role. Updates leave a switched resource alone, with the reason in the update check and the scheduled update's report; going back makes updates work for it again.
+  - After any of this the page says "Restart needed" (see above).
+- **Pull requests.** The open pull requests of the original repository and of your own copy, labelled, each with title, number, author, age, whether its checks pass, fail or are running, whether it is approved or has changes requested, a link to GitHub and a search box. **Details** shows the checks that are not passing, the files it changes, the conversation (comments and reviews) and, for people allowed to, **Comment**, **Approve**, **Ask for changes** and **Merge** (the merge method the repository allows, never forced past its rules, asked first). **Try it** downloads one onto a branch `pr/<number>`; the one being tried is shown first with how far behind its newest commit the folder is, **Get the latest commits** and **Stop trying it**. The "this is someone else's code that will run on your server" warning is always shown.
+- **Your changes.** What changed in the folder (files, and the changes line by line, read-only), **Save the changes (commit)** with a message, **Push** to your own copy (never forced; refused on a plain copy, on a single commit and for a pull request you are only trying), **open a pull request** to the original author, and the recent commits.
+- **Issues and releases.** Open issues of the resource's repository with comments and a form to report a new one (as before, with Kora's version and no secrets); the releases, which one the server is pinned to, what is newer and the release notes.
+- **Make my own copy (fork).** Turns a plain clone into your own copy for one resource or the whole server: forks it into your account or an organisation, makes `origin` your copy and keeps the original as `upstream`. The version, the branch and any changes you have stay exactly as they are. It needs a GitHub sign-in and the right to create repositories where the copy goes; without them the usual guided message offers the sign-in.
+
+**Whose GitHub account acts.** Everything above that happens *on GitHub* (push, comment, review, merge, issue comment, pull request, fork) is done as the one GitHub account `gh` on the computer that runs Kora is signed in as, shared by every person who uses the panel. The page says "This is done on GitHub as <login>" next to each such button and after each such action. These actions need the admin role, and a remote administrator who signed in with a token is held back from push and merge unless remote actions are switched on (`kora panel remote-actions on`), exactly as for other outward-facing changes. Reading (changes, log, pull request details, issues, releases) needs operator, the log viewer.
+
+The same operations from a terminal: `kora branch ...`, `kora pr list|checkout|view|comment|review|merge ...`, `kora resource show|changes|log|commit|push|new-branch|issues|issue-comment|releases|fork|versions ...`.
+
+## Clone / fork and released / latest (what changed from Production and Development)
+
+Before 0.8 a server was *Production* or *Development*, and that one word decided many things at once. It is now two separate settings, which every server has:
+
+- **Where the resources come from** (`source`): `clone` (plain clones of the original repositories, no GitHub account needed) or `fork` (your own copies on GitHub, in your account or an organisation).
+- **Which versions** (`versions`): `released` (each resource pinned to a released version of the catalogue; updates move between releases) or `latest` (each follows the main branch).
+
+Old servers keep working untouched: a record without the new fields reads as `production` = clone + released and `development` = fork + latest. The old `mode` word is still written next to the new fields (`production` when the versions are released, `development` otherwise) so an older Kora can read the file. `kora install --mode prod|dev` and the API's `mode` still work; `--source clone|fork`, `--versions released|latest` and `--fork-owner <login-or-org>` are the new spelling and win over it. With only a source given, the versions default to released for clones and latest for forks.
+
+| What differed | Now |
+|---|---|
+| Resources are clones of the originals / forks in your account | **source**: `clone` or `fork`. Needs GitHub (and `gh`) only for `fork`. |
+| Pinned to catalogue releases / following the fork's default branch | **versions**: `released` or `latest`. A separate setting, changeable later (Resources tab; `kora resource versions`). Nothing moves when it changes: the next check shows what would. Going to released only moves a resource forward to a release that contains what it has; one that is ahead of its release is shown as needing attention, never moved back. |
+| Fork sync from the original before an update | follows **source** (`fork`). |
+| Which resources can be picked (development-only resources are not released) | follows **versions** (`latest` offers them). |
+| Daily automatic update (Development only) | **every server**. Off until turned on; the installer sets it up by default only for `latest` servers with a background service. On a released server it moves to newer releases through the same engine as a manual update; on a latest server it fast-forwards the branches. |
+| Branches, pull requests, switching a resource | **every server** (decision: see "The GitHub work of one resource"). The stability warning is about running unreleased code on a server set to released versions, not about forking. |
+| Report an issue / open a pull request | every server for issues; a pull request, push and fork sync need your own copy (`fork`) and offer *Make my own copy*. |
+| GitHub sign-in asked up front | only when making your own copies. |
+| Wording (servers list, Overview, wizard, review page, CLI output, issue diagnostics) | the plain words above: "Plain copies, released versions", "Own copies, latest changes". |
+| Ports, licence key handling, notifications, firewall, uninstall | **the same for both** (they never really depended on the mode). |
+
+On disk: `kora-server.json` and `servers.json` gain optional `source` and `versions` fields (see `installer::style` in the code for the single mapping); saved install answers and a stopped install carry them too. Nothing is rewritten until the record is saved for another reason.
+
 
 ## 5. Installing a server (the wizard)
 
 "Install a server" walks through the install steps (`kora install` with options does the same without asking):
 
-1. **Mode:** production (pinned releases) or development (forks on your GitHub account or organisation).
+1. **Where the resources come from:** *Use Kora's resources as they are* (plain clones, no GitHub account needed) or *Make my own copies on GitHub so I can change them* (forks, then: your personal account, or an organisation you belong to).
+   **Which versions:** *Released versions* (recommended, stable) or *Latest changes* (the main branch). It starts as released for clones and latest for your own copies, and can be changed later on the Resources tab.
 2. **Name and folder:** the server name, and where it lives. A suggested name and folder are filled in.
 3. **Ports:** game port (30120 by default) and txAdmin port (40120). Kora checks they are free and suggests the next free
    ones if they are not.
@@ -213,9 +337,9 @@ Sign-in: listing and trying pull requests uses the GitHub CLI (`gh`); if you are
 9. **Your Cfx.re account:** type your Cfx.re username and press "Check". Kora asks forum.cfx.re (only the username is sent)
    which account owns it, and that account becomes the txAdmin admin, so you sign in to txAdmin with Cfx.re. Leave it
    empty to skip: Kora then creates a local txAdmin admin with a generated password saved in the server folder. After
-   the first time Kora remembers your name (and, in development mode, your GitHub owner) and fills them in; change them
+   the first time Kora remembers your name (and, when you make your own copies, your GitHub owner) and fills them in; change them
    on that page, or forget them in Settings.
-10. **GitHub** (development mode only): sign in with a short code and choose where the forks go.
+10. **GitHub** (only when making your own copies): sign in with a short code, then choose *My personal account (<login>)* or *An organisation I belong to* and which one.
 11. **Review and install.** Kora shows a dry-run plan first, then the install with live progress.
 
 If an install fails, the panel keeps your answers (never the licence key or the database password; only the name of a
@@ -224,6 +348,26 @@ saved key can also carry on after Kora Panel was restarted ("Carry on"); the dat
 typed one, is not kept and the install uses the automatic login or fails at that step again. A key you pasted without
 saving it is only remembered while the panel runs. The wizard also checks free disk space before it begins.
 
+### Running a server in a container (Linux)
+
+On Linux, when **Podman** or **Docker** is installed and works, the wizard (in "Choose everything myself", and as a line on the last screen) also asks **How should this server run?**: *As a system service* (the default, as always) or *In a container*. `kora install --run-mode container [--engine podman|docker] [--bind <ip>] [--memory-mb N] [--cpus N]` does the same.
+
+A container server is the same server: start, stop, restart, the console and logs, txAdmin through the panel, updates, resources, branches and pull requests, backups, the reachability check and the resource page all work as before. What is different is what Kora sets up. There is **no system service, no service account and no systemd unit**; with rootless Podman nothing needs administrator rights at all.
+
+- **One container per server**, named `kora-<name>` and labelled `kora.server=<name>`, on a small pinned Alpine image (Kora publishes no image of its own). The FXServer build is downloaded and verified by Kora as always into the server folder and mounted into the container, at the same path inside as outside. Everything you see in the folder (`server.cfg`, `txData`, resources) is the real folder.
+- **The database** is, by default, a **MariaDB container next to the server** (`kora-<name>-db`) on a private network `kora-<name>-net`, with its data in the volume `kora-<name>-dbdata`. The login is generated like always and kept in `database.json`; nothing is published to the network. "Use a database I already have" stays available (give its network address: `127.0.0.1` inside a container is the container itself).
+- **Ports:** the game port is published for TCP and UDP (on every address, or only on the one you chose with `--bind`); txAdmin's port is published on this computer only, and the panel's **Open txAdmin** reaches it there.
+- **Files stay yours.** The container runs as the folder's owner (rootless Podman maps your own id through unchanged), so Kora can update, back up and delete everything the server writes.
+- **Starting at boot and after a crash:** the engine's restart policy. With rootless Podman Kora also enables the user unit `podman-restart.service` and `loginctl enable-linger` (the System check says if that needs one command from an administrator). One difference: Docker keeps a server you stopped stopped across a reboot; Podman starts it again.
+- **Logs and the console:** the Logs and Console tabs read the container's output, copied to `.kora/console.log` by a small background follower that Kora starts and keeps running; the live console's command file is in the folder, so it works unchanged.
+- **Updates** that change the FXServer build, the ports or the container settings recreate the container (it holds no data of its own) at the next start.
+- **Backups** run the database dump inside the database container (no database client is needed on this computer). The backup records how the server ran; **bringing a server in from a backup** offers a container when this computer has an engine, and a service when it has none. Restoring a backup never changes how a server runs.
+- **Deleting** removes the containers and the private network, and (you are asked, like for databases) the database volume. `kora status` and the panel say **in a container (podman, rootless)**.
+- **Docker and your firewall:** Docker (and Podman run as root) publish ports with their own firewall rules, which `ufw` and `firewalld` do not see: the server's port is open to the network whatever your firewall says. The reachability check says so instead of asking you to open a port. Rootless Podman and rootless Docker forward from an ordinary program, so your firewall applies.
+- **Docker needs trust:** being in the `docker` group is the same as being root on the computer. Kora says so before offering it; rootless Podman does not need that trust.
+
+What a container does and does not protect is in [SECURITY.md](../SECURITY.md#container-mode-linux). Not in this release: converting an existing service server to a container (and back) in place. Make a backup, then bring it in as a new container server (**Bring a server from a backup**), or the other way round.
+
 ## 6. Settings
 
 - **Kora version:** check for a newer Kora and update it (same as `kora self-update`), or install a specific version.
@@ -231,19 +375,24 @@ saving it is only remembered while the panel runs. The wizard also checks free d
   as `kora app install`). If the panel finds the old machine-wide Kora app from earlier versions (a copy in Program
   Files or /opt/kora, and shortcuts that ask for administrator rights) it offers **Tidy up old shortcuts**, also as a
   notice on the servers screen. That makes the new shortcuts first, so the old ones keep working until the end, then removes
-  the old copy. Removing the old copy needs administrator rights: on Windows the panel asks Windows for permission
-  (one prompt); on Linux it shows the command to run (`kora uninstall --app --yes`) or, with the helper installed, does it itself.
+  the old copy. Removing the old copy is a job for an administrator terminal (the administrator service never does it): the
+  panel shows the command to run (`kora uninstall --app --yes`).
 - **GitHub account:** sign in or see who you are signed in as.
-- **Licence keys:** the keys saved on this computer (`secrets.json` in the Kora folder: plain text, readable only by you,
-  not encrypted, like each server's `secrets.cfg`). Add, rename, replace and delete (admins and this computer only); each
+- **Licence keys:** the keys saved on this computer: in your **system keychain** when this computer has one (Windows: protected for your
+  account; Linux: GNOME Keyring, KWallet), otherwise in Kora's private data file (`store/kora.db`, readable only by you, not encrypted, like
+  each server's `secrets.cfg`); each key says where it is kept, and a button turns the keychain on or off (`kora keys keychain`). A key that
+  cannot be read from here (locked keychain, another session, deleted entry) says so and offers **Enter it again**; see [store.md](store.md). Add, rename, replace and delete (admins and this computer only); each
   shows its last 4 characters and the servers that use it. Deleting a key does not affect servers already installed with it
   (they have their own copy); an unfinished install that used it needs another key. Same as `kora keys`.
-- **Remembered answers:** your Cfx.re name and GitHub owner, kept after first use in `profile.json` (nothing secret), with a
+- **Remembered answers:** your Cfx.re name and GitHub owner, kept after first use in Kora's data file (nothing secret), with a
   button to forget each. Same as `kora profile`.
 - **Uninstall Kora:** shows exactly what would be removed, item by item, and asks you to type `uninstall`. Server folders
   and databases are kept unless you tick them. Your saved licence keys and remembered answers are never removed from here;
-  `kora uninstall` in a terminal asks about them (default: keep), or delete `secrets.json` and `profile.json` in the Kora
-  folder yourself.
+  `kora uninstall` in a terminal asks about them (default: keep), or run `kora keys remove <name>` and `kora profile forget`.
+- **Recent jobs:** updates, installs and the like, also from before the panel last restarted. A job that was running when
+  the panel was closed shows as "stopped by a restart" with what to do next (an install that used a saved key can be carried on).
+- **Activity log** (administrators only): who changed what, from this panel (this computer or another device, with sign-in name, provider
+  and role) and from `kora` commands, with the result. Nothing secret is recorded; entries are kept 365 days. Same as `kora audit`.
 - **About:** the version, platform, and links. The settings page makes no requests to other websites.
 
 ### The System check
@@ -254,13 +403,14 @@ words with a button where something is wrong:
 - **Git** and **GitHub CLI**: *Install it for me* downloads Kora's own copy into its own folder (a known, checksum-verified
   release from GitHub; no administrator rights; nothing else on the computer changes). If you already have Git or the
   GitHub CLI Kora uses yours. If the download fails (no internet, a proxy, GitHub busy) you get *Try again* and a link to
-  install it by hand. Git on Linux is your system's package, which needs administrator rights (the helper does it, or the
+  install it by hand. Git on Linux is your system's package, which needs administrator rights (the administrator service does it, or the
   panel shows the command). `kora tools status` shows which copy is used and where it is; `kora tools install` sets them up.
 - **GitHub sign-in**: *Sign in to GitHub* (or *Sign in again* when only some permissions are missing).
 - **Database**: when a database server is installed but not running, *Start it for me*. Starting a service needs
-  administrator rights: with the helper (Linux) it just works, otherwise the panel shows the command (`kora check
-  --start-database`; Windows asks for administrator permission).
+  administrator rights: with the administrator service it just works, otherwise the panel shows the command (`kora check
+  --start-database`).
 - **Administrator rights** and **Background service**: what Kora can do without asking, for your information.
+- **Containers** (Linux, when Podman or Docker is installed): which engine, its version, whether it is rootless, and whether it really ran a test container. A problem comes with its fix: no subuid/subgid range for rootless (an administrator adds one), cgroup v1, lingering off (containers stop when you sign out: `loginctl enable-linger`), the Docker socket refusing this account. Not having an engine is not a problem: servers run as system services.
 
 The same buttons appear wherever an error offers them (the install wizard, the GitHub account card), and those errors link here.
 `kora uninstall` also removes Kora's own copies of Git and the GitHub CLI.
@@ -268,45 +418,55 @@ The same buttons appear wherever an error offers them (the install wizard, the G
 ## 7. Actions that need administrator rights
 
 The panel runs as you, not as an administrator. A few things need more rights: creating or changing services, firewall
-rules, update timers and scheduled tasks, installing MariaDB, and removing the old machine-wide Kora app.
+rules, update tasks and scheduled tasks, installing MariaDB, updating Kora itself.
 
-**Windows: Windows asks for permission, once.** The panel asks Windows itself, with the normal permission prompt
-(choose Yes). An install asks **once, when it starts**, for all of its administrator parts (the wizard says so on its
-last screen), then you watch it carry on in the browser. Other actions (the update schedule, Kora's self-update,
-"Tidy up old shortcuts", uninstalling, deleting a server that has a background service) ask once each. Behind the
-prompt is a short-lived copy of Kora running as administrator that does only those parts and then exits; your server
-folders, settings and the install's progress stay yours. If you do not see the prompt, look for a flashing shield icon
-in the taskbar. On an account that is not an administrator, Windows asks for an administrator's password instead; the
-server is still installed for you.
+**With Kora's administrator service there is no prompt at all.** The Windows installer (`.msi`) and the Linux package
+(`.deb`, or `sudo kora service install` on other systems) install a small service that does exactly those parts for
+the accounts an administrator allowed, and nothing else. One administrator approval at install time; after that the
+panel installs and removes servers, changes schedules and updates Kora with no password and no terminal, from this
+computer or from another device. The install wizard says so on its last screen ("Kora's administrator service will do
+these parts"), and its steps show in the same progress list as everything else.
 
-If Windows does not get permission (you chose No, nobody answered within five minutes, or you are signed in from
-another device so nobody may be at the computer to answer), nothing that needs administrator rights is changed and the
-panel offers three choices:
+Who may use it: the account that installed Kora, plus anyone an administrator adds. On a computer shared by several
+accounts each person's servers, services, firewall rules and databases are theirs alone.
 
-- **Ask again** (from another device: **Ask for administrator permission**): Windows asks on the computer that runs
-  Kora; someone there chooses Yes. From another device the panel never asks unless you press this.
+```
+kora service status          is it installed, running, and does it serve me?
+kora service list            the accounts that may use it
+kora service allow <account> (administrators) let another account use it
+kora service deny <account>  (administrators) stop an account using it; its servers keep working
+```
+
+**Without the service** (you installed Kora just for yourself, without administrator rights) there is no automatic
+path, and the panel never asks Windows or `sudo` by itself. When a step needs administrator rights it says so and
+offers:
+
+- **Install Kora's administrator service.** On Windows this starts the installer (one permission prompt, on the
+  computer that runs Kora; the file is checked against its checksum first). On Linux it shows
+  `sudo kora service install`.
 - **Continue without the administrator parts:** the install carries on as you, without the firewall change, the
-  background service and the daily update task (and with an existing database only). Everything already done is kept.
-- **Show me the command:** the command to run yourself from a terminal opened with "Run as administrator".
+  background service and the daily update task (and with an existing database only).
+- **Show me the command:** the command to run yourself from an administrator terminal.
 
-A step that failed halfway (for example the administrator copy was closed) can be tried again (Windows asks again) or,
-when it is safe, skipped, like any other install step.
+If the service is installed but not turned on for your account, the message says so and gives the command an
+administrator runs (`kora service allow <you>`). A step that failed halfway (for example the service was restarted)
+can be tried again or, when it is safe, skipped, like any other install step.
 
-**Linux** (and Windows when the panel itself runs as administrator, which it normally does not): the panel does one
-of two things:
+Two things stay commands for an administrator terminal even with the service: removing the old machine-wide copy of
+Kora and removing everything Kora set up on the machine (`kora uninstall`); Kora itself is removed in Apps & features
+(Windows) or with `sudo apt remove kora` (Linux). Update tasks that run as the system account (a choice in the
+schedule dialog) also stay a command: the service only makes update tasks that run as you.
 
-- **Shows the exact command to run.** A message appears with a command such as `sudo kora ...` (Linux) or an elevated
-  `kora ...` (Windows). Copy it into a terminal; the command asks for administrator permission itself. When it
-  finishes, return to the panel and refresh.
-- **Uses the helper, if it is installed (Linux only for now).** The helper is a small system service, installed once with
-  `sudo kora helper install`, that runs those same actions for the panel without a prompt each time. It accepts only the fixed list of privileged actions Kora already has and checks which user is asking. Check it with `kora helper status`, remove it with `kora helper uninstall`.
-  Be aware of what it means: with the helper installed, your account (and any program running as you) has the same
-  power as passwordless `sudo` for these Kora actions, so only install it on an account you keep safe. Through the
-  helper, servers are installed only into a new or empty folder in your home folder or in `/home/kora`, never from
-  another catalogue, and Kora is only updated to a newer version; for anything else run the command yourself with `sudo`.
+**Updating Kora.** With the service installed the panel's Update button (and `kora self-update` from a terminal) is
+applied by the service: it downloads the release, checks its checksum, keeps the old program, restarts itself on the
+new one and rolls back by itself if the new one does not run.
 
-The Settings page says when the helper is installed. The Linux helper is not used on Windows, where the panel asks
-Windows instead (above).
+**Upgrading from 0.7.0 or 0.6.x.** Run the new installer (MSI, `.deb`, or the one-liner, which offers it first). It
+brings the old layout over without touching servers or data: the old Linux helper is removed (its account stays
+allowed), update tasks that still ran with full administrator rights become unelevated, servers set up the old way
+are recorded as yours, and the panel's "Tidy up old shortcuts" also sets aside your own earlier copy of Kora (kept as
+`kora.previous`) and points the background panel at the installed one. To go back, install the earlier version's
+installer; the old copy is still there as `.previous`.
 
 ## 8. Troubleshooting
 
@@ -340,6 +500,8 @@ The page files are part of the program and are replaced with it.
 ---
 
 ## 9. Optional: monitoring and alerts
+
+Some alerts belong to no server but to Kora itself: the panel's HTTPS certificate ends within 14 days, has expired, or Kora could not renew it, Kora's administrator service stopped answering after it had been answering, or a pass of the scheduled backups could not run at all. They show in the same alert list at the top of every page (with a link to what to do, not to a server), as a desktop notification in the Kora app, and go to the Discord and webhook addresses of the servers that have **Problems with Kora itself** ticked (Monitoring, each address once).
 
 The **Monitoring** tab shows, for each server: whether it is up, players online, CPU and memory of the server's processes,
 disk space, port checks and the update badge, as charts you can view over 1, 6 or 24 hours. About 24 hours of history is
@@ -401,31 +563,213 @@ Tailscale ACLs if you want to limit which devices can reach the server at all.
 Do not put the panel behind a reverse proxy or `tailscale serve`: every visitor would then look like the computer
 itself. The panel refuses requests that came through a proxy.
 
+### HTTPS: the connection to the panel
+
+Plain HTTP is fine on this computer's own address and inside Tailscale (already encrypted). On a home network or a
+public address the session cookie, the sign-in link and everything you type (licence keys) would cross the network in
+clear, so the panel serves **HTTPS** there:
+
+- the loopback address (`http://127.0.0.1:47120`) stays plain HTTP: no certificate warnings for the normal local case;
+- any other address uses HTTPS on the **same port** as soon as there is a certificate, and says loudly when there is none.
+  A browser that opens `http://` on that port from another computer is sent to `https://` (plain requests from this
+  computer are still answered, so the launch link keeps working);
+- `--allow-public` refuses to start without HTTPS (or a reverse proxy you told Kora to trust, below);
+- the session cookie gets `Secure` over HTTPS; `Strict-Transport-Security` is sent only for a certificate you provided
+  or Tailscale's (not for a self-signed one: a mistake there would lock you out of the name for a year); the "Open
+  txAdmin" gateway ports, the live views and the console use the same HTTPS.
+
+Where the certificate comes from, in order of preference (`kora panel tls ...`):
+
+1. **Your own certificate:** `kora panel tls set --cert fullchain.pem --key privkey.pem`. The panel reads the files
+   again when they change (certbot, a script), so renewing needs no restart. The key file must not be readable by other
+   accounts (`chmod 600`); the panel refuses it otherwise and says the command.
+2. **Tailscale:** `kora panel tls tailscale`. Kora asks `tailscale cert` for this computer's tailnet name and renews it
+   before it ends. It needs MagicDNS and "HTTPS Certificates" turned on in the Tailscale admin console (DNS page): when
+   Tailscale says no, its own reason is shown. Open the panel by its Tailscale **name**; the certificate is for that name
+   (the `100.x` address gives a name mismatch). With `kora panel --tailscale` this is used automatically when it works.
+3. **Self-signed:** `kora panel tls self-signed --name box.lan`. Kora makes a local certificate authority (once) and a
+   server certificate from it for this computer's names and addresses (it is made again by itself before it ends, or when a
+   name is added). You trust the **authority once**: `kora panel tls export-ca` saves it as `kora-local-ca.crt`, and the
+   command prints how to install it on Windows, macOS, Linux, Firefox and phones. Compare the fingerprint it prints with
+   what the browser shows (also in Settings > HTTPS) before you install it.
+
+`kora panel tls status` shows what is in use (certificate, names, end date, fingerprint); `kora panel tls off` turns HTTPS
+off again (not recommended); `kora panel tls renew` fetches or makes the certificate again now. The System check has an
+HTTPS line, and a certificate in its last 14 days is warned about in Settings, the System check, the terminal and the
+activity log.
+
+**Public domain names with Let's Encrypt are not done by Kora.** Put a reverse proxy (Caddy, nginx) in front instead and
+tell Kora to trust it:
+
+```sh
+kora panel proxy trust 127.0.0.1          # prints a secret and ready-to-paste Caddy and nginx snippets
+```
+
+Kora then accepts `X-Forwarded-For` and `X-Forwarded-Proto` only from that address **and** only on requests that carry
+the shared secret (`X-Kora-Proxy-Secret`). The visitor's address (the right-most one that is not a proxy of yours) is what
+the sign-in lockout counts; `X-Forwarded-Proto: https` makes the request count as secure; a proxied visitor is always a
+remote one, never the person at the computer, and never gets a Tailscale identity. Without the secret, or from another
+address, forwarded headers are refused as before. Add the public name to the allowed names (Settings > Remote access)
+and turn remote access on. `kora panel proxy forget` removes the trust. To open txAdmin through the proxy, see [below](#opening-txadmin-through-the-proxy).
+
+### Opening txAdmin through the proxy
+
+txAdmin cannot run under a path prefix (`/txadmin/main/`): its page talks to absolute paths such as `/auth/` and `/socket.io`. So
+the panel gives each server's txAdmin an address of its own, a **gateway port** (txAdmin's port + 10000: `50120` for the usual
+`40120`), and the proxy has to give people a **host name** or a **port** that leads to it. Pick one way and set it up once per server:
+
+1. **One host name per server** (recommended, nothing to open in the firewall). Tell Kora the pattern, then give each server that name
+   in the proxy, forwarding to its gateway port on the panel's own address. Add the names to the allowed hosts (Settings, Remote access).
+
+   ```sh
+   kora panel proxy txadmin-host 'tx-{server}.example.com'    # {server} is the server's short name (underscores become dashes)
+   ```
+
+2. **One port per server on the panel's public name.** Nothing to tell Kora (`kora panel proxy txadmin-host --clear`): "Open txAdmin"
+   opens `https://panel.example.com:<gateway port>`, so the proxy must listen on that same public port and forward to the same
+   port on the panel's address. `Host` must reach Kora as the visitor typed it (nginx: `$http_host`, not `$host`).
+
+Replace `<secret>` with the proxy's secret (`kora panel proxy trust`); it is the same one as for the panel. The proxy must pass
+WebSockets on (txAdmin's live console is one) and forward `Host` unchanged. Kora applies the same rules as for the panel: the
+address and the secret together, a visitor is always remote, and txAdmin still needs an administrator, and
+`kora panel remote-actions on` for a token sign-in. A name made for one server does not open another server's txAdmin. The secret and
+the forwarded headers never reach txAdmin.
+
+**Caddy, one host name per server**
+
+```
+tx-main.example.com {
+    reverse_proxy 127.0.0.1:50120 {
+        header_up X-Kora-Proxy-Secret <secret>
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+(Caddy passes WebSockets on and adds X-Forwarded-For and Host itself.)
+```
+
+**Caddy, one port per server**
+
+```
+example.com:50120 {
+    reverse_proxy 127.0.0.1:50120 {
+        header_up X-Kora-Proxy-Secret <secret>
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+```
+
+**nginx, one host name per server**
+
+```
+server {
+    listen 443 ssl;
+    server_name tx-main.example.com;
+    # ssl_certificate and ssl_certificate_key as for the panel
+    location / {
+        proxy_pass http://127.0.0.1:50120;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Kora-Proxy-Secret <secret>;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+    }
+}
+```
+
+**nginx, one port per server**
+
+```
+server {
+    listen 50120 ssl;
+    server_name example.com;
+    # ssl_certificate and ssl_certificate_key as for the panel
+    location / {
+        proxy_pass http://127.0.0.1:50120;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Kora-Proxy-Secret <secret>;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+    }
+}
+```
+
 ### Other options
 
 1. **SSH tunnel** (`ssh -L`, as in [section 1](#starting-it-on-a-server-with-no-screen-ssh)). Nothing is exposed.
-2. **WireGuard or another private network:** start the panel with `kora panel --bind <private address> --remote` and
-   sign in with a user token (below). Kora refuses public addresses and `0.0.0.0` unless you add `--allow-public`,
-   because the page is plain HTTP: without an encrypted network around it, anyone on the way could read and change
-   what you send, including sign-in tokens.
+2. **WireGuard or another private network:** start the panel with `kora panel --bind <private address> --remote`, set
+   up HTTPS as above if it is not an encrypted network, and sign in with a passkey or one-time codes (below). Kora
+   refuses public addresses and `0.0.0.0` unless you add `--allow-public`, which also needs HTTPS.
 
-**Users and roles.** Besides Tailscale accounts, remote sign-in can use named users with a token each:
-`kora panel user add <name> --role <role>`, `kora panel user list`, `kora panel user remove <name>`. Each Tailscale
-account or user has a role:
+### Signing in from another computer: passkeys and one-time codes
 
-- **viewer:** can look at server status and lists and charts; cannot change anything, and cannot read logs or
-  the console (they can contain player names and addresses).
-- **operator:** a viewer, plus logs and console output, start/stop/restart, update preview and apply, ensuring resources.
-- **admin:** an operator, plus settings (ports, webhooks, resources, snapshots, GitHub).
+A remote user used to sign in with a **token**: a secret in a link, valid until revoked, so whoever held the link *was*
+that user. That is no longer the day-to-day credential.
 
-Managing remote access and users from the panel is only possible from a local session, never remotely; the
-`kora panel tailscale`, `kora panel user` and `kora panel remote-actions` commands work on the server at any time. Remote sessions end after 12
-hours idle or 7 days in total, and at once when the account is removed or its role changes. The sign-in link from
-`kora panel` only works on the computer itself (or through an SSH tunnel), never remotely.
+1. On the computer that runs Kora: `kora panel user invite sam --role operator` (or **Invite person** in Settings > Remote
+   access). It prints a **one-time link** (works once, for 30 minutes). That link is the only bearer link left.
+2. Sam opens the link, and sets up **a passkey** (WebAuthn: the phone, laptop or security key holds a private key and
+   asks for a fingerprint, face or PIN; nothing is replayable) or **a password and one-time codes** (any authenticator app;
+   ten single-use recovery codes are shown once). Sam is signed in at the end.
+3. From then on Sam signs in with the passkey (type the name, touch the device) or password + code.
+
+**Passkeys need a name and a secure address.** A passkey belongs to the name it was registered on (the "relying party
+ID"), and browsers allow passkeys only over `https://` (or `localhost`). So:
+
+| how the panel is opened | passkeys |
+|---|---|
+| `https://box.tail1234.ts.net:47120` (Tailscale HTTPS) | yes, for `box.tail1234.ts.net` |
+| `https://panel.example.com` (your domain, reverse proxy) | yes, for `panel.example.com` |
+| `https://box.lan:47120` (a LAN name with a certificate) | yes, for `box.lan` |
+| `https://192.168.1.5:47120` (a bare address) | **no**: an IP address cannot be a relying-party ID; use one-time codes, or give the panel a name |
+| `http://...` | **no**: not a secure address |
+
+Pick one name for remote access and register there: a passkey registered for one name does not work on another (the page
+says so). People who cannot use a passkey (a bare address, an old browser) use **password + one-time codes**, which work
+everywhere. Passwords are checked for strength (12 characters or more, not a common one, not the name) and stored as
+argon2id hashes; a code is accepted for the current 30-second step and one either side, and **each step only once**
+(a code seen over a shoulder cannot be replayed); five wrong passwords lock that account for 15 minutes (a passkey still
+works, so a stranger cannot lock the owner out of their own device); wrong attempts from one address lock that address
+out, as for tokens.
+
+**Lost a phone or laptop?** On the computer that runs Kora: `kora panel user reset sam` (Settings: **Reset sign-in**). It
+removes the credentials you choose (`--what passkeys|code|all|legacy-token`), signs every device of that person out at
+once and prints a new one-time link. A user can also remove a lost passkey themselves from another device (**Your sign-in**
+in Settings), which signs their other devices out.
+
+**Your sign-in** (Settings, for people signed in remotely) lists your passkeys, one-time-code status and recovery codes,
+and the **signed-in devices** (browser, address, when) with Sign out. Changing how you sign in asks for a fresh check first.
+
+**A fresh check before the most sensitive actions.** For a session that signed in with a passkey or one-time codes, deleting
+or unregistering a server, uninstalling Kora, updating Kora, console input, schedules and opening txAdmin ask for a passkey or
+code check made in the last 10 minutes (the page shows a "Confirm it is you" box and then carries on). This comes on top of
+the roles and the remote-actions switch, which are unchanged. Sessions: a remote passkey or code session ends after 8 hours
+idle or 3 days in all (the computer's own and Tailscale sessions keep 12 hours / 7 days; an old token session at most 1 day).
+
+**API tokens, for scripts.** `kora panel user api-token create backup-script --role operator --days 90` prints a token
+once (stored only as a salted hash; optional expiry). It is sent as `Authorization: Bearer <token>` and **never** accepted in
+an address (query or `?ks=`), never makes a browser session, and cannot sign anyone in to the page. Its role is its limit,
+and deleting or uninstalling through it still needs `kora panel remote-actions on`. `api-token list` and `api-token revoke`
+manage them; Settings > Remote access has the same.
+
+**Upgrading from token links.** Nothing breaks on upgrade: existing users keep their token, which still signs them in to the
+page and still works as a header for scripts. At their next sign-in the page suggests a passkey or one-time codes ("Replace
+your token link"). Once a user has a passkey or one-time codes, their old token link is **not accepted for signing in any more**
+(so a leaked old link cannot bypass them); it keeps working as a script header until the user ends it (**End my token link**)
+or an administrator resets it. An administrator can turn on **Require a passkey or one-time codes for everybody** (Settings >
+Remote access, or `PUT /remote`), which refuses the token link for signing in for everyone. New users never get a token.
 
 **What a remote administrator can do depends on how they signed in.**
 
-| | Tailscale admin | Token admin |
+| | Tailscale admin | Passkey, code or token admin |
 |---|---|---|
 | Install a new server (start an install, resume a paused one) | yes | yes |
 | Manage servers: start/stop, settings, resources, snapshots, ports, GitHub | yes | yes |
@@ -438,7 +782,7 @@ destructive actions, whatever the setting).
 
 Why the difference: a Tailscale sign-in is checked by the Tailscale service on this computer, so it names a real
 person on a device they have signed in. A token is a secret in a link: it can be pasted into a chat or left in a
-backup, and whoever holds it *is* that user. A leaked token that can only install can be undone by removing the
+backup, and whoever holds it *is* that user (a passkey or one-time code cannot be copied that way, but the switch stays the same for now: what each role may do is unchanged). A leaked token that can only install can be undone by removing the
 server it made. A leaked token that can delete cannot be undone, so deleting stays off for tokens until someone on
 the computer that runs Kora turns it on. The typed-name confirmation for deleting always applies.
 
@@ -476,6 +820,7 @@ SSH tunnel as described in [section 10](#10-optional-remote-access).
   only on private addresses (Tailscale with `--tailscale`); public addresses need `--allow-public`.
 - **Identity from Tailscale, not the browser.** Tailscale sign-in asks the Tailscale service on the computer who is
   connecting, and only listed accounts get in, each with a role.
+- **HTTPS off the loopback address, passkeys and one-time codes for people.** See sections above and `SECURITY.md`.
 - **One-time sign-in links.** The link printed by `kora panel` holds a one-time code (it works once, for 10 minutes,
   and only on the computer that runs Kora), never the panel's long-lived token. It is exchanged for a session.
   Wrong codes and tokens are rate limited: on the computer itself, and per address for remote sign-ins (so a
@@ -484,8 +829,9 @@ SSH tunnel as described in [section 10](#10-optional-remote-access).
   txAdmin and the FiveM server's own web server, where any resource can log it. Each session therefore also has a
   secret that the page keeps for its own address and port and sends with every request (`X-Kora-Session`); the
   cookie alone is refused. The cookie (`kora_session_<port>`) is `HttpOnly` and `SameSite=Strict`.
-- **No proxies.** Requests that came through a reverse proxy or `tailscale serve` are refused (they connect from
-  127.0.0.1, so everyone would look like the owner).
+- **txAdmin through the panel is a second door, guarded by the first.** The gateway port of a server's txAdmin (txAdmin's port + 10000) lets nobody in without a one-time ticket made by a signed-in administrator's panel session (cookie and session secret together); the gateway then follows that session (signing out, a removed user, a changed role or the remote-actions switch ending it, also for an open live console), never passes the panel's cookies or secret on to txAdmin, keeps two servers' txAdmin cookies apart, only ever connects to that server's own txAdmin on this computer, and refuses proxy headers, other `Host` and `Origin` values and WebSocket handshakes without a matching `Origin`. See `SECURITY.md`.
+- **No proxies, unless you say so.** Requests that came through a reverse proxy or `tailscale serve` are refused (they connect from
+  127.0.0.1, so everyone would look like the owner), except from the one proxy you told Kora to trust, with its secret.
 - **Limits for remote sessions.** At most 8 live views per account and 64 in total. A remote session can only read a
   job its role could have started. The hub (fleet, other panels' servers) is local only. Alert webhooks set from
   another computer must point to the public internet.
@@ -494,7 +840,7 @@ SSH tunnel as described in [section 10](#10-optional-remote-access).
   requests).
 - **Strict page policy.** The page can only load its own files: no inline scripts, no other sites, no framing.
 - **Secrets are write-only.** Licence keys, database passwords and webhook addresses are accepted but never sent back to
-  the browser. Saved licence keys show only their name and last 4 characters.
+  the browser. Saved licence keys show only their name and last 4 characters, and live in the system keychain when there is one.
 - **No elevated panel.** The panel runs as you (as root only when you are signed in as root, see [section 10](#10-optional-remote-access)). Privileged actions are a command you run, a helper that accepts only
   Kora's fixed actions (Linux), or on Windows a short-lived administrator copy of Kora started through the Windows
   permission prompt that runs only Kora's fixed administrator steps and exits (see SECURITY.md for how it is protected).

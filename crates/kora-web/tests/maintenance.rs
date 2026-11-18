@@ -16,24 +16,35 @@ const TOKEN: &str = "testtoken";
 const ADDR: &str = "127.0.0.1:47120";
 static LOCK: Mutex<()> = Mutex::new(());
 
+/// These tests describe the "no way to elevate: give the command" answer. Whatever service
+/// this machine has must not be asked (and a real one would need a real Kora home), so it is absent through the broker seam.
+struct NoWorker;
+impl kora_web::elevated::Broker for NoWorker {
+    fn availability(&self) -> kora_core::privsvc::problems::Availability {
+        kora_core::privsvc::problems::Availability::Missing
+    }
+    fn handles(&self, verb: &str) -> bool {
+        kora_core::privsvc::op::VERBS.contains(&verb)
+    }
+    fn call(&self, _: &str, _: &[String], _: &[(String, String)], _: &mut dyn FnMut(&str)) -> Result<kora_web::elevated::StepOutcome, kora_core::privsvc::conn::ClientError> {
+        unreachable!("the administrator service is absent in this test file")
+    }
+}
+
 /// The maintenance seam is process-wide: tests take turns.
 fn setup(admin: bool) -> (axum::Router, Arc<FakeMaintenance>, MutexGuard<'static, ()>) {
     let g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     std::env::remove_var("KORA_APP_PREFIX");
+    kora_web::elevated::set_broker_override(Some(Arc::new(NoWorker)));
     let m = FakeMaintenance::new(admin);
     maintenance::set_override(Some(m.clone()));
     let fake = FakeBackend::sample();
-    let st = AppState::system(TOKEN.into(), ADDR.parse().unwrap())
-        .with_backend(Arc::new(move || Box::new(fake.clone())));
+    let st = AppState::system(TOKEN.into(), ADDR.parse().unwrap()).with_backend(Arc::new(move || Box::new(fake.clone())));
     (router(st), m, g)
 }
 
 async fn call(app: &axum::Router, method: &str, uri: &str, body: Option<Value>) -> (u16, Value) {
-    let mut b = Request::builder()
-        .method(method)
-        .uri(uri)
-        .header(header::HOST, ADDR)
-        .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"));
+    let mut b = Request::builder().method(method).uri(uri).header(header::HOST, ADDR).header(header::AUTHORIZATION, format!("Bearer {TOKEN}"));
     let body = match body {
         Some(j) => {
             b = b.header(header::CONTENT_TYPE, "application/json");
@@ -64,14 +75,8 @@ async fn self_update_check_reports_versions() {
     let (app, _m, _g) = setup(false);
     let (s, j) = call(&app, "GET", "/api/v1/self-update", None).await;
     assert_eq!(s, 200);
-    assert_eq!(
-        (j["current"].as_str(), j["latest"].as_str()),
-        (Some("0.4.0"), Some("0.4.1"))
-    );
-    assert_eq!(
-        (&j["available"], &j["update_available"]),
-        (&json!(true), &json!(true))
-    );
+    assert_eq!((j["current"].as_str(), j["latest"].as_str()), (Some("0.4.0"), Some("0.4.1")));
+    assert_eq!((&j["available"], &j["update_available"]), (&json!(true), &json!(true)));
     assert_eq!(j["versions"], json!(["0.4.1", "0.4.0"]));
 }
 
@@ -81,30 +86,24 @@ async fn self_update_check_failure_is_a_plain_error() {
     *m.update.lock().unwrap() = Err("could not reach GitHub: offline".into());
     let (s, j) = call(&app, "GET", "/api/v1/self-update", None).await;
     assert_eq!(s, 422);
-    assert!(j["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("could not reach GitHub"));
+    assert!(j["error"]["message"].as_str().unwrap().contains("could not reach GitHub"));
 }
 
 #[tokio::test]
 async fn self_update_apply_runs_a_job() {
     let (app, m, _g) = setup(false);
-    let (s, j) = call(
-        &app,
-        "POST",
-        "/api/v1/self-update",
-        Some(json!({"version": "v0.4.1"})),
-    )
-    .await;
+    let (s, j) = call(&app, "POST", "/api/v1/self-update", Some(json!({"version": "v0.4.1"}))).await;
     assert_eq!(s, 202);
     let done = finish(&app, j["job"].as_str().unwrap()).await;
     assert_eq!(done["state"], "done");
     assert_eq!(done["result"]["version"], "v0.4.1");
     assert!(m.calls().contains(&"self_update_apply v0.4.1".to_string()));
     // No body at all is fine too.
-    let (s, _) = call(&app, "POST", "/api/v1/self-update", None).await;
+    let (s, j) = call(&app, "POST", "/api/v1/self-update", None).await;
     assert_eq!(s, 202);
+    // ...and it is waited for: a job still running when the next test installs ITS fake would call that one
+    // (the seam is process-wide), which showed up as an extra "self_update_apply -" in another test on a slow machine.
+    assert_eq!(finish(&app, j["job"].as_str().unwrap()).await["state"], "done");
 }
 
 // Without a helper this answers "run this command" on Linux. On Windows the panel asks Windows itself
@@ -113,13 +112,7 @@ async fn self_update_apply_runs_a_job() {
 #[tokio::test]
 async fn self_update_apply_validates_and_elevates() {
     let (app, _m, _g) = setup(false);
-    let (s, _) = call(
-        &app,
-        "POST",
-        "/api/v1/self-update",
-        Some(json!({"version": "x; rm -rf /"})),
-    )
-    .await;
+    let (s, _) = call(&app, "POST", "/api/v1/self-update", Some(json!({"version": "x; rm -rf /"}))).await;
     assert_eq!(s, 400);
     let (app, mut_m, _g2) = {
         drop(_g);
@@ -127,24 +120,12 @@ async fn self_update_apply_validates_and_elevates() {
         (a, m, g)
     };
     // Rebuild with a fake that cannot write the program folder.
-    let m2 = Arc::new(FakeMaintenance {
-        needs_admin: true,
-        ..clone_fake(&mut_m)
-    });
+    let m2 = Arc::new(FakeMaintenance { needs_admin: true, ..clone_fake(&mut_m) });
     maintenance::set_override(Some(m2));
-    let (s, j) = call(
-        &app,
-        "POST",
-        "/api/v1/self-update",
-        Some(json!({"version": "0.4.1"})),
-    )
-    .await;
+    let (s, j) = call(&app, "POST", "/api/v1/self-update", Some(json!({"version": "0.4.1"}))).await;
     assert_eq!(s, 403);
     assert_eq!(j["error"]["code"], "needs_elevation");
-    assert_eq!(
-        j["error"]["command"],
-        json!(["kora", "self-update", "--yes", "--version", "0.4.1"])
-    );
+    assert_eq!(j["error"]["command"], json!(["kora", "self-update", "--yes", "--version", "0.4.1"]));
 }
 
 #[cfg(not(windows))]
@@ -251,21 +232,9 @@ async fn uninstall_plan_has_safe_defaults() {
     assert_eq!(s, 200);
     let items = j["items"].as_array().unwrap();
     assert_eq!(items.len(), 2);
-    assert_eq!(
-        (items[0]["kind"].as_str(), items[0]["remove"].as_bool()),
-        (Some("system"), Some(true))
-    );
-    assert_eq!(
-        (items[1]["kind"].as_str(), items[1]["remove"].as_bool()),
-        (Some("folder"), Some(false))
-    );
-    let (s, j) = call(
-        &app,
-        "POST",
-        "/api/v1/uninstall/plan",
-        Some(json!({"server": "nope"})),
-    )
-    .await;
+    assert_eq!((items[0]["kind"].as_str(), items[0]["remove"].as_bool()), (Some("system"), Some(true)));
+    assert_eq!((items[1]["kind"].as_str(), items[1]["remove"].as_bool()), (Some("folder"), Some(false)));
+    let (s, j) = call(&app, "POST", "/api/v1/uninstall/plan", Some(json!({"server": "nope"}))).await;
     assert_eq!(s, 404, "{j}");
 }
 
@@ -278,22 +247,12 @@ async fn uninstall_run_job_and_errors() {
     let done = finish(&app, j["job"].as_str().unwrap()).await;
     assert_eq!(done["state"], "done");
     assert!(done["result"]["notes"].is_array());
-    assert!(m.calls()[0]
-        .starts_with("uninstall_run answers=[(\"prod/service\", true), (\"prod/folder\", false)]"));
+    assert!(m.calls()[0].starts_with("uninstall_run answers=[(\"prod/service\", true), (\"prod/folder\", false)]"));
     // Unknown server.
-    let (s, _) = call(
-        &app,
-        "POST",
-        "/api/v1/uninstall",
-        Some(json!({"only": ["ghost"]})),
-    )
-    .await;
+    let (s, _) = call(&app, "POST", "/api/v1/uninstall", Some(json!({"only": ["ghost"]}))).await;
     assert_eq!(s, 404);
     // Failures are reported as a failed job.
-    *m.outcome.lock().unwrap() = Ok(UninstallOutcome {
-        failed: vec!["prod: service: refused".into()],
-        ..Default::default()
-    });
+    *m.outcome.lock().unwrap() = Ok(UninstallOutcome { failed: vec!["prod: service: refused".into()], ..Default::default() });
     let (_, j) = call(&app, "POST", "/api/v1/uninstall", Some(body)).await;
     let done = finish(&app, j["job"].as_str().unwrap()).await;
     assert_eq!(done["state"], "failed");
@@ -308,10 +267,7 @@ async fn uninstall_run_needs_elevation_without_admin() {
     let (s, j) = call(&app, "POST", "/api/v1/uninstall", Some(json!({"answers": [], "delete_files": true, "delete_databases": false, "only": ["prod"]}))).await;
     assert_eq!(s, 403);
     assert_eq!(j["error"]["code"], "needs_elevation");
-    assert_eq!(
-        j["error"]["command"],
-        json!(["kora", "uninstall", "--yes", "--delete-files", "prod"])
-    );
+    assert_eq!(j["error"]["command"], json!(["kora", "uninstall", "--yes", "--delete-files", "prod"]));
     assert!(m.calls().is_empty());
 }
 
@@ -320,22 +276,9 @@ async fn bad_bodies_are_400() {
     let (app, _m, _g) = setup(true);
     let r = app
         .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/uninstall")
-                .header(header::HOST, ADDR)
-                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
-                .body(Body::from("{nope"))
-                .unwrap(),
-        )
+        .oneshot(Request::builder().method("POST").uri("/api/v1/uninstall").header(header::HOST, ADDR).header(header::AUTHORIZATION, format!("Bearer {TOKEN}")).body(Body::from("{nope")).unwrap())
         .await
         .unwrap();
     assert_eq!(r.status(), 400);
-    let _ = PlanItem {
-        item: String::new(),
-        description: String::new(),
-        kind: "system",
-        remove: true,
-    };
+    let _ = PlanItem { item: String::new(), description: String::new(), kind: "system", remove: true };
 }

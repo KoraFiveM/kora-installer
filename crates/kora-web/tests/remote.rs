@@ -36,13 +36,7 @@ impl FakeWhois {
 impl Whois for FakeWhois {
     fn whois(&self, peer: SocketAddr) -> Result<String, String> {
         self.asked.lock().unwrap().push(peer);
-        self.logins
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|(ip, _)| *ip == peer.ip().to_string())
-            .map(|(_, l)| l.clone())
-            .ok_or_else(|| "Tailscale does not know this address.".to_string())
+        self.logins.lock().unwrap().iter().find(|(ip, _)| *ip == peer.ip().to_string()).map(|(_, l)| l.clone()).ok_or_else(|| "Tailscale does not know this address.".to_string())
     }
     fn self_names(&self) -> Vec<String> {
         self.names.clone()
@@ -57,20 +51,13 @@ struct World {
 fn world_with(remote: Remote) -> World {
     let remote = Arc::new(remote);
     let fake = FakeBackend::sample();
-    let st = AppState::system(LAUNCH.into(), BOUND.parse().unwrap())
-        .with_backend(Arc::new(move || Box::new(fake.clone())))
-        .with_remote(remote.clone());
-    World {
-        app: router(st),
-        remote,
-    }
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
+    let st = AppState::system(LAUNCH.into(), BOUND.parse().unwrap()).with_backend(Arc::new(move || Box::new(fake.clone()))).with_remote(remote.clone());
+    World { app: router(st), remote }
 }
 
 fn enabled_cfg() -> RemoteConfig {
-    RemoteConfig {
-        enabled: true,
-        ..Default::default()
-    }
+    RemoteConfig { enabled: true, ..Default::default() }
 }
 
 /// Remote access on, one token user per role. Returns their tokens.
@@ -92,14 +79,7 @@ struct Req {
 }
 
 fn req(method: &'static str, uri: &str) -> Req {
-    Req {
-        method,
-        uri: uri.into(),
-        host: BOUND.into(),
-        peer: Some(REMOTE_PEER),
-        headers: vec![],
-        body: None,
-    }
+    Req { method, uri: uri.into(), host: BOUND.into(), peer: Some(REMOTE_PEER), headers: vec![], body: None }
 }
 impl Req {
     fn host(mut self, h: &str) -> Self {
@@ -136,10 +116,7 @@ impl Req {
         self
     }
     async fn send(self, app: &axum::Router) -> Resp {
-        let mut b = Request::builder()
-            .method(self.method)
-            .uri(&self.uri)
-            .header(header::HOST, &self.host);
+        let mut b = Request::builder().method(self.method).uri(&self.uri).header(header::HOST, &self.host);
         for (k, v) in &self.headers {
             b = b.header(*k, v);
         }
@@ -152,8 +129,7 @@ impl Req {
         };
         let mut r = b.body(body).unwrap();
         if let Some(p) = self.peer {
-            r.extensions_mut()
-                .insert(ConnectInfo(p.parse::<SocketAddr>().unwrap()));
+            r.extensions_mut().insert(ConnectInfo(p.parse::<SocketAddr>().unwrap()));
         }
         Resp::new(app.clone().oneshot(r).await.unwrap()).await
     }
@@ -168,14 +144,8 @@ struct Resp {
 impl Resp {
     async fn new(r: Response<Body>) -> Self {
         let status = r.status().as_u16();
-        let cookie = r
-            .headers()
-            .get(header::SET_COOKIE)
-            .map(|c| c.to_str().unwrap().split(';').next().unwrap().to_string());
-        let is_stream = r
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .is_some_and(|v| v.to_str().unwrap_or("").starts_with("text/event-stream"));
+        let cookie = r.headers().get(header::SET_COOKIE).map(|c| c.to_str().unwrap().split(';').next().unwrap().to_string());
+        let is_stream = r.headers().get(header::CONTENT_TYPE).is_some_and(|v| v.to_str().unwrap_or("").starts_with("text/event-stream"));
         let json = if is_stream {
             Value::Null
         } else {
@@ -186,27 +156,16 @@ impl Resp {
             (Some(c), Some(sec)) => Some(format!("{c}|{sec}")),
             (c, _) => c,
         };
-        Self {
-            status,
-            json,
-            cookie,
-        }
+        Self { status, json, cookie }
     }
     fn msg(&self) -> String {
-        self.json["error"]["message"]
-            .as_str()
-            .unwrap_or("")
-            .to_string()
+        self.json["error"]["message"].as_str().unwrap_or("").to_string()
     }
 }
 
 /// POST /session as a remote peer with a user token; returns the cookie.
 async fn sign_in(app: &axum::Router, token: &str) -> String {
-    let r = req("POST", "/api/v1/session")
-        .h("x-kora", "1")
-        .json(json!({"token": token}))
-        .send(app)
-        .await;
+    let r = req("POST", "/api/v1/session").h("x-kora", "1").json(json!({"token": token})).send(app).await;
     assert_eq!(r.status, 200, "{:?}", r.json);
     r.cookie.expect("a session cookie")
 }
@@ -217,49 +176,21 @@ async fn sign_in(app: &axum::Router, token: &str) -> String {
 async fn loopback_still_needs_the_launch_token_and_is_admin() {
     let (w, [_, _, adam]) = with_users(enabled_cfg());
     // From the computer itself: the launch token works, in every form.
-    let r = req("GET", "/api/v1/servers")
-        .host(BOUND)
-        .peer(LOOPBACK_PEER)
-        .bearer(LAUNCH)
-        .send(&w.app)
-        .await;
+    let r = req("GET", "/api/v1/servers").host(BOUND).peer(LOOPBACK_PEER).bearer(LAUNCH).send(&w.app).await;
     assert_eq!(r.status, 200);
-    let r = req("GET", "/api/v1/servers")
-        .peer(LOOPBACK_PEER)
-        .send(&w.app)
-        .await;
+    let r = req("GET", "/api/v1/servers").peer(LOOPBACK_PEER).send(&w.app).await;
     assert_eq!(r.status, 401);
     // A remote user's token is not a launch token.
-    let r = req("GET", "/api/v1/servers")
-        .peer(LOOPBACK_PEER)
-        .bearer(&adam)
-        .send(&w.app)
-        .await;
+    let r = req("GET", "/api/v1/servers").peer(LOOPBACK_PEER).bearer(&adam).send(&w.app).await;
     assert_eq!(r.status, 401);
     // The local session is admin: it can do local-only and destructive things.
-    let r = req("POST", "/api/v1/session")
-        .peer(LOOPBACK_PEER)
-        .h("x-kora", "1")
-        .json(json!({"token": LAUNCH}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session").peer(LOOPBACK_PEER).h("x-kora", "1").json(json!({"token": LAUNCH})).send(&w.app).await;
     assert_eq!(r.status, 200);
-    assert_eq!(
-        r.json["identity"],
-        json!({"name": "local", "provider": "local", "role": "admin"})
-    );
+    assert_eq!(r.json["identity"], json!({"name": "local", "provider": "local", "role": "admin"}));
     let cookie = r.cookie.unwrap();
-    let r = req("GET", "/api/v1/users")
-        .peer(LOOPBACK_PEER)
-        .cookie(&cookie)
-        .send(&w.app)
-        .await;
+    let r = req("GET", "/api/v1/users").peer(LOOPBACK_PEER).cookie(&cookie).send(&w.app).await;
     assert_eq!(r.status, 200);
-    let r = req("GET", "/api/v1/meta")
-        .peer(LOOPBACK_PEER)
-        .cookie(&cookie)
-        .send(&w.app)
-        .await;
+    let r = req("GET", "/api/v1/meta").peer(LOOPBACK_PEER).cookie(&cookie).send(&w.app).await;
     assert_eq!(r.json["identity"]["role"], "admin");
     assert_eq!(r.json["remote"], false);
 }
@@ -267,16 +198,9 @@ async fn loopback_still_needs_the_launch_token_and_is_admin() {
 #[tokio::test]
 async fn the_launch_token_does_not_work_from_another_computer() {
     let (w, _) = with_users(enabled_cfg());
-    let r = req("GET", "/api/v1/servers")
-        .bearer(LAUNCH)
-        .send(&w.app)
-        .await;
+    let r = req("GET", "/api/v1/servers").bearer(LAUNCH).send(&w.app).await;
     assert_eq!(r.status, 401);
-    let r = req("POST", "/api/v1/session")
-        .h("x-kora", "1")
-        .json(json!({"token": LAUNCH}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session").h("x-kora", "1").json(json!({"token": LAUNCH})).send(&w.app).await;
     assert_eq!(r.status, 401);
 }
 
@@ -284,27 +208,12 @@ async fn the_launch_token_does_not_work_from_another_computer() {
 async fn a_cookie_only_works_from_the_kind_of_peer_it_was_made_for() {
     let (w, [_, _, adam]) = with_users(enabled_cfg());
     let remote_cookie = sign_in(&w.app, &adam).await;
-    let r = req("GET", "/api/v1/servers")
-        .peer(LOOPBACK_PEER)
-        .cookie(&remote_cookie)
-        .send(&w.app)
-        .await;
+    let r = req("GET", "/api/v1/servers").peer(LOOPBACK_PEER).cookie(&remote_cookie).send(&w.app).await;
     assert_eq!(r.status, 401);
-    let r = req("POST", "/api/v1/session")
-        .peer(LOOPBACK_PEER)
-        .h("x-kora", "1")
-        .json(json!({"token": LAUNCH}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session").peer(LOOPBACK_PEER).h("x-kora", "1").json(json!({"token": LAUNCH})).send(&w.app).await;
     let local_cookie = r.cookie.unwrap();
-    let r = req("GET", "/api/v1/servers")
-        .cookie(&local_cookie)
-        .send(&w.app)
-        .await;
-    assert_eq!(
-        r.status, 401,
-        "a local cookie must not work from a remote peer"
-    );
+    let r = req("GET", "/api/v1/servers").cookie(&local_cookie).send(&w.app).await;
+    assert_eq!(r.status, 401, "a local cookie must not work from a remote peer");
 }
 
 #[tokio::test]
@@ -327,51 +236,27 @@ async fn host_checks_for_a_remote_bind() {
     let mut cfg = enabled_cfg();
     cfg.allowed_hosts = vec!["box.example.com".into()];
     let w = world_with(Remote::new(None, cfg));
-    w.remote
-        .set_dynamic_hosts(vec!["box.tail1234.ts.net".into(), "box".into()]);
+    w.remote.set_dynamic_hosts(vec!["box.tail1234.ts.net".into(), "box".into()]);
     let get = |h: &'static str| {
         let app = w.app.clone();
         async move { req("GET", "/api/v1/meta").host(h).send(&app).await.status }
     };
     assert_eq!(get(BOUND).await, 200, "the bound address");
-    assert_eq!(
-        get("box.example.com:47120").await,
-        200,
-        "a name from the settings"
-    );
-    assert_eq!(
-        get("BOX.tail1234.ts.net:47120").await,
-        200,
-        "the MagicDNS name, any case"
-    );
+    assert_eq!(get("box.example.com:47120").await, 200, "a name from the settings");
+    assert_eq!(get("BOX.tail1234.ts.net:47120").await, 200, "the MagicDNS name, any case");
     assert_eq!(get("box:47120").await, 200, "the short MagicDNS name");
-    assert_eq!(
-        get("box.example.com").await,
-        403,
-        "a configured name still needs the panel's port"
-    );
+    assert_eq!(get("box.example.com").await, 403, "a configured name still needs the panel's port");
     assert_eq!(get("box.example.com:9").await, 403);
     assert_eq!(get("evil.example.org:47120").await, 403);
-    assert_eq!(
-        get("127.0.0.1:47120").await,
-        403,
-        "this bind is not loopback"
-    );
+    assert_eq!(get("127.0.0.1:47120").await, 403, "this bind is not loopback");
     assert_eq!(get("localhost:47120").await, 403);
 }
 
 #[tokio::test]
 async fn configured_names_are_ignored_while_remote_access_is_off() {
-    let cfg = RemoteConfig {
-        allowed_hosts: vec!["box.example.com".into()],
-        ..Default::default()
-    };
+    let cfg = RemoteConfig { allowed_hosts: vec!["box.example.com".into()], ..Default::default() };
     let w = world_with(Remote::new(None, cfg));
-    let r = req("GET", "/api/v1/meta")
-        .host("box.example.com:47120")
-        .no_peer()
-        .send(&w.app)
-        .await;
+    let r = req("GET", "/api/v1/meta").host("box.example.com:47120").no_peer().send(&w.app).await;
     assert_eq!(r.status, 403);
 }
 
@@ -380,27 +265,11 @@ async fn csrf_and_origin_still_apply_to_remote_sessions() {
     let (w, [_, _, adam]) = with_users(enabled_cfg());
     let cookie = sign_in(&w.app, &adam).await;
     let body = json!({"action": "restart"});
-    let r = req("POST", "/api/v1/servers/prod/control")
-        .cookie(&cookie)
-        .json(body.clone())
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/servers/prod/control").cookie(&cookie).json(body.clone()).send(&w.app).await;
     assert_eq!((r.status, r.msg().as_str()), (403, "missing X-Kora header"));
-    let r = req("POST", "/api/v1/servers/prod/control")
-        .cookie(&cookie)
-        .h("x-kora", "1")
-        .h("origin", "http://evil.example.org")
-        .json(body.clone())
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/servers/prod/control").cookie(&cookie).h("x-kora", "1").h("origin", "http://evil.example.org").json(body.clone()).send(&w.app).await;
     assert_eq!((r.status, r.msg().as_str()), (403, "origin not allowed"));
-    let r = req("POST", "/api/v1/servers/prod/control")
-        .cookie(&cookie)
-        .h("x-kora", "1")
-        .h("origin", &format!("http://{BOUND}"))
-        .json(body)
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/servers/prod/control").cookie(&cookie).h("x-kora", "1").h("origin", &format!("http://{BOUND}")).json(body).send(&w.app).await;
     assert_eq!(r.status, 202);
 }
 
@@ -411,24 +280,15 @@ async fn token_sign_in_and_meta_identity() {
     let (w, [vera, _, _]) = with_users(enabled_cfg());
     let cookie = sign_in(&w.app, &vera).await;
     assert!(cookie.starts_with("kora_session_47120="));
-    let r = req("GET", "/api/v1/meta")
-        .cookie(&cookie)
-        .send(&w.app)
-        .await;
-    assert_eq!(
-        r.json["identity"],
-        json!({"name": "vera", "provider": "token", "role": "viewer"})
-    );
+    let r = req("GET", "/api/v1/meta").cookie(&cookie).send(&w.app).await;
+    assert_eq!(r.json["identity"], json!({"name": "vera", "provider": "token", "role": "viewer"}));
     assert_eq!(r.json["remote"], true);
     // Not signed in: meta still answers, with no identity.
     let r = req("GET", "/api/v1/meta").send(&w.app).await;
     assert_eq!(r.status, 200);
     assert!(r.json["identity"].is_null());
     // A bearer token works for scripts too.
-    let r = req("GET", "/api/v1/servers")
-        .bearer(&vera)
-        .send(&w.app)
-        .await;
+    let r = req("GET", "/api/v1/servers").bearer(&vera).send(&w.app).await;
     assert_eq!(r.status, 200);
 }
 
@@ -436,26 +296,13 @@ async fn token_sign_in_and_meta_identity() {
 async fn bad_tokens_are_refused_and_lock_out_remote_sign_in_only() {
     let (w, [_, _, adam]) = with_users(enabled_cfg());
     for _ in 0..10 {
-        let r = req("POST", "/api/v1/session")
-            .h("x-kora", "1")
-            .json(json!({"token": "wrong"}))
-            .send(&w.app)
-            .await;
+        let r = req("POST", "/api/v1/session").h("x-kora", "1").json(json!({"token": "wrong"})).send(&w.app).await;
         assert_eq!(r.status, 401);
     }
-    let r = req("POST", "/api/v1/session")
-        .h("x-kora", "1")
-        .json(json!({"token": adam}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session").h("x-kora", "1").json(json!({"token": adam})).send(&w.app).await;
     assert_eq!(r.status, 429, "locked out after repeated failures");
     // The owner on the computer itself is not locked out by strangers.
-    let r = req("POST", "/api/v1/session")
-        .peer(LOOPBACK_PEER)
-        .h("x-kora", "1")
-        .json(json!({"token": LAUNCH}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session").peer(LOOPBACK_PEER).h("x-kora", "1").json(json!({"token": LAUNCH})).send(&w.app).await;
     assert_eq!(r.status, 200);
 }
 
@@ -479,14 +326,7 @@ async fn removing_a_user_or_changing_their_role_takes_effect_at_once() {
     assert_eq!(ok("/api/v1/servers").await, 401);
     let cookie2 = sign_in(&w.app, &olly).await;
     w.remote.update(|c| Ok(c.remove_user("olly"))).unwrap();
-    assert_eq!(
-        req("GET", "/api/v1/servers")
-            .cookie(&cookie2)
-            .send(&w.app)
-            .await
-            .status,
-        401
-    );
+    assert_eq!(req("GET", "/api/v1/servers").cookie(&cookie2).send(&w.app).await.status, 401);
 }
 
 // ---------- tailscale provider ----------
@@ -498,62 +338,27 @@ fn tailscale_world(login: &str, map: &[(&str, Role)]) -> (World, Arc<FakeWhois>)
         cfg.tailscale_users.insert(l.to_string(), *r);
     }
     let who = FakeWhois::with("100.64.0.20", login);
-    (
-        world_with(Remote::new(None, cfg).with_whois(who.clone())),
-        who,
-    )
+    (world_with(Remote::new(None, cfg).with_whois(who.clone())), who)
 }
 
 #[tokio::test]
 async fn tailscale_identity_comes_from_whois_only() {
-    let (w, who) = tailscale_world(
-        "Alice@Example.com",
-        &[
-            ("alice@example.com", Role::Operator),
-            ("boss@example.com", Role::Admin),
-        ],
-    );
+    let (w, who) = tailscale_world("Alice@Example.com", &[("alice@example.com", Role::Operator), ("boss@example.com", Role::Admin)]);
     // The request claims to be the boss with the headers tailscale serve would add: refused outright.
-    let r = req("POST", "/api/v1/session")
-        .h("x-kora", "1")
-        .h("tailscale-user-login", "boss@example.com")
-        .json(json!({}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session").h("x-kora", "1").h("tailscale-user-login", "boss@example.com").json(json!({})).send(&w.app).await;
     assert_eq!(r.status, 403, "{:?}", r.json);
     assert!(r.msg().contains("tailscale serve"), "{}", r.msg());
     assert!(who.asked.lock().unwrap().is_empty());
     // Other headers that only look like identity are ignored: the identity comes from whois.
-    let r = req("POST", "/api/v1/session")
-        .h("x-kora", "1")
-        .h("x-forwarded-user", "boss@example.com")
-        .json(json!({}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session").h("x-kora", "1").h("x-forwarded-user", "boss@example.com").json(json!({})).send(&w.app).await;
     assert_eq!(r.status, 200, "{:?}", r.json);
-    assert_eq!(
-        r.json["identity"],
-        json!({"name": "Alice@Example.com", "provider": "tailscale", "role": "operator"})
-    );
-    assert_eq!(
-        who.asked.lock().unwrap().as_slice(),
-        &[REMOTE_PEER.parse::<SocketAddr>().unwrap()],
-        "whois is asked about the peer address"
-    );
+    assert_eq!(r.json["identity"], json!({"name": "Alice@Example.com", "provider": "tailscale", "role": "operator"}));
+    assert_eq!(who.asked.lock().unwrap().as_slice(), &[REMOTE_PEER.parse::<SocketAddr>().unwrap()], "whois is asked about the peer address");
     let cookie = r.cookie.unwrap();
     // Operator: may restart, may not read users or delete.
-    let r = req("POST", "/api/v1/servers/prod/control")
-        .cookie(&cookie)
-        .h("x-kora", "1")
-        .json(json!({"action": "restart"}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/servers/prod/control").cookie(&cookie).h("x-kora", "1").json(json!({"action": "restart"})).send(&w.app).await;
     assert_eq!(r.status, 202);
-    let r = req("DELETE", "/api/v1/servers/prod/registration")
-        .cookie(&cookie)
-        .h("x-kora", "1")
-        .send(&w.app)
-        .await;
+    let r = req("DELETE", "/api/v1/servers/prod/registration").cookie(&cookie).h("x-kora", "1").send(&w.app).await;
     assert_eq!(r.status, 403);
 }
 
@@ -561,18 +366,11 @@ async fn tailscale_identity_comes_from_whois_only() {
 async fn tailscale_identity_headers_alone_never_sign_anyone_in() {
     let (w, _) = tailscale_world("nobody@example.com", &[("boss@example.com", Role::Admin)]);
     for h in ["tailscale-user-login", "tailscale-user-name"] {
-        let r = req("GET", "/api/v1/servers")
-            .h(h, "boss@example.com")
-            .send(&w.app)
-            .await;
+        let r = req("GET", "/api/v1/servers").h(h, "boss@example.com").send(&w.app).await;
         assert_eq!(r.status, 403, "{h}");
     }
     // whois says this peer is someone who is not listed: refused, with their login named.
-    let r = req("POST", "/api/v1/session")
-        .h("x-kora", "1")
-        .json(json!({}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session").h("x-kora", "1").json(json!({})).send(&w.app).await;
     assert_eq!(r.status, 401);
     assert!(r.msg().contains("nobody@example.com"), "{}", r.msg());
 }
@@ -581,31 +379,17 @@ async fn tailscale_identity_headers_alone_never_sign_anyone_in() {
 async fn tailscale_off_unknown_peer_or_whois_failure_are_refused() {
     // Provider not enabled.
     let mut cfg = enabled_cfg();
-    cfg.tailscale_users
-        .insert("alice@example.com".into(), Role::Admin);
+    cfg.tailscale_users.insert("alice@example.com".into(), Role::Admin);
     let who = FakeWhois::with("100.64.0.20", "alice@example.com");
     let w = world_with(Remote::new(None, cfg).with_whois(who));
-    let r = req("POST", "/api/v1/session")
-        .h("x-kora", "1")
-        .json(json!({}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session").h("x-kora", "1").json(json!({})).send(&w.app).await;
     assert_eq!(r.status, 401);
     // Enabled, but tailscaled does not know the peer.
     let (w, _) = tailscale_world("alice@example.com", &[("alice@example.com", Role::Admin)]);
-    let r = req("POST", "/api/v1/session")
-        .peer("10.9.9.9:1234")
-        .h("x-kora", "1")
-        .json(json!({}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session").peer("10.9.9.9:1234").h("x-kora", "1").json(json!({})).send(&w.app).await;
     assert_eq!(r.status, 401);
     // Turning the provider off ends existing sessions.
-    let r = req("POST", "/api/v1/session")
-        .h("x-kora", "1")
-        .json(json!({}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session").h("x-kora", "1").json(json!({})).send(&w.app).await;
     let cookie = r.cookie.unwrap();
     w.remote
         .update(|c| {
@@ -613,10 +397,7 @@ async fn tailscale_off_unknown_peer_or_whois_failure_are_refused() {
             Ok(())
         })
         .unwrap();
-    let r = req("GET", "/api/v1/servers")
-        .cookie(&cookie)
-        .send(&w.app)
-        .await;
+    let r = req("GET", "/api/v1/servers").cookie(&cookie).send(&w.app).await;
     assert_eq!(r.status, 401);
 }
 
@@ -641,79 +422,22 @@ async fn every_role_boundary_for_a_sample_of_operations() {
         ("GET", "/api/v1/system", none(), Role::Viewer),
         ("GET", "/api/v1/catalog", none(), Role::Viewer),
         ("GET", "/api/v1/servers/prod/logs", none(), Role::Operator),
-        (
-            "GET",
-            "/api/v1/servers/prod/logs/server.log",
-            none(),
-            Role::Operator,
-        ),
-        (
-            "POST",
-            "/api/v1/servers/prod/control",
-            Some(json!({"action": "restart"})),
-            Role::Operator,
-        ),
-        (
-            "POST",
-            "/api/v1/servers/prod/ensure",
-            Some(json!({"name": "x", "restart": false})),
-            Role::Operator,
-        ),
-        (
-            "POST",
-            "/api/v1/servers/prod/update/preview",
-            Some(json!({"scope": "all"})),
-            Role::Operator,
-        ),
-        (
-            "POST",
-            "/api/v1/servers/prod/webhook/test",
-            Some(json!({})),
-            Role::Operator,
-        ),
-        (
-            "PUT",
-            "/api/v1/servers/prod/ports",
-            Some(json!({"game": 30120, "txadmin": 40120})),
-            Role::Admin,
-        ),
-        (
-            "PUT",
-            "/api/v1/servers/prod/webhook",
-            Some(json!({"url": "https://example.com/x"})),
-            Role::Admin,
-        ),
-        (
-            "POST",
-            "/api/v1/servers/prod/resources",
-            Some(json!({"ids": []})),
-            Role::Admin,
-        ),
-        (
-            "POST",
-            "/api/v1/installs/plan",
-            Some(json!({})),
-            Role::Admin,
-        ),
-        (
-            "PUT",
-            "/api/v1/servers/prod/console/enabled",
-            Some(json!({"enabled": true})),
-            Role::Admin,
-        ),
+        ("GET", "/api/v1/servers/prod/logs/server.log", none(), Role::Operator),
+        ("POST", "/api/v1/servers/prod/control", Some(json!({"action": "restart"})), Role::Operator),
+        ("POST", "/api/v1/servers/prod/ensure", Some(json!({"name": "x", "restart": false})), Role::Operator),
+        ("POST", "/api/v1/servers/prod/update/preview", Some(json!({"scope": "all"})), Role::Operator),
+        ("POST", "/api/v1/servers/prod/webhook/test", Some(json!({})), Role::Operator),
+        ("PUT", "/api/v1/servers/prod/ports", Some(json!({"game": 30120, "txadmin": 40120})), Role::Admin),
+        ("PUT", "/api/v1/servers/prod/webhook", Some(json!({"url": "https://example.com/x"})), Role::Admin),
+        ("POST", "/api/v1/servers/prod/resources", Some(json!({"ids": []})), Role::Admin),
+        ("POST", "/api/v1/installs/plan", Some(json!({})), Role::Admin),
+        ("PUT", "/api/v1/servers/prod/console/enabled", Some(json!({"enabled": true})), Role::Admin),
     ];
     for (method, uri, body, min) in table {
-        for (role, tok) in [
-            (Role::Viewer, &vera),
-            (Role::Operator, &olly),
-            (Role::Admin, &adam),
-        ] {
+        for (role, tok) in [(Role::Viewer, &vera), (Role::Operator, &olly), (Role::Admin, &adam)] {
             let s = status(&w, tok, method, uri, body.clone()).await;
             if role >= min {
-                assert_ne!(
-                    s, 403,
-                    "{role} should get past the guard for {method} {uri}"
-                );
+                assert_ne!(s, 403, "{role} should get past the guard for {method} {uri}");
                 assert_ne!(s, 401, "{method} {uri}");
             } else {
                 assert_eq!(s, 403, "{role} must be refused for {method} {uri}");
@@ -725,56 +449,26 @@ async fn every_role_boundary_for_a_sample_of_operations() {
 #[tokio::test]
 async fn refusals_explain_themselves() {
     let (w, [vera, _, _]) = with_users(enabled_cfg());
-    let r = req("POST", "/api/v1/servers/prod/control")
-        .bearer(&vera)
-        .json(json!({"action": "stop"}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/servers/prod/control").bearer(&vera).json(json!({"action": "stop"})).send(&w.app).await;
     assert_eq!(r.status, 403);
     assert_eq!(r.json["error"]["code"], "forbidden");
-    assert!(
-        r.msg().contains("viewer") && r.msg().contains("operator"),
-        "{}",
-        r.msg()
-    );
+    assert!(r.msg().contains("viewer") && r.msg().contains("operator"), "{}", r.msg());
     // The fake backend was not touched by a refused request.
 }
 
 #[tokio::test]
 async fn a_viewer_cannot_read_the_console_or_logs() {
     let (w, [vera, olly, _]) = with_users(enabled_cfg());
-    assert_eq!(
-        status(
-            &w,
-            &vera,
-            "GET",
-            "/api/v1/servers/prod/console/stream",
-            None
-        )
-        .await,
-        403
-    );
-    assert_eq!(
-        status(&w, &vera, "GET", "/api/v1/servers/prod/logs", None).await,
-        403
-    );
-    assert_eq!(
-        status(&w, &olly, "GET", "/api/v1/servers/prod/logs", None).await,
-        200
-    );
+    assert_eq!(status(&w, &vera, "GET", "/api/v1/servers/prod/console/stream", None).await, 403);
+    assert_eq!(status(&w, &vera, "GET", "/api/v1/servers/prod/logs", None).await, 403);
+    assert_eq!(status(&w, &olly, "GET", "/api/v1/servers/prod/logs", None).await, 200);
 }
 
 #[tokio::test]
 async fn unknown_non_get_routes_are_refused_for_remote_callers() {
     let (w, [_, _, adam]) = with_users(enabled_cfg());
-    assert_eq!(
-        status(&w, &adam, "POST", "/api/v1/nothing-here", Some(json!({}))).await,
-        403
-    );
-    assert_eq!(
-        status(&w, &adam, "GET", "/api/v1/nothing-here", None).await,
-        404
-    );
+    assert_eq!(status(&w, &adam, "POST", "/api/v1/nothing-here", Some(json!({}))).await, 403);
+    assert_eq!(status(&w, &adam, "GET", "/api/v1/nothing-here", None).await, 404);
 }
 
 // ---------- remote destructive ----------
@@ -791,10 +485,7 @@ const DESTRUCTIVE: &[(&str, &str)] = &[
 ];
 
 /// Installing a new server (start, and resume a paused install).
-const INSTALL: &[(&str, &str)] = &[
-    ("POST", "/api/v1/installs"),
-    ("POST", "/api/v1/installs/j1/resume"),
-];
+const INSTALL: &[(&str, &str)] = &[("POST", "/api/v1/installs"), ("POST", "/api/v1/installs/j1/resume")];
 
 /// What the remote guard says when it refuses an action: a guided problem about the switch.
 fn is_switch_refusal(r: &Resp) -> bool {
@@ -807,7 +498,7 @@ async fn destructive_actions_are_refused_for_token_admins_while_remote_actions_a
     for (m, uri) in DESTRUCTIVE {
         let r = req(m, uri).bearer(&adam).json(json!({})).send(&w.app).await;
         assert!(is_switch_refusal(&r), "{m} {uri}: {} {:?}", r.status, r.json);
-        assert!(r.msg().contains("turned off for sign-ins made with a token"), "{m} {uri}: {}", r.msg());
+        assert!(r.msg().contains("turned off for sign-ins that do not come through Tailscale"), "{m} {uri}: {}", r.msg());
         // The problem says exactly how to turn it on, and the other ways to do it.
         let e = &r.json["error"];
         assert!(e["details"].as_str().unwrap().contains("kora panel remote-actions on"), "{e}");
@@ -842,12 +533,7 @@ async fn tailscale_admins_get_install_and_destructive_actions_with_no_switch() {
     assert_eq!(r.status, 200, "{:?}", r.json);
     let cookie = r.cookie.unwrap();
     // The typed-name confirmation still applies.
-    let r = req("DELETE", "/api/v1/servers/dev")
-        .cookie(&cookie)
-        .h("x-kora", "1")
-        .json(json!({"confirm_name": "wrong"}))
-        .send(&w.app)
-        .await;
+    let r = req("DELETE", "/api/v1/servers/dev").cookie(&cookie).h("x-kora", "1").json(json!({"confirm_name": "wrong"})).send(&w.app).await;
     assert_eq!(r.status, 400);
     assert!(r.msg().contains("does not match"), "{}", r.msg());
     for (m, uri) in DESTRUCTIVE.iter().chain(INSTALL) {
@@ -890,36 +576,18 @@ async fn destructive_actions_pass_the_guard_when_enabled_and_keep_their_own_conf
     cfg.allow_remote_destructive = true;
     let (w, [_, olly, adam]) = with_users(cfg);
     // Typed-name confirmation is still enforced by the handler.
-    let r = req("DELETE", "/api/v1/servers/dev")
-        .bearer(&adam)
-        .json(json!({"confirm_name": "wrong"}))
-        .send(&w.app)
-        .await;
+    let r = req("DELETE", "/api/v1/servers/dev").bearer(&adam).json(json!({"confirm_name": "wrong"})).send(&w.app).await;
     assert_eq!(r.status, 400);
     assert!(r.msg().contains("does not match"), "{}", r.msg());
     for (m, uri) in DESTRUCTIVE.iter().chain(INSTALL) {
         let r = req(m, uri).bearer(&adam).json(json!({})).send(&w.app).await;
         // A handler may still answer 403 itself (needs_elevation when this process is not root,
         // as on a CI runner): what matters is that the remote guard did not refuse it.
-        assert!(
-            !is_switch_refusal(&r),
-            "{m} {uri} should reach the handler: {}",
-            r.msg()
-        );
+        assert!(!is_switch_refusal(&r), "{m} {uri} should reach the handler: {}", r.msg());
         assert_ne!(r.status, 401, "{m} {uri}");
     }
     // The switch does not lift the role: an operator is still not an admin.
-    assert_eq!(
-        status(
-            &w,
-            &olly,
-            "DELETE",
-            "/api/v1/servers/dev",
-            Some(json!({"confirm_name": "dev"}))
-        )
-        .await,
-        403
-    );
+    assert_eq!(status(&w, &olly, "DELETE", "/api/v1/servers/dev", Some(json!({"confirm_name": "dev"}))).await, 403);
 }
 
 #[tokio::test]
@@ -929,145 +597,68 @@ async fn local_only_operations_are_never_available_remotely() {
     let (w, [_, _, adam]) = with_users(cfg);
     let cases = [
         ("GET", "/api/v1/remote", None),
-        (
-            "PUT",
-            "/api/v1/remote",
-            Some(json!({"allow_remote_destructive": true})),
-        ),
+        ("PUT", "/api/v1/remote", Some(json!({"allow_remote_destructive": true}))),
         ("GET", "/api/v1/users", None),
-        (
-            "POST",
-            "/api/v1/users",
-            Some(json!({"name": "mallory", "role": "admin"})),
-        ),
+        ("POST", "/api/v1/users", Some(json!({"name": "mallory", "role": "admin"}))),
         ("DELETE", "/api/v1/users/vera", None),
         ("POST", "/api/v1/servers/prod/open-folder", Some(json!({}))),
         // The hub works with tokens of other panels stored here.
         ("GET", "/api/v1/fleet", None),
         ("GET", "/api/v1/nodes", None),
         ("GET", "/api/v1/nodes/n1/servers", None),
-        (
-            "POST",
-            "/api/v1/nodes/n1/servers/prod/control",
-            Some(json!({"action": "stop"})),
-        ),
+        ("POST", "/api/v1/nodes/n1/servers/prod/control", Some(json!({"action": "stop"}))),
         ("POST", "/api/v1/session/link", Some(json!({}))),
     ];
     for (m, uri, body) in cases {
         let s = status(&w, &adam, m, uri, body).await;
         assert_eq!(s, 403, "{m} {uri}");
     }
-    assert_eq!(
-        w.remote.config().users.len(),
-        3,
-        "no user was added or removed"
-    );
+    assert_eq!(w.remote.config().users.len(), 3, "no user was added or removed");
 }
 
 // ---------- settings and users API (local) ----------
 
 async fn local_cookie(w: &World) -> String {
-    let r = req("POST", "/api/v1/session")
-        .peer(LOOPBACK_PEER)
-        .h("x-kora", "1")
-        .json(json!({"token": LAUNCH}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session").peer(LOOPBACK_PEER).h("x-kora", "1").json(json!({"token": LAUNCH})).send(&w.app).await;
     r.cookie.unwrap()
 }
 
 #[tokio::test]
-async fn users_api_shows_the_token_once_and_never_the_hash() {
-    let w = world_with(Remote::new(None, enabled_cfg()));
+async fn users_api_shows_the_enrolment_link_once_and_makes_no_token() {
+    let dir = tempfile::tempdir().unwrap();
+    let w = world_with(Remote::from_file(dir.path().join("panel.json")).unwrap().forced(true));
     let c = local_cookie(&w).await;
-    let r = req("POST", "/api/v1/users")
-        .peer(LOOPBACK_PEER)
-        .cookie(&c)
-        .h("x-kora", "1")
-        .json(json!({"name": "pat", "role": "operator"}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/users").peer(LOOPBACK_PEER).cookie(&c).h("x-kora", "1").json(json!({"name": "pat", "role": "operator"})).send(&w.app).await;
     assert_eq!(r.status, 201);
-    let token = r.json["token"].as_str().unwrap().to_string();
-    assert!(token.len() >= 32);
-    assert_eq!(
-        (r.json["name"].as_str(), r.json["role"].as_str()),
-        (Some("pat"), Some("operator"))
-    );
+    let link = r.json["link"].as_str().unwrap().to_string();
+    assert!(link.len() >= 32);
+    assert!(r.json.get("token").is_none(), "a new user has no token: {:?}", r.json);
+    assert_eq!(r.json["expires_in"], 1800);
+    // The link is the only credential, and only its hash is kept; the list shows no secret.
+    let r = req("GET", "/api/v1/users").peer(LOOPBACK_PEER).cookie(&c).send(&w.app).await;
+    assert!(!r.json.to_string().contains(&link));
+    assert_eq!(r.json["users"][0]["legacy_token"], false);
+    assert_eq!((r.json["users"][0]["name"].as_str(), r.json["users"][0]["role"].as_str()), (Some("pat"), Some("operator")));
     // Duplicate and bad names.
-    let r = req("POST", "/api/v1/users")
-        .peer(LOOPBACK_PEER)
-        .cookie(&c)
-        .h("x-kora", "1")
-        .json(json!({"name": "PAT", "role": "viewer"}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/users").peer(LOOPBACK_PEER).cookie(&c).h("x-kora", "1").json(json!({"name": "PAT", "role": "viewer"})).send(&w.app).await;
     assert_eq!(r.status, 409);
-    let r = req("POST", "/api/v1/users")
-        .peer(LOOPBACK_PEER)
-        .cookie(&c)
-        .h("x-kora", "1")
-        .json(json!({"name": "a b", "role": "viewer"}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/users").peer(LOOPBACK_PEER).cookie(&c).h("x-kora", "1").json(json!({"name": "a b", "role": "viewer"})).send(&w.app).await;
     assert_eq!(r.status, 400);
-    let r = req("POST", "/api/v1/users")
-        .peer(LOOPBACK_PEER)
-        .cookie(&c)
-        .h("x-kora", "1")
-        .json(json!({"name": "x", "role": "root"}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/users").peer(LOOPBACK_PEER).cookie(&c).h("x-kora", "1").json(json!({"name": "x", "role": "root"})).send(&w.app).await;
     assert!(r.status == 400 || r.status == 422, "{}", r.status);
     // List and settings: no token, no hash, no salt.
-    let list = req("GET", "/api/v1/users")
-        .peer(LOOPBACK_PEER)
-        .cookie(&c)
-        .send(&w.app)
-        .await;
+    let list = req("GET", "/api/v1/users").peer(LOOPBACK_PEER).cookie(&c).send(&w.app).await;
     assert_eq!(list.json["users"][0]["name"], "pat");
-    let get = req("GET", "/api/v1/remote")
-        .peer(LOOPBACK_PEER)
-        .cookie(&c)
-        .send(&w.app)
-        .await;
+    let get = req("GET", "/api/v1/remote").peer(LOOPBACK_PEER).cookie(&c).send(&w.app).await;
     for text in [list.json.to_string(), get.json.to_string()] {
-        assert!(
-            !text.contains(&token) && !text.contains("hash") && !text.contains("salt"),
-            "{text}"
-        );
+        assert!(!text.contains(&link) && !text.contains("hash") && !text.contains("salt"), "{text}");
     }
-    // The new token signs in from another computer, then removal ends the session.
-    let cookie = sign_in(&w.app, &token).await;
-    assert_eq!(
-        req("GET", "/api/v1/servers")
-            .cookie(&cookie)
-            .send(&w.app)
-            .await
-            .status,
-        200
-    );
-    let r = req("DELETE", "/api/v1/users/pat")
-        .peer(LOOPBACK_PEER)
-        .cookie(&c)
-        .h("x-kora", "1")
-        .send(&w.app)
-        .await;
+    // The enrolment link is not a token: it signs nobody in.
+    let r = req("POST", "/api/v1/session").h("x-kora", "1").json(json!({"token": link})).send(&w.app).await;
+    assert_eq!(r.status, 401);
+    let r = req("DELETE", "/api/v1/users/pat").peer(LOOPBACK_PEER).cookie(&c).h("x-kora", "1").send(&w.app).await;
     assert_eq!(r.status, 204);
-    assert_eq!(
-        req("GET", "/api/v1/servers")
-            .cookie(&cookie)
-            .send(&w.app)
-            .await
-            .status,
-        401
-    );
-    let r = req("DELETE", "/api/v1/users/pat")
-        .peer(LOOPBACK_PEER)
-        .cookie(&c)
-        .h("x-kora", "1")
-        .send(&w.app)
-        .await;
+    let r = req("DELETE", "/api/v1/users/pat").peer(LOOPBACK_PEER).cookie(&c).h("x-kora", "1").send(&w.app).await;
     assert_eq!(r.status, 404);
 }
 
@@ -1077,15 +668,7 @@ async fn remote_set_updates_settings_and_checks_input() {
     let c = local_cookie(&w).await;
     let put = |b: Value| {
         let (app, c) = (w.app.clone(), c.clone());
-        async move {
-            req("PUT", "/api/v1/remote")
-                .peer(LOOPBACK_PEER)
-                .cookie(&c)
-                .h("x-kora", "1")
-                .json(b)
-                .send(&app)
-                .await
-        }
+        async move { req("PUT", "/api/v1/remote").peer(LOOPBACK_PEER).cookie(&c).h("x-kora", "1").json(b).send(&app).await }
     };
     let r = put(json!({
         "tailscale": true,
@@ -1096,14 +679,8 @@ async fn remote_set_updates_settings_and_checks_input() {
     .await;
     assert_eq!(r.status, 200, "{:?}", r.json);
     assert_eq!(r.json["tailscale"], true);
-    assert_eq!(
-        r.json["tailscale_users"],
-        json!({"alice@example.com": "operator"})
-    );
-    assert_eq!(
-        r.json["allowed_hosts"],
-        json!(["box.example.com", "100.64.0.9"])
-    );
+    assert_eq!(r.json["tailscale_users"], json!({"alice@example.com": "operator"}));
+    assert_eq!(r.json["allowed_hosts"], json!(["box.example.com", "100.64.0.9"]));
     assert_eq!(r.json["allow_remote_destructive"], true);
     assert_eq!(r.json["bind"], "100.64.0.5");
     // Left-out fields stay as they are.
@@ -1111,28 +688,12 @@ async fn remote_set_updates_settings_and_checks_input() {
     assert_eq!(r.json["tailscale"], true);
     assert_eq!(r.json["allow_remote_destructive"], false);
     // Bad input.
-    assert_eq!(
-        put(json!({"allowed_hosts": ["http://evil"]})).await.status,
-        400
-    );
-    assert_eq!(
-        put(json!({"tailscale_users": {"a b": "admin"}}))
-            .await
-            .status,
-        400
-    );
-    assert!(
-        put(json!({"tailscale_users": {"a@b": "root"}}))
-            .await
-            .status
-            >= 400
-    );
+    assert_eq!(put(json!({"allowed_hosts": ["http://evil"]})).await.status, 400);
+    assert_eq!(put(json!({"tailscale_users": {"a b": "admin"}})).await.status, 400);
+    assert!(put(json!({"tailscale_users": {"a@b": "root"}})).await.status >= 400);
     assert!(put(json!({"surprise": 1})).await.status >= 400);
     // A new name is honoured at once.
-    let r = req("GET", "/api/v1/meta")
-        .host("box.example.com:47120")
-        .send(&w.app)
-        .await;
+    let r = req("GET", "/api/v1/meta").host("box.example.com:47120").send(&w.app).await;
     assert_eq!(r.status, 200);
 }
 
@@ -1140,31 +701,10 @@ async fn remote_set_updates_settings_and_checks_input() {
 async fn turning_remote_access_off_closes_the_door_but_not_for_local() {
     let (w, [_, _, adam]) = with_users(enabled_cfg());
     let c = local_cookie(&w).await;
-    let r = req("PUT", "/api/v1/remote")
-        .peer(LOOPBACK_PEER)
-        .cookie(&c)
-        .h("x-kora", "1")
-        .json(json!({"enabled": false}))
-        .send(&w.app)
-        .await;
+    let r = req("PUT", "/api/v1/remote").peer(LOOPBACK_PEER).cookie(&c).h("x-kora", "1").json(json!({"enabled": false})).send(&w.app).await;
     assert_eq!(r.status, 200);
-    assert_eq!(
-        req("GET", "/api/v1/servers")
-            .bearer(&adam)
-            .send(&w.app)
-            .await
-            .status,
-        403
-    );
-    assert_eq!(
-        req("GET", "/api/v1/servers")
-            .peer(LOOPBACK_PEER)
-            .cookie(&c)
-            .send(&w.app)
-            .await
-            .status,
-        200
-    );
+    assert_eq!(req("GET", "/api/v1/servers").bearer(&adam).send(&w.app).await.status, 403);
+    assert_eq!(req("GET", "/api/v1/servers").peer(LOOPBACK_PEER).cookie(&c).send(&w.app).await.status, 200);
 }
 
 #[tokio::test]
@@ -1173,15 +713,8 @@ async fn the_remote_flag_turns_it_on_for_one_run_without_saving() {
     let r = req("GET", "/api/v1/meta").send(&w.app).await;
     assert_eq!(r.status, 200);
     let c = local_cookie(&w).await;
-    let r = req("GET", "/api/v1/remote")
-        .peer(LOOPBACK_PEER)
-        .cookie(&c)
-        .send(&w.app)
-        .await;
-    assert_eq!(
-        (r.json["enabled"].clone(), r.json["enabled_by_flag"].clone()),
-        (json!(false), json!(true))
-    );
+    let r = req("GET", "/api/v1/remote").peer(LOOPBACK_PEER).cookie(&c).send(&w.app).await;
+    assert_eq!((r.json["enabled"].clone(), r.json["enabled_by_flag"].clone()), (json!(false), json!(true)));
 }
 
 #[tokio::test]
@@ -1202,30 +735,28 @@ async fn settings_say_where_tailnet_devices_open_the_panel() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn settings_are_saved_to_a_private_file() {
+async fn settings_are_saved_to_the_private_store() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("panel.json");
     let w = world_with(Remote::from_file(path.clone()).unwrap().forced(true));
     let c = local_cookie(&w).await;
-    let r = req("POST", "/api/v1/users")
-        .peer(LOOPBACK_PEER)
-        .cookie(&c)
-        .h("x-kora", "1")
-        .json(json!({"name": "pat", "role": "admin"}))
-        .send(&w.app)
-        .await;
-    let token = r.json["token"].as_str().unwrap().to_string();
-    assert_eq!(
-        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-        0o600
-    );
-    let text = std::fs::read_to_string(&path).unwrap();
-    assert!(!text.contains(&token), "the token must not be on disk");
-    assert!(text.contains("\"hash\""));
-    // A fresh panel reading the file knows the user.
+    let r = req("POST", "/api/v1/users").peer(LOOPBACK_PEER).cookie(&c).h("x-kora", "1").json(json!({"name": "pat", "role": "admin"})).send(&w.app).await;
+    let link = r.json["link"].as_str().unwrap().to_string();
+    let db = kora_core::store::db_path(dir.path());
+    assert_eq!(std::fs::metadata(&db).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(std::fs::metadata(dir.path().join("store")).unwrap().permissions().mode() & 0o777, 0o700);
+    let mut text = String::new();
+    for e in std::fs::read_dir(dir.path().join("store")).unwrap().flatten().filter(|e| e.path().is_file()) {
+        text.push_str(&String::from_utf8_lossy(&std::fs::read(e.path()).unwrap()));
+    }
+    assert!(!text.contains(&link), "the enrolment link must not be on disk");
+    // The new user exists with no token at all.
+    assert!(RemoteConfig::load(&path).unwrap().users.iter().any(|u| u.name == "pat" && u.hash.is_empty()));
+    // A fresh panel reading the file knows the user, and nobody can sign in as them with the link as a token.
     let again = Remote::from_file(path).unwrap();
-    assert_eq!(again.identity_for_token(&token).unwrap().role, Role::Admin);
+    assert!(again.config().user("pat").is_some());
+    assert!(again.identity_for_token(&link).is_none() && again.identity_for_bearer(&link).is_none());
 }
 
 // ---------- /meta for the UI ----------
@@ -1242,10 +773,7 @@ async fn meta_tells_a_remote_user_whether_destructive_actions_are_on() {
     let r = req("GET", "/api/v1/meta").bearer(&adam2).send(&w2.app).await;
     assert_eq!(r.json["allow_remote_destructive"], false);
     let r = req("GET", "/api/v1/meta").send(&w.app).await;
-    assert_eq!(
-        r.json["allow_remote_destructive"], false,
-        "not shown to someone who is not signed in"
-    );
+    assert_eq!(r.json["allow_remote_destructive"], false, "not shown to someone who is not signed in");
 }
 
 // ---------- session expiry and logout ----------
@@ -1268,18 +796,9 @@ fn timed_world() -> (World, Arc<Mutex<Duration>>, String) {
     let remote = Arc::new(Remote::new(None, cfg));
     let fake = FakeBackend::sample();
     let (clock, offset) = stepping_clock();
-    let st = AppState::system(LAUNCH.into(), BOUND.parse().unwrap())
-        .with_backend(Arc::new(move || Box::new(fake.clone())))
-        .with_remote(remote.clone())
-        .with_session_clock(clock);
-    (
-        World {
-            app: router(st),
-            remote,
-        },
-        offset,
-        tok,
-    )
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
+    let st = AppState::system(LAUNCH.into(), BOUND.parse().unwrap()).with_backend(Arc::new(move || Box::new(fake.clone()))).with_remote(remote.clone()).with_session_clock(clock);
+    (World { app: router(st), remote }, offset, tok)
 }
 
 async fn local_login(w: &World) -> String {
@@ -1293,17 +812,10 @@ async fn sessions_expire_after_twelve_idle_hours_and_use_keeps_them_alive() {
     let local = local_login(&w).await;
     let get = |cookie: String, peer: &'static str| {
         let app = w.app.clone();
-        async move {
-            req("GET", "/api/v1/servers")
-                .peer(peer)
-                .cookie(&cookie)
-                .send(&app)
-                .await
-                .status
-        }
+        async move { req("GET", "/api/v1/servers").peer(peer).cookie(&cookie).send(&app).await.status }
     };
-    // Activity every 11 hours keeps both alive well past 12 hours in total.
-    for _ in 0..3 {
+    // Activity every 11 hours keeps both alive well past 12 hours in total (a remote token session is capped at one day).
+    for _ in 0..2 {
         *clock.lock().unwrap() += hours(11);
         assert_eq!(get(remote.clone(), REMOTE_PEER).await, 200);
         assert_eq!(get(local.clone(), LOOPBACK_PEER).await, 200);
@@ -1324,21 +836,14 @@ async fn sessions_end_after_seven_days_however_busy() {
     let local = local_login(&w).await;
     let get = |cookie: String, peer: &'static str| {
         let app = w.app.clone();
-        async move {
-            req("GET", "/api/v1/servers")
-                .peer(peer)
-                .cookie(&cookie)
-                .send(&app)
-                .await
-                .status
-        }
+        async move { req("GET", "/api/v1/servers").peer(peer).cookie(&cookie).send(&app).await.status }
     };
-    // Busy every 6 hours for just under 7 days: still fine.
+    // Busy every 6 hours for just under 7 days: the computer's own session is fine; a remote token session is capped at one day.
     let mut t = 0;
     while t + 6 < 7 * 24 {
         t += 6;
         *clock.lock().unwrap() = hours(t);
-        assert_eq!(get(remote.clone(), REMOTE_PEER).await, 200, "at {t} h");
+        assert_eq!(get(remote.clone(), REMOTE_PEER).await, if t < 24 { 200 } else { 401 }, "remote token session at {t} h");
         assert_eq!(get(local.clone(), LOOPBACK_PEER).await, 200, "at {t} h");
     }
     *clock.lock().unwrap() = hours(7 * 24);
@@ -1347,32 +852,38 @@ async fn sessions_end_after_seven_days_however_busy() {
 }
 
 #[tokio::test]
+async fn strong_remote_sessions_end_after_eight_idle_hours_and_three_days() {
+    use kora_web::remote::Provider;
+    let (st_clock, offset) = stepping_clock();
+    let sessions = kora_web::security::Sessions::with_clock(st_clock);
+    let n = sessions.create_for(Provider::Passkey, "adam", true, Role::Admin);
+    *offset.lock().unwrap() += hours(7);
+    assert!(sessions.get(&n.id).is_some(), "busy within 8 hours");
+    *offset.lock().unwrap() += hours(8);
+    assert!(sessions.get(&n.id).is_none(), "idle for 8 hours");
+    let n = sessions.create_for(Provider::Code, "adam", true, Role::Admin);
+    for _ in 0..11 {
+        *offset.lock().unwrap() += hours(6);
+        assert!(sessions.get(&n.id).is_some());
+    }
+    *offset.lock().unwrap() += hours(6);
+    assert!(sessions.get(&n.id).is_none(), "three days, however busy");
+    // The computer's own session keeps the long limits.
+    let n = sessions.create_for(Provider::Local, "local", false, Role::Admin);
+    *offset.lock().unwrap() += hours(11);
+    assert!(sessions.get(&n.id).is_some());
+}
+
+#[tokio::test]
 async fn logout_ends_the_session_and_clears_the_cookie() {
     let (w, [vera, _, _]) = with_users(enabled_cfg());
     let cookie = sign_in(&w.app, &vera).await;
-    let r = req("POST", "/api/v1/session/logout")
-        .cookie(&cookie)
-        .h("x-kora", "1")
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session/logout").cookie(&cookie).h("x-kora", "1").send(&w.app).await;
     assert_eq!(r.status, 204);
-    assert!(
-        r.cookie.is_some_and(|c| c == "kora_session_47120="),
-        "the cookie is cleared"
-    );
-    assert_eq!(
-        req("GET", "/api/v1/servers")
-            .cookie(&cookie)
-            .send(&w.app)
-            .await
-            .status,
-        401
-    );
+    assert!(r.cookie.is_some_and(|c| c == "kora_session_47120="), "the cookie is cleared");
+    assert_eq!(req("GET", "/api/v1/servers").cookie(&cookie).send(&w.app).await.status, 401);
     // Not signed in: refused like any other route.
-    let r = req("POST", "/api/v1/session/logout")
-        .h("x-kora", "1")
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session/logout").h("x-kora", "1").send(&w.app).await;
     assert_eq!(r.status, 401);
 }
 
@@ -1384,33 +895,16 @@ async fn sign_in_links_are_for_this_computer_only() {
     // A remote admin cannot make one, by token or by session.
     assert_eq!(status(&w, &adam, "POST", "/api/v1/session/link", None).await, 403);
     let cookie = sign_in(&w.app, &adam).await;
-    let r = req("POST", "/api/v1/session/link")
-        .cookie(&cookie)
-        .h("x-kora", "1")
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session/link").cookie(&cookie).h("x-kora", "1").send(&w.app).await;
     assert_eq!(r.status, 403);
     // A code made on this computer does not work from another one, and is not used up by trying.
-    let r = req("POST", "/api/v1/session/link")
-        .peer(LOOPBACK_PEER)
-        .bearer(LAUNCH)
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session/link").peer(LOOPBACK_PEER).bearer(LAUNCH).send(&w.app).await;
     assert_eq!(r.status, 200);
     let code = r.json["code"].as_str().unwrap().to_string();
-    let r = req("POST", "/api/v1/session")
-        .h("x-kora", "1")
-        .json(json!({"code": code}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session").h("x-kora", "1").json(json!({"code": code})).send(&w.app).await;
     assert_eq!(r.status, 403, "{:?}", r.json);
     assert!(r.msg().contains("computer that runs Kora"), "{}", r.msg());
-    let r = req("POST", "/api/v1/session")
-        .peer(LOOPBACK_PEER)
-        .h("x-kora", "1")
-        .json(json!({"code": code}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/session").peer(LOOPBACK_PEER).h("x-kora", "1").json(json!({"code": code})).send(&w.app).await;
     assert_eq!(r.status, 200);
     assert_eq!(r.json["identity"]["provider"], "local");
 }
@@ -1419,36 +913,19 @@ async fn sign_in_links_are_for_this_computer_only() {
 async fn the_remote_lockout_is_per_address() {
     let (w, [_, _, adam]) = with_users(enabled_cfg());
     for _ in 0..10 {
-        let r = req("POST", "/api/v1/session")
-            .h("x-kora", "1")
-            .json(json!({"token": "wrong"}))
-            .send(&w.app)
-            .await;
+        let r = req("POST", "/api/v1/session").h("x-kora", "1").json(json!({"token": "wrong"})).send(&w.app).await;
         assert_eq!(r.status, 401);
     }
     let attempt = |peer: &'static str| {
         let app = w.app.clone();
         let adam = adam.clone();
-        async move {
-            req("POST", "/api/v1/session")
-                .peer(peer)
-                .h("x-kora", "1")
-                .json(json!({"token": adam}))
-                .send(&app)
-                .await
-                .status
-        }
+        async move { req("POST", "/api/v1/session").peer(peer).h("x-kora", "1").json(json!({"token": adam})).send(&app).await.status }
     };
     assert_eq!(attempt(REMOTE_PEER).await, 429, "the guesser is locked out");
     assert_eq!(attempt("100.64.0.21:40000").await, 200, "someone else is not");
     // IPv6: one /64 is one network.
     for _ in 0..10 {
-        req("POST", "/api/v1/session")
-            .peer("[fd7a:115c:a1e0:1::5]:5000")
-            .h("x-kora", "1")
-            .json(json!({"token": "wrong"}))
-            .send(&w.app)
-            .await;
+        req("POST", "/api/v1/session").peer("[fd7a:115c:a1e0:1::5]:5000").h("x-kora", "1").json(json!({"token": "wrong"})).send(&w.app).await;
     }
     assert_eq!(attempt("[fd7a:115c:a1e0:1::6]:5000").await, 429);
     assert_eq!(attempt("[fd7a:115c:a1e0:2::6]:5000").await, 200);
@@ -1457,11 +934,7 @@ async fn the_remote_lockout_is_per_address() {
 #[tokio::test]
 async fn remote_callers_only_follow_jobs_their_role_allows() {
     let (w, [vera, olly, adam]) = with_users(enabled_cfg());
-    let r = req("POST", "/api/v1/servers/prod/control")
-        .bearer(&olly)
-        .json(json!({"action": "restart"}))
-        .send(&w.app)
-        .await;
+    let r = req("POST", "/api/v1/servers/prod/control").bearer(&olly).json(json!({"action": "restart"})).send(&w.app).await;
     assert_eq!(r.status, 202);
     let id = r.json["job"].as_str().unwrap().to_string();
     let get = |tok: String, uri: String| {
@@ -1483,15 +956,8 @@ async fn remote_callers_only_follow_jobs_their_role_allows() {
 
 /// Open a live stream as `tok` from `peer` and keep it open (the response is the stream).
 async fn open_stream(w: &World, tok: &str, peer: &'static str) -> Response<Body> {
-    let mut r = Request::builder()
-        .method("GET")
-        .uri("/api/v1/events")
-        .header(header::HOST, BOUND)
-        .header(header::AUTHORIZATION, format!("Bearer {tok}"))
-        .body(Body::empty())
-        .unwrap();
-    r.extensions_mut()
-        .insert(ConnectInfo(peer.parse::<SocketAddr>().unwrap()));
+    let mut r = Request::builder().method("GET").uri("/api/v1/events").header(header::HOST, BOUND).header(header::AUTHORIZATION, format!("Bearer {tok}")).body(Body::empty()).unwrap();
+    r.extensions_mut().insert(ConnectInfo(peer.parse::<SocketAddr>().unwrap()));
     w.app.clone().oneshot(r).await.unwrap()
 }
 

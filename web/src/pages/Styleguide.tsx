@@ -34,7 +34,7 @@ const TOKENS: { name: string; hex: string; cssVar: string; use: string }[] = [
   { name: 'Success', hex: '#22C55E', cssVar: '--kora-success', use: 'online, done' },
   { name: 'Amber', hex: '#F5A623', cssVar: '--kora-amber', use: 'restarting, pending' },
   { name: 'Orange', hex: '#E67E22', cssVar: '--kora-orange', use: 'notices' },
-  { name: 'Danger', hex: '#EF4444', cssVar: '--kora-danger', use: 'offline, errors, destructive' },
+  { name: 'Danger', hex: '#DC2626', cssVar: '--kora-danger', use: 'offline, errors, destructive' },
   { name: 'Steel', hex: '#95A5A6', cssVar: '--kora-steel', use: 'neutral' },
 ]
 const SEMANTIC = ['background', 'foreground', 'card', 'primary', 'primary-foreground', 'secondary', 'muted', 'muted-foreground', 'accent', 'destructive', 'border', 'input', 'ring']
@@ -142,7 +142,7 @@ function Chips() {
         <UpdateChip badge={{ kind: 'new_release' }} />
         <UpdateChip badge={null} />
       </Row>
-      <Row label="Mode"><ModeChip mode="production" /><ModeChip mode="development" /></Row>
+      <Row label="Style"><ModeChip mode="production" /><ModeChip mode="development" /></Row>
     </div>
   )
 }

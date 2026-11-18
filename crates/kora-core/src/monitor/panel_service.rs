@@ -10,12 +10,11 @@
 //! (owner-only). `kora panel --print-link` reads it back. All steps are a data [`Plan`], so the unit and
 //! script text is tested on every OS without touching the machine.
 
+use crate::problem::Problem;
 use std::path::{Path, PathBuf};
 
 use crate::installer::registry::kora_home;
-use crate::service::{
-    apply_plan, CommandRunner, Plan, Platform, ServiceError, ServiceResult, SystemStep,
-};
+use crate::service::{apply_plan, CommandRunner, Plan, Platform, ServiceError, ServiceResult, SystemStep};
 
 pub const UNIT_NAME: &str = "kora-panel.service";
 const TOKEN_FILE: &str = "panel-token";
@@ -52,22 +51,17 @@ impl RunningPanel {
 }
 
 /// Remember a running panel (owner-only: the record holds its sign-in token).
-pub fn record_running(home: &Path, p: &RunningPanel) -> Result<(), String> {
+pub fn record_running(home: &Path, p: &RunningPanel) -> Result<(), Problem> {
     let text = serde_json::json!({"port": p.port, "pid": p.pid, "token": p.token}).to_string();
     super::write_private(&running_path(home), &text)
 }
 
 /// The recorded running panel, if any (it may have stopped since: check it answers).
 pub fn load_running(home: &Path) -> Option<RunningPanel> {
-    let v: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(running_path(home)).ok()?).ok()?;
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(running_path(home)).ok()?).ok()?;
     let token = v["token"].as_str()?.to_string();
     (!token.is_empty() && token.bytes().all(|b| b.is_ascii_hexdigit())).then_some(())?;
-    Some(RunningPanel {
-        port: u16::try_from(v["port"].as_u64()?).ok()?,
-        pid: u32::try_from(v["pid"].as_u64()?).ok()?,
-        token,
-    })
+    Some(RunningPanel { port: u16::try_from(v["port"].as_u64()?).ok()?, pid: u32::try_from(v["pid"].as_u64()?).ok()?, token })
 }
 
 /// Forget the running panel, but only if the record is still ours (`pid`).
@@ -111,20 +105,15 @@ pub fn can_restart(platform: Platform, f: &RestartFacts) -> bool {
 
 /// Does a `/proc/self/cgroup` text put us in the panel's unit?
 pub fn cgroup_is_service(cgroup: &str) -> bool {
-    cgroup
-        .lines()
-        .any(|l| l.rsplit('/').next() == Some(UNIT_NAME))
+    cgroup.lines().any(|l| l.rsplit('/').next() == Some(UNIT_NAME))
 }
 
 /// Gather [`RestartFacts`] for this process.
 pub fn restart_facts(home: &Path, platform: Platform, our_port: u16) -> RestartFacts {
     RestartFacts {
         installed: service_installed(platform),
-        in_service_unit: platform == Platform::Linux
-            && std::fs::read_to_string("/proc/self/cgroup").is_ok_and(|c| cgroup_is_service(&c)),
-        pid_file: std::fs::read_to_string(pid_path(home))
-            .ok()
-            .and_then(|t| t.trim().parse().ok()),
+        in_service_unit: platform == Platform::Linux && std::fs::read_to_string("/proc/self/cgroup").is_ok_and(|c| cgroup_is_service(&c)),
+        pid_file: std::fs::read_to_string(pid_path(home)).ok().and_then(|t| t.trim().parse().ok()),
         our_pid: std::process::id(),
         our_port,
         saved_port: saved_port(home),
@@ -135,14 +124,8 @@ pub fn restart_facts(home: &Path, platform: Platform, our_port: u16) -> RestartF
 /// script's command line (the caller then exits so the new panel can take the port).
 pub fn restart_command(platform: Platform, exe: &Path, port: u16, tailscale: bool) -> (String, Vec<String>) {
     match platform {
-        Platform::Linux => (
-            "systemctl".into(),
-            vec!["--user".into(), "restart".into(), UNIT_NAME.into()],
-        ),
-        Platform::Windows => (
-            exe.display().to_string(),
-            service_args(port, tailscale).split(' ').map(String::from).collect(),
-        ),
+        Platform::Linux => ("systemctl".into(), vec!["--user".into(), "restart".into(), UNIT_NAME.into()]),
+        Platform::Windows => (exe.display().to_string(), service_args(port, tailscale).split(' ').map(String::from).collect()),
     }
 }
 
@@ -159,15 +142,7 @@ pub fn restart_plan(platform: Platform, stop_pid: Option<u32>) -> Plan {
             let script = startup_script_path().display().to_string();
             let mut steps = Vec::new();
             if let Some(pid) = stop_pid {
-                steps.push(
-                    SystemStep::run_owned(
-                        "Stop the running panel",
-                        "taskkill.exe",
-                        vec!["/PID".into(), pid.to_string(), "/F".into()],
-                    )
-                    .user_level()
-                    .tolerant(),
-                );
+                steps.push(SystemStep::run_owned("Stop the running panel", "taskkill.exe", vec!["/PID".into(), pid.to_string(), "/F".into()]).user_level().tolerant());
             }
             steps.push(SystemStep::run("Start the panel again", "wscript.exe", &["//nologo", &script]).user_level());
             Plan::new(steps)
@@ -188,15 +163,14 @@ pub fn load_token(home: &Path) -> Option<String> {
 }
 
 /// Keep the saved token, or make one (random, 256 bits) and save it owner-only.
-pub fn ensure_token(home: &Path) -> Result<String, String> {
+pub fn ensure_token(home: &Path) -> Result<String, Problem> {
     if let Some(t) = load_token(home) {
         return Ok(t);
     }
     let mut b = [0u8; 32];
     getrandom::fill(&mut b).map_err(|e| format!("Could not make a sign-in token: {e}"))?;
     let t = hex::encode(b);
-    super::write_private(&token_path(home), &t)
-        .map_err(|e| format!("Could not save the sign-in token: {e}"))?;
+    super::write_private(&token_path(home), &t).map_err(|e| e.lead("Could not save the sign-in token"))?;
     Ok(t)
 }
 
@@ -215,13 +189,13 @@ pub fn saved_tailscale(home: &Path) -> bool {
 }
 
 /// Make a new sign-in token (the old link stops working once the panel restarts with it).
-pub fn rotate_token(home: &Path) -> Result<String, String> {
+pub fn rotate_token(home: &Path) -> Result<String, Problem> {
     let _ = std::fs::remove_file(token_path(home));
     ensure_token(home)
 }
 
 /// The sign-in link of the installed service (needs no running process: the token is on disk).
-pub fn link(home: &Path) -> Result<String, String> {
+pub fn link(home: &Path) -> Result<String, Problem> {
     let (Some(token), Some(port)) = (load_token(home), saved_port(home)) else {
         return Err("The Kora Panel background service is not installed. Install it with `kora panel --install-service`.".into());
     };
@@ -229,11 +203,7 @@ pub fn link(home: &Path) -> Result<String, String> {
 }
 
 fn user_home() -> PathBuf {
-    PathBuf::from(
-        std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .unwrap_or_default(),
-    )
+    PathBuf::from(std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).unwrap_or_default())
 }
 
 /// Where the systemd user unit lives.
@@ -249,26 +219,12 @@ pub fn unit_path() -> PathBuf {
 
 /// Where the Windows start-up script lives.
 pub fn startup_script_path() -> PathBuf {
-    let appdata = std::env::var_os("APPDATA").map_or_else(
-        || user_home().join("AppData").join("Roaming"),
-        PathBuf::from,
-    );
-    appdata
-        .join("Microsoft")
-        .join("Windows")
-        .join("Start Menu")
-        .join("Programs")
-        .join("Startup")
-        .join("Kora Panel.vbs")
+    let appdata = std::env::var_os("APPDATA").map_or_else(|| user_home().join("AppData").join("Roaming"), PathBuf::from);
+    appdata.join("Microsoft").join("Windows").join("Start Menu").join("Programs").join("Startup").join("Kora Panel.vbs")
 }
 
 fn systemd_quote(s: &str) -> String {
-    format!(
-        "\"{}\"",
-        s.replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('%', "%%")
-    )
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('%', "%%"))
 }
 
 /// The panel's command line in the service (after the program).
@@ -280,14 +236,7 @@ fn service_args(port: u16, tailscale: bool) -> String {
 
 /// The systemd user unit. `kora_home` is passed on only when it was customised.
 pub fn systemd_unit(exe: &Path, port: u16, tailscale: bool, kora_home_env: Option<&Path>) -> String {
-    let env = kora_home_env
-        .map(|h| {
-            format!(
-                "Environment={}\n",
-                systemd_quote(&format!("KORA_HOME={}", h.display()))
-            )
-        })
-        .unwrap_or_default();
+    let env = kora_home_env.map(|h| format!("Environment={}\n", systemd_quote(&format!("KORA_HOME={}", h.display())))).unwrap_or_default();
     format!(
         "[Unit]\nDescription=Kora Panel (monitoring and alerts)\nAfter=network.target\n\n[Service]\nType=simple\n{env}ExecStart={} {}\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n",
         systemd_quote(&exe.display().to_string()),
@@ -321,66 +270,24 @@ pub fn install_plan(spec: &InstallSpec<'_>, platform: Platform) -> Plan {
         Platform::Linux => {
             let unit = unit_path();
             Plan::new(vec![
-                SystemStep::write(
-                    "Write the Kora Panel user service",
-                    &unit.display().to_string(),
-                    systemd_unit(spec.exe, spec.port, spec.tailscale, spec.kora_home_env),
-                    0o644,
-                )
-                .user_level(),
-                SystemStep::run(
-                    "Reload the user services",
-                    "systemctl",
-                    &["--user", "daemon-reload"],
-                )
-                .user_level(),
-                SystemStep::run(
-                    "Start the panel at every sign-in",
-                    "systemctl",
-                    &["--user", "enable", UNIT_NAME],
-                )
-                .user_level(),
+                SystemStep::write("Write the Kora Panel user service", &unit.display().to_string(), systemd_unit(spec.exe, spec.port, spec.tailscale, spec.kora_home_env), 0o644).user_level(),
+                SystemStep::run("Reload the user services", "systemctl", &["--user", "daemon-reload"]).user_level(),
+                SystemStep::run("Start the panel at every sign-in", "systemctl", &["--user", "enable", UNIT_NAME]).user_level(),
                 // Restart (not just start) so a changed port takes effect when it was already running.
-                SystemStep::run(
-                    "Start the panel now",
-                    "systemctl",
-                    &["--user", "restart", UNIT_NAME],
-                )
-                .user_level(),
+                SystemStep::run("Start the panel now", "systemctl", &["--user", "restart", UNIT_NAME]).user_level(),
                 // So it also runs while nobody is signed in. Not every system allows it: that is fine.
-                SystemStep::run(
-                    "Keep it running when you are signed out",
-                    "loginctl",
-                    &["enable-linger"],
-                )
-                .user_level()
-                .tolerant(),
+                SystemStep::run("Keep it running when you are signed out", "loginctl", &["enable-linger"]).user_level().tolerant(),
             ])
         }
         Platform::Windows => {
             let script = startup_script_path().display().to_string();
             let mut steps = Vec::new();
             if let Some(pid) = spec.stop_pid {
-                steps.push(
-                    SystemStep::run_owned(
-                        "Stop the running panel",
-                        "taskkill.exe",
-                        vec!["/PID".into(), pid.to_string(), "/F".into()],
-                    )
-                    .user_level()
-                    .tolerant(),
-                );
+                steps.push(SystemStep::run_owned("Stop the running panel", "taskkill.exe", vec!["/PID".into(), pid.to_string(), "/F".into()]).user_level().tolerant());
             }
             steps.extend([
-                SystemStep::write(
-                    "Write the Kora Panel start-up script",
-                    &script,
-                    startup_script(spec.exe, spec.port, spec.tailscale),
-                    0o644,
-                )
-                .user_level(),
-                SystemStep::run("Start the panel now", "wscript.exe", &["//nologo", &script])
-                    .user_level(),
+                SystemStep::write("Write the Kora Panel start-up script", &script, startup_script(spec.exe, spec.port, spec.tailscale), 0o644).user_level(),
+                SystemStep::run("Start the panel now", "wscript.exe", &["//nologo", &script]).user_level(),
             ]);
             Plan::new(steps)
         }
@@ -391,78 +298,36 @@ pub fn install_plan(spec: &InstallSpec<'_>, platform: Platform) -> Plan {
 pub fn remove_plan(platform: Platform, running_pid: Option<u32>) -> Plan {
     match platform {
         Platform::Linux => Plan::new(vec![
-            SystemStep::run(
-                "Stop the panel service",
-                "systemctl",
-                &["--user", "disable", "--now", UNIT_NAME],
-            )
-            .user_level()
-            .tolerant(),
-            SystemStep::remove(
-                "Remove the Kora Panel user service",
-                &unit_path().display().to_string(),
-            )
-            .user_level(),
-            SystemStep::run(
-                "Reload the user services",
-                "systemctl",
-                &["--user", "daemon-reload"],
-            )
-            .user_level()
-            .tolerant(),
+            SystemStep::run("Stop the panel service", "systemctl", &["--user", "disable", "--now", UNIT_NAME]).user_level().tolerant(),
+            SystemStep::remove("Remove the Kora Panel user service", &unit_path().display().to_string()).user_level(),
+            SystemStep::run("Reload the user services", "systemctl", &["--user", "daemon-reload"]).user_level().tolerant(),
         ]),
         Platform::Windows => {
             let mut steps = Vec::new();
             if let Some(pid) = running_pid {
-                steps.push(
-                    SystemStep::run_owned(
-                        "Stop the running panel",
-                        "taskkill.exe",
-                        vec!["/PID".into(), pid.to_string(), "/F".into()],
-                    )
-                    .user_level()
-                    .tolerant(),
-                );
+                steps.push(SystemStep::run_owned("Stop the running panel", "taskkill.exe", vec!["/PID".into(), pid.to_string(), "/F".into()]).user_level().tolerant());
             }
-            steps.push(
-                SystemStep::remove(
-                    "Remove the Kora Panel start-up script",
-                    &startup_script_path().display().to_string(),
-                )
-                .user_level(),
-            );
+            steps.push(SystemStep::remove("Remove the Kora Panel start-up script", &startup_script_path().display().to_string()).user_level());
             Plan::new(steps)
         }
     }
 }
 
 /// Install: keep or make the token, remember the port, then run the plan. Returns the sign-in link.
-pub fn install(
-    home: &Path,
-    spec: &InstallSpec<'_>,
-    runner: &dyn CommandRunner,
-    platform: Platform,
-) -> ServiceResult<String> {
-    ensure_token(home).map_err(ServiceError::Other)?;
+pub fn install(home: &Path, spec: &InstallSpec<'_>, runner: &dyn CommandRunner, platform: Platform) -> ServiceResult<String> {
+    ensure_token(home).map_err(|e| ServiceError::Other(e.one_line()))?;
     let info = serde_json::json!({"port": spec.port, "tailscale": spec.tailscale}).to_string();
     std::fs::create_dir_all(home)?;
     std::fs::write(info_path(home), info)?;
     apply_plan(&install_plan(spec, platform), runner)?;
-    link(home).map_err(ServiceError::Other)
+    link(home).map_err(|e| ServiceError::Other(e.one_line()))
 }
 
 /// Remove the service and the saved token and port.
 pub fn remove(home: &Path, runner: &dyn CommandRunner, platform: Platform) -> ServiceResult<()> {
-    let pid = std::fs::read_to_string(pid_path(home))
-        .ok()
-        .and_then(|t| t.trim().parse().ok());
+    let pid = std::fs::read_to_string(pid_path(home)).ok().and_then(|t| t.trim().parse().ok());
     apply_plan(&remove_plan(platform, pid), runner)?;
-    for f in [
-        token_path(home),
-        info_path(home),
-        pid_path(home),
-        running_path(home),
-    ] {
+    for f in [token_path(home), info_path(home), pid_path(home), running_path(home)] {
         let _ = std::fs::remove_file(f);
     }
     Ok(())
@@ -484,14 +349,7 @@ mod tests {
         assert!(can_restart(Platform::Linux, &linux));
         assert!(!can_restart(Platform::Linux, &RestartFacts { installed: false, ..linux }));
         assert!(!can_restart(Platform::Linux, &RestartFacts { in_service_unit: false, ..linux }));
-        let win = RestartFacts {
-            installed: true,
-            pid_file: Some(42),
-            our_pid: 42,
-            our_port: 47130,
-            saved_port: Some(47130),
-            ..Default::default()
-        };
+        let win = RestartFacts { installed: true, pid_file: Some(42), our_pid: 42, our_port: 47130, saved_port: Some(47130), ..Default::default() };
         assert!(can_restart(Platform::Windows, &win));
         assert!(!can_restart(Platform::Windows, &RestartFacts { pid_file: Some(7), ..win }));
         assert!(!can_restart(Platform::Windows, &RestartFacts { saved_port: Some(1), ..win }));
@@ -524,12 +382,7 @@ mod tests {
         let win = restart_plan(Platform::Windows, Some(42));
         let l = lines(&win);
         assert_eq!(l.len(), 2, "{l:?}");
-        assert!(
-            l[0].contains("taskkill.exe /PID 42 /F")
-                && l[1].contains("wscript.exe //nologo")
-                && l[1].contains("Kora Panel.vbs"),
-            "{l:?}"
-        );
+        assert!(l[0].contains("taskkill.exe /PID 42 /F") && l[1].contains("wscript.exe //nologo") && l[1].contains("Kora Panel.vbs"), "{l:?}");
         // Nothing known to be running: only start it.
         let idle = restart_plan(Platform::Windows, None);
         assert_eq!(lines(&idle).len(), 1);
@@ -544,21 +397,9 @@ mod tests {
 
     #[test]
     fn the_unit_runs_the_panel_without_a_browser_and_quotes_paths() {
-        let u = systemd_unit(
-            Path::new("/opt/my kora/kora"),
-            47200,
-            false,
-            Some(Path::new("/data/kora home")),
-        );
-        assert!(
-            u.contains("ExecStart=\"/opt/my kora/kora\" panel --no-open --foreground --port 47200\n"),
-            "{u}"
-        );
-        assert!(
-            u.contains("Environment=\"KORA_HOME=/data/kora home\"")
-                && u.contains("WantedBy=default.target")
-                && u.contains("Restart=on-failure")
-        );
+        let u = systemd_unit(Path::new("/opt/my kora/kora"), 47200, false, Some(Path::new("/data/kora home")));
+        assert!(u.contains("ExecStart=\"/opt/my kora/kora\" panel --no-open --foreground --port 47200\n"), "{u}");
+        assert!(u.contains("Environment=\"KORA_HOME=/data/kora home\"") && u.contains("WantedBy=default.target") && u.contains("Restart=on-failure"));
         assert!(!systemd_unit(Path::new("/k"), 1, false, None).contains("Environment="));
         assert!(systemd_unit(Path::new("/k"), 1, true, None).contains("ExecStart=\"/k\" panel --no-open --foreground --port 1 --listen-tailscale\n"));
     }
@@ -567,50 +408,24 @@ mod tests {
     fn the_windows_script_is_hidden_and_quotes_the_path() {
         let s = startup_script(Path::new(r"C:\Program Files\Kora\kora.exe"), 47120, false);
         assert!(startup_script(Path::new("k.exe"), 1, true).contains("--port 1 --listen-tailscale\", 0, False"));
-        assert!(
-            s.contains(
-                r#"Run """C:\Program Files\Kora\kora.exe"" panel --no-open --foreground --port 47120", 0, False"#
-            ),
-            "{s}"
-        );
+        assert!(s.contains(r#"Run """C:\Program Files\Kora\kora.exe"" panel --no-open --foreground --port 47120", 0, False"#), "{s}");
     }
 
     #[test]
     fn plans_need_no_administrator_rights() {
-        let spec = InstallSpec {
-            exe: Path::new("/k/kora"),
-            port: 47120,
-            tailscale: false,
-            stop_pid: None,
-            kora_home_env: None,
-        };
+        let spec = InstallSpec { exe: Path::new("/k/kora"), port: 47120, tailscale: false, stop_pid: None, kora_home_env: None };
         for p in [Platform::Linux, Platform::Windows] {
             assert!(!install_plan(&spec, p).needs_admin(), "{p:?}");
             assert!(!remove_plan(p, Some(7)).needs_admin(), "{p:?}");
         }
-        let lines: Vec<String> = install_plan(&spec, Platform::Linux)
-            .steps
-            .iter()
-            .filter_map(SystemStep::command_line)
-            .collect();
-        assert!(
-            lines
-                .iter()
-                .any(|l| l.contains("systemctl --user enable kora-panel.service")),
-            "{lines:?}"
-        );
-        assert!(remove_plan(Platform::Windows, Some(7))
-            .steps
-            .iter()
-            .any(|s| s.command_line().is_some_and(|l| l.contains("/PID 7"))));
+        let lines: Vec<String> = install_plan(&spec, Platform::Linux).steps.iter().filter_map(SystemStep::command_line).collect();
+        assert!(lines.iter().any(|l| l.contains("systemctl --user enable kora-panel.service")), "{lines:?}");
+        assert!(remove_plan(Platform::Windows, Some(7)).steps.iter().any(|s| s.command_line().is_some_and(|l| l.contains("/PID 7"))));
         // Windows: a running panel is stopped first, so the new token or settings take effect.
         let restart = InstallSpec { exe: Path::new("k.exe"), port: 1, tailscale: false, stop_pid: Some(42), kora_home_env: None };
         let lines: Vec<String> = install_plan(&restart, Platform::Windows).steps.iter().filter_map(SystemStep::command_line).collect();
         assert!(lines[0].contains("taskkill.exe /PID 42 /F") && lines[1].contains("wscript.exe"), "{lines:?}");
-        assert!(!remove_plan(Platform::Windows, None)
-            .steps
-            .iter()
-            .any(|s| s.command_line().is_some()));
+        assert!(!remove_plan(Platform::Windows, None).steps.iter().any(|s| s.command_line().is_some()));
     }
 
     #[test]
@@ -619,55 +434,29 @@ mod tests {
         assert!(link(home.path()).is_err());
         let t1 = ensure_token(home.path()).unwrap();
         assert_eq!(t1.len(), 64);
-        assert_eq!(
-            ensure_token(home.path()).unwrap(),
-            t1,
-            "a second install keeps the token"
-        );
+        assert_eq!(ensure_token(home.path()).unwrap(), t1, "a second install keeps the token");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                std::fs::metadata(token_path(home.path()))
-                    .unwrap()
-                    .permissions()
-                    .mode()
-                    & 0o077,
-                0
-            );
+            assert_eq!(std::fs::metadata(token_path(home.path())).unwrap().permissions().mode() & 0o077, 0);
         }
         // A link needs the port too.
         assert!(link(home.path()).is_err());
         std::fs::write(info_path(home.path()), r#"{"port":47999}"#).unwrap();
-        assert_eq!(
-            link(home.path()).unwrap(),
-            format!("http://127.0.0.1:47999/#token={t1}")
-        );
+        assert_eq!(link(home.path()).unwrap(), format!("http://127.0.0.1:47999/#token={t1}"));
     }
 
     #[test]
     fn install_and_remove_run_the_plan_through_the_runner() {
         let home = tempfile::tempdir().unwrap();
         let rn = FakeRunner::default();
-        let spec = InstallSpec {
-            exe: Path::new("/k/kora"),
-            port: 47123,
-            tailscale: true,
-            stop_pid: None,
-            kora_home_env: None,
-        };
+        let spec = InstallSpec { exe: Path::new("/k/kora"), port: 47123, tailscale: true, stop_pid: None, kora_home_env: None };
         let link = install(home.path(), &spec, &rn, Platform::Linux).unwrap();
         assert!(saved_tailscale(home.path()));
         let old = load_token(home.path()).unwrap();
         assert_ne!(rotate_token(home.path()).unwrap(), old, "a new token");
         assert!(link.starts_with("http://127.0.0.1:47123/#token="));
-        assert!(
-            rn.calls()
-                .iter()
-                .any(|c| c.contains("restart kora-panel.service")),
-            "{:?}",
-            rn.calls()
-        );
+        assert!(rn.calls().iter().any(|c| c.contains("restart kora-panel.service")), "{:?}", rn.calls());
         remove(home.path(), &rn, Platform::Linux).unwrap();
         assert!(load_token(home.path()).is_none() && saved_port(home.path()).is_none());
     }
@@ -676,38 +465,21 @@ mod tests {
     fn a_running_panel_is_recorded_privately_and_cleared_only_by_itself() {
         let home = tempfile::tempdir().unwrap();
         assert!(load_running(home.path()).is_none());
-        let p = RunningPanel {
-            port: 47121,
-            pid: 42,
-            token: "ab".repeat(32),
-        };
+        let p = RunningPanel { port: 47121, pid: 42, token: "ab".repeat(32) };
         record_running(home.path(), &p).unwrap();
         assert_eq!(load_running(home.path()), Some(p.clone()));
-        assert_eq!(
-            p.link(),
-            format!("http://127.0.0.1:47121/#token={}", "ab".repeat(32))
-        );
+        assert_eq!(p.link(), format!("http://127.0.0.1:47121/#token={}", "ab".repeat(32)));
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(running_path(home.path()))
-                .unwrap()
-                .permissions()
-                .mode();
+            let mode = std::fs::metadata(running_path(home.path())).unwrap().permissions().mode();
             assert_eq!(mode & 0o077, 0);
         }
         clear_running(home.path(), 7);
-        assert!(
-            load_running(home.path()).is_some(),
-            "another panel's record is kept"
-        );
+        assert!(load_running(home.path()).is_some(), "another panel's record is kept");
         clear_running(home.path(), 42);
         assert!(load_running(home.path()).is_none());
-        std::fs::write(
-            running_path(home.path()),
-            r#"{"port":1,"pid":2,"token":"not hex!"}"#,
-        )
-        .unwrap();
+        std::fs::write(running_path(home.path()), r#"{"port":1,"pid":2,"token":"not hex!"}"#).unwrap();
         assert!(load_running(home.path()).is_none());
     }
 }

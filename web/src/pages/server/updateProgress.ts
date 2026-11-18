@@ -1,4 +1,6 @@
 import { normaliseUpdateEvent } from '@/components/JobProgress'
+import { t } from '@/i18n'
+import '@/i18n/en/resources/updateProgress'
 export { percentOf } from '@/components/JobProgress'
 
 /** The latest "checked" event of a check job: `done` of `total` resources looked at; `id` is the one just finished. */
@@ -18,7 +20,7 @@ export interface ApplyProgress {
 }
 
 /** Resource states that mean "not finished yet". Everything else (updated, failed, skipped, waiting, rolled back...) is final. */
-const MOVING = new Set(['updating', 'rolling back'])
+const MOVING = new Set(['updating', 'rolling back']) // i18n-ignore: states the server sends, matched, not shown
 
 /** The latest checked event, or undefined before the first one arrives. */
 export function checkProgress(events: unknown[]): CheckProgress | undefined {
@@ -65,6 +67,6 @@ export function applyProgress(events: unknown[]): ApplyProgress | undefined {
     else finished.add(e.id)
   }
   const failed = [...latest.values()].filter((s) => s.startsWith('failed')).length
-  const current = moving && latest.get(moving.id) === moving.state ? `${moving.state === 'updating' ? 'Updating' : 'Rolling back'} ${moving.id}` : undefined
+  const current = moving && latest.get(moving.id) === moving.state ? `${moving.state === 'updating' ? 'Updating' : t('resources.updateProgress.rollingBack')} ${moving.id}` : undefined
   return { total: planned.length, done: finished.size, failed, current }
 }

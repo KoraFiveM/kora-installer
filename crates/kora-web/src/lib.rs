@@ -1,13 +1,19 @@
 //! Kora Panel HTTP server: security middleware, sessions, jobs/SSE, embedded UI.
-mod error;
+#[doc(hidden)]
+pub mod audit;
 pub mod elevated;
+mod error;
 pub mod handlers;
 mod jobs;
 pub mod launch;
+pub mod machine_alerts;
 pub mod remote;
 pub mod routes;
 pub mod security;
 mod static_ui;
+pub mod tls;
+pub mod txgate;
+mod wire_from;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -15,14 +21,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::{DefaultBodyLimit, Request, State};
-use axum::Extension;
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::Extension;
 use axum::{middleware, Json, Router};
-use kora_core::api::{Backend, JobRegistry, Op};
+use kora_core::api::{wire, Backend, JobRegistry, Op};
 use kora_core::installer::registry::ServerEntry;
-use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::json;
 
 pub use error::{blocking, ApiError};
 pub use jobs::{JobMessage, Jobs, MemoryJobs, NoJobs};
@@ -33,10 +38,7 @@ pub const BODY_LIMIT: usize = 1024 * 1024;
 #[derive(Debug, thiserror::Error)]
 pub enum PanelError {
     #[error("cannot listen on {addr}: {source} (is another panel running? choose --port)")]
-    Bind {
-        addr: SocketAddr,
-        source: std::io::Error,
-    },
+    Bind { addr: SocketAddr, source: std::io::Error },
     /// Remote access is not set up for this bind, or its settings file cannot be read.
     #[error("{0}")]
     Remote(String),
@@ -67,17 +69,7 @@ pub struct PanelOptions {
 
 impl Default for PanelOptions {
     fn default() -> Self {
-        Self {
-            bind: IpAddr::V4(Ipv4Addr::LOCALHOST),
-            port: DEFAULT_PORT,
-            open_browser: true,
-            token: None,
-            remote: false,
-            remote_config: None,
-            tailscale: false,
-            allow_public: false,
-            landing: None,
-        }
+        Self { bind: IpAddr::V4(Ipv4Addr::LOCALHOST), port: DEFAULT_PORT, open_browser: true, token: None, remote: false, remote_config: None, tailscale: false, allow_public: false, landing: None }
     }
 }
 
@@ -107,6 +99,17 @@ pub struct AppState {
     pub events: Arc<handlers::system::EventsHub>,
     /// The last `GET /fleet` answer, for a few seconds.
     pub fleet_cache: Arc<handlers::hub::FleetCache>,
+    /// txAdmin through the panel: tickets, sessions and the per-server gateway listeners.
+    pub txgate: Arc<txgate::Gate>,
+    /// The Kora folder whose store gets an audit row for every state-changing request. `None` (the default: tests and
+    /// embedders) records nothing and never touches the disk; the real panel sets it ([`AppState::with_audit`]).
+    pub audit_home: Option<std::path::PathBuf>,
+    /// The certificate in use (inactive until the panel loads one: plain HTTP).
+    pub tls: tls::TlsState,
+    /// Loads and renews the certificate (the real panel; `None` in tests and for embedders).
+    pub tls_manager: Option<Arc<tls::manager::Manager>>,
+    /// Sign-in ceremonies in flight (passkeys, one-time-code set-ups).
+    pub auth: Arc<remote::auth::AuthState>,
 }
 
 impl AppState {
@@ -131,7 +134,28 @@ impl AppState {
             streams: Arc::default(),
             events: Arc::default(),
             fleet_cache: Arc::default(),
+            txgate: Arc::default(),
+            audit_home: None,
+            tls: tls::TlsState::new(),
+            tls_manager: None,
+            auth: Arc::default(),
         }
+    }
+    /// Serve with this certificate state (the panel's own, shared with its [`tls::manager::Manager`]).
+    pub fn with_tls(mut self, t: tls::TlsState) -> Self {
+        self.tls = t;
+        self
+    }
+    /// Serve with this manager's certificate, and let Settings renew it.
+    pub fn with_tls_manager(mut self, m: Arc<tls::manager::Manager>) -> Self {
+        self.tls = m.state.clone();
+        self.tls_manager = Some(m);
+        self
+    }
+    /// Record state-changing requests in the audit log of the store in this Kora folder.
+    pub fn with_audit(mut self, home: std::path::PathBuf) -> Self {
+        self.audit_home = Some(home);
+        self
     }
     /// A one-time code for a sign-in link: `http://127.0.0.1:<port>/#code=<code>`. Works once, for ten
     /// minutes, from this computer only.
@@ -144,11 +168,7 @@ impl AppState {
         if !caller.remote {
             return Ok(None);
         }
-        let who = caller
-            .identity
-            .as_ref()
-            .map(|i| format!("{:?}:{}", i.provider, i.name))
-            .unwrap_or_default();
+        let who = caller.identity.as_ref().map(|i| format!("{:?}:{}", i.provider, i.name)).unwrap_or_default();
         self.streams.acquire(&who).map(Some)
     }
     pub fn with_remote(mut self, r: Arc<remote::Remote>) -> Self {
@@ -186,14 +206,12 @@ impl AppState {
     /// Find a registered server by name (blocking: call inside [`blocking`]).
     pub fn entry(&self, name: &str) -> Result<ServerEntry, ApiError> {
         let list = self.backend().list().map_err(ApiError::internal)?;
-        list.into_iter()
-            .find(|e| e.name == name)
-            .ok_or_else(|| ApiError::not_found(format!("There is no server named '{name}'.")))
+        list.into_iter().find(|e| e.name == name).ok_or_else(|| ApiError::not_found(format!("There is no server named '{name}'.")))
     }
     /// Start a job for `op`; `202 {"job": id}`, or `409 conflict` when the server is busy.
     pub fn spawn_job<F>(&self, op: Op, server: Option<String>, f: F) -> Result<Response, ApiError>
     where
-        F: FnOnce(&kora_core::api::JobHandle) -> Result<Value, String> + Send + 'static,
+        F: FnOnce(&kora_core::api::JobHandle) -> kora_core::api::JobResult + Send + 'static,
     {
         // A job changes what the fleet shows: forget the cached list when it starts and when it ends.
         self.fleet_cache.clear();
@@ -203,8 +221,14 @@ impl AppState {
             cache.clear();
             r
         };
+        let server_name = server.clone();
         match self.registry.spawn(op, server, body) {
-            Ok(id) => Ok((StatusCode::ACCEPTED, Json(json!({"job": id.0}))).into_response()),
+            Ok(id) => {
+                let mut resp = (StatusCode::ACCEPTED, Json(json!({"job": id.0}))).into_response();
+                // The guard follows the job to its end for the audit log.
+                resp.extensions_mut().insert(audit::JobStarted { id: id.0.clone(), server: server_name });
+                Ok(resp)
+            }
             Err(c) => Err(ApiError::conflict(conflict_message(&c))),
         }
     }
@@ -222,41 +246,33 @@ impl AppState {
 /// "Busy" without the running job's id: the id is all it takes to follow that job, and the UI never
 /// needed it here.
 pub(crate) fn conflict_message(c: &kora_core::api::jobs::Conflict) -> String {
-    format!(
-        "Another operation is already running for '{}'. Wait for it to finish, then try again.",
-        c.server
-    )
+    format!("Another operation is already running for '{}'. Wait for it to finish, then try again.", c.server)
 }
 
-#[derive(Deserialize)]
-struct SessionReq {
-    /// Local: the launch token. Remote: a user token, or absent to sign in by Tailscale identity.
-    #[serde(default)]
-    token: Option<String>,
-    /// Local only: a one-time code from a sign-in link (`/#code=...`).
-    #[serde(default)]
-    code: Option<String>,
-}
+use wire::SessionRequest as SessionReq;
 
 /// `GET /meta`. `identity` is `null` unless the request carries a valid session or bearer token;
 /// then it is `{name, provider: local|tailscale|token, role: viewer|operator|admin}` and `remote` says
 /// whether the request came from another computer. The UI reads these to hide what the role cannot do.
-pub(crate) async fn meta(Extension(caller): Extension<remote::Caller>, State(st): State<AppState>) -> Json<Value> {
-    let platform = if cfg!(windows) { "windows" } else { "linux" };
-    Json(json!({
-        "version": env!("CARGO_PKG_VERSION"),
-        "api": 1,
-        "platform": platform,
-        "ops": Op::ALL.iter().map(|o| o.name()).collect::<Vec<_>>(),
-        "node": hostname(),
-        "identity": caller.identity,
-        "remote": caller.remote,
+pub(crate) async fn meta(Extension(caller): Extension<remote::Caller>, State(st): State<AppState>) -> Json<wire::Meta> {
+    Json(wire::Meta {
+        version: env!("CARGO_PKG_VERSION").into(),
+        api: 1,
+        platform: if cfg!(windows) { wire::PlatformName::Windows } else { wire::PlatformName::Linux },
+        ops: Op::ALL.iter().map(|o| o.name().to_string()).collect(),
+        node: hostname(),
+        identity: caller.identity.as_ref().map(wire::Identity::from),
+        remote: caller.remote,
         // May this remote session use the destructive actions? A Tailscale identity always may; a token
         // session only once `kora panel remote-actions on` has been run. (Installing needs neither.)
-        "allow_remote_destructive": caller.remote && caller.identity.as_ref().is_some_and(|i| {
-            i.provider == remote::Provider::Tailscale || st.remote.config().allow_remote_destructive
-        }),
-    }))
+        allow_remote_destructive: caller.remote && caller.identity.as_ref().is_some_and(|i| i.provider == remote::Provider::Tailscale || st.remote.config().allow_remote_destructive),
+        // A token sign-in of someone with no passkey or one-time codes yet: the page suggests setting one up.
+        auth_upgrade: caller.remote
+            && caller
+                .identity
+                .as_ref()
+                .is_some_and(|i| i.provider == remote::Provider::Token && st.remote.auth_store().ok().and_then(|s| remote::auth::db::state(&s, &i.name).ok()).is_some_and(|s| !s.strong())),
+    })
 }
 
 fn hostname() -> String {
@@ -267,11 +283,7 @@ fn hostname() -> String {
             }
         }
     }
-    std::fs::read_to_string("/etc/hostname")
-        .map(|s| s.trim().to_string())
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "unknown".into())
+    std::fs::read_to_string("/etc/hostname").map(|s| s.trim().to_string()).ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "unknown".into())
 }
 
 /// `POST /session`. Local: `{"token"}` (the launch token, or a sign-in code, as pasted) or `{"code"}` (from
@@ -282,6 +294,7 @@ fn hostname() -> String {
 pub(crate) async fn session_create(
     State(st): State<AppState>,
     Extension(caller): Extension<remote::Caller>,
+    Extension(transport): Extension<tls::serve::Transport>,
     headers: axum::http::HeaderMap,
     Json(req): Json<SessionReq>,
 ) -> Result<Response, ApiError> {
@@ -289,23 +302,17 @@ pub(crate) async fn session_create(
     let code = req.code.as_deref().map(str::trim).filter(|t| !t.is_empty());
     let (session, identity) = if caller.remote {
         if code.is_some() {
-            return Err(ApiError::forbidden(
-                "Sign-in links only work on the computer that runs Kora. Sign in with your user token or your Tailscale account.",
-            ));
+            return Err(ApiError::forbidden("Sign-in links only work on the computer that runs Kora. Sign in with your passkey, a one-time code or your Tailscale account."));
         }
         remote_sign_in(&st, &caller, token).await?
     } else {
         if token.is_none() && code.is_none() {
             // A Tailscale sign-in try from this computer: it can never work here, so it is not counted
             // as a failed attempt either.
-            return Err(ApiError::bad_request(
-                "Tailscale sign-in is for other devices; use the link from `kora panel` here.",
-            ));
+            return Err(ApiError::bad_request("Tailscale sign-in is for other devices; use the link from `kora panel` here."));
         }
         if st.limiter.locked() {
-            return Err(ApiError::rate_limited(
-                "too many failed attempts, try again later",
-            ));
+            return Err(ApiError::rate_limited("too many failed attempts, try again later"));
         }
         let ok = match (code, token) {
             (Some(c), _) => st.link_codes.consume(c),
@@ -327,50 +334,29 @@ pub(crate) async fn session_create(
     if let Some(old) = security::current_session(&st, &headers, caller.remote) {
         st.sessions.remove(&old);
     }
-    let cookie = format!(
-        "{}={}; HttpOnly; SameSite=Strict; Path=/",
-        security::cookie_name(st.addr.port()),
-        session.id
-    );
-    let mut r = Json(json!({"ok": true, "identity": identity, "secret": session.secret})).into_response();
-    r.headers_mut().insert(
-        header::SET_COOKIE,
-        HeaderValue::from_str(&cookie).expect("ascii cookie"),
-    );
+    let cookie = format!("{}={}; {}", security::cookie_name(st.addr.port()), session.id, tls::rules::cookie_attrs(transport.secure));
+    let mut r = Json(wire::SessionCreated { ok: true, identity: (&identity).into(), secret: session.secret.clone() }).into_response();
+    r.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_str(&cookie).expect("ascii cookie"));
     // Older versions used one name for every port, sent to every service on this host: drop it.
-    r.headers_mut().append(
-        header::SET_COOKIE,
-        HeaderValue::from_str(&format!("{}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0", security::COOKIE)).expect("ascii cookie"),
-    );
+    r.headers_mut().append(header::SET_COOKIE, HeaderValue::from_str(&format!("{}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0", security::COOKIE)).expect("ascii cookie"));
     Ok(r)
 }
 
 /// `POST /session/link`: a one-time sign-in code, `{"code", "expires_in": 600}`. Only for a caller on this
 /// computer that is already signed in (the launch token as a bearer token, or a local session).
-pub(crate) async fn session_link(
-    State(st): State<AppState>,
-    Extension(caller): Extension<remote::Caller>,
-) -> Result<Json<Value>, ApiError> {
-    let local = !caller.remote
-        && caller
-            .identity
-            .as_ref()
-            .is_some_and(|i| i.provider == remote::Provider::Local);
+pub(crate) async fn session_link(State(st): State<AppState>, Extension(caller): Extension<remote::Caller>) -> Result<Json<wire::SessionLink>, ApiError> {
+    let local = !caller.remote && caller.identity.as_ref().is_some_and(|i| i.provider == remote::Provider::Local);
     if !local {
-        return Err(ApiError::forbidden(
-            "Sign-in links can only be made on the computer that runs Kora.",
-        ));
+        return Err(ApiError::forbidden("Sign-in links can only be made on the computer that runs Kora."));
     }
-    Ok(Json(json!({
-        "code": st.mint_link_code(),
-        "expires_in": security::LINK_CODE_TTL.as_secs(),
-    })))
+    Ok(Json(wire::SessionLink { code: st.mint_link_code(), expires_in: security::LINK_CODE_TTL.as_secs() }))
 }
 
 /// `POST /session/logout`: forget this session and clear the cookie. 204.
 pub(crate) async fn session_logout(
     State(st): State<AppState>,
     Extension(caller): Extension<remote::Caller>,
+    Extension(transport): Extension<tls::serve::Transport>,
     req_headers: axum::http::HeaderMap,
 ) -> Response {
     let name = security::cookie_name(st.addr.port());
@@ -379,20 +365,13 @@ pub(crate) async fn session_logout(
         st.sessions.remove(&id);
     }
     let mut r = StatusCode::NO_CONTENT.into_response();
-    r.headers_mut().insert(
-        header::SET_COOKIE,
-        HeaderValue::from_str(&format!("{name}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")).expect("ascii cookie"),
-    );
+    r.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_str(&format!("{name}=; {}; Max-Age=0", tls::rules::cookie_attrs(transport.secure))).expect("ascii cookie"));
     r
 }
 
 /// Sign in from another computer: a per-user token, or (no token) the Tailscale identity of the peer.
 /// The launch token is not accepted here. Failed tokens are counted on their own limiter.
-async fn remote_sign_in(
-    st: &AppState,
-    caller: &remote::Caller,
-    token: Option<&str>,
-) -> Result<(security::NewSession, remote::Identity), ApiError> {
+async fn remote_sign_in(st: &AppState, caller: &remote::Caller, token: Option<&str>) -> Result<(security::NewSession, remote::Identity), ApiError> {
     let r = &st.remote;
     // Counted per source address: one person guessing does not lock out everyone else.
     let ip = caller.peer.map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |p| p.ip());
@@ -405,25 +384,44 @@ async fn remote_sign_in(
     }
     let identity = match token {
         Some(t) => {
+            // Only an old per-user token link signs a person in. An API token (for scripts) is a different kind and
+            // never makes a session; it is refused here as any other unknown value.
             let found = r.identity_for_token(t);
-            if found.is_none() {
+            let Some(id) = found.as_ref() else {
                 r.limiter.failure(ip);
                 return Err(ApiError::unauthorized("invalid token"));
+            };
+            let strong = r.auth_store().ok().and_then(|s| remote::auth::db::state(&s, &id.name).ok()).is_some_and(|s| s.strong());
+            if let remote::auth::state::TokenSignIn::Refused(why) = remote::auth::state::token_sign_in(r.config().require_strong_auth, strong) {
+                if let Some(home) = &st.audit_home {
+                    kora_core::store::audit::record_quiet(
+                        home,
+                        &kora_core::store::audit::New {
+                            op: "session_create".into(),
+                            actor_kind: kora_core::store::audit::actor::REMOTE.into(),
+                            actor_name: Some(id.name.clone()),
+                            provider: Some("token".into()),
+                            role: Some(id.role.as_str().into()),
+                            result: kora_core::store::audit::result::REFUSED.into(),
+                            detail: Some("token sign-in refused: a passkey or one-time codes are required".into()),
+                            ..Default::default()
+                        },
+                    );
+                }
+                return Err(ApiError::forbidden(why));
             }
             found
         }
         None => {
             if !r.config().tailscale {
-                return Err(ApiError::unauthorized("Sign in with your user token."));
+                return Err(ApiError::unauthorized("Sign in with your passkey or a one-time code."));
             }
             let peer = caller.peer.ok_or_else(|| ApiError::unauthorized("Could not tell where you are connecting from."))?;
             let remote = st.remote.clone();
             let login = blocking(move || remote.whois(peer).map_err(ApiError::unauthorized)).await?;
             let found = r.identity_for_tailscale(&login);
             if found.is_none() {
-                return Err(ApiError::unauthorized(format!(
-                    "The Tailscale account {login} is not allowed on this panel. Ask an administrator to add it."
-                )));
+                return Err(ApiError::unauthorized(format!("The Tailscale account {login} is not allowed on this panel. Ask an administrator to add it.")));
             }
             found
         }
@@ -447,15 +445,7 @@ async fn fallback(req: Request) -> Response {
 
 pub fn router(state: AppState) -> Router {
     let api = routes::api_routes().fallback(|| async { ApiError::not_found("unknown API route") });
-    Router::new()
-        .nest("/api/v1", api)
-        .fallback(fallback)
-        .layer(DefaultBodyLimit::max(BODY_LIMIT))
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            security::guard,
-        ))
-        .with_state(state)
+    Router::new().nest("/api/v1", api).fallback(fallback).layer(DefaultBodyLimit::max(BODY_LIMIT)).layer(middleware::from_fn_with_state(state.clone(), security::guard)).with_state(state)
 }
 
 /// Listen on this machine's Tailscale addresses as well (`--tailscale`), on the panel's port.
@@ -470,11 +460,7 @@ async fn serve_tailnet(state: AppState, port: u16) {
     let mut announced = false;
     loop {
         let rem = state.remote.clone();
-        let status = tokio::task::spawn_blocking(move || rem.tailscale_status())
-            .await
-            .ok()
-            .flatten()
-            .filter(|s| s.running);
+        let status = tokio::task::spawn_blocking(move || rem.tailscale_status()).await.ok().flatten().filter(|s| s.running);
         if let Some(s) = status {
             // The names a browser on the tailnet uses (MagicDNS name, short name, addresses).
             state.remote.set_dynamic_hosts(s.host_names());
@@ -486,9 +472,12 @@ async fn serve_tailnet(state: AppState, port: u16) {
                 match tokio::net::TcpListener::bind(SocketAddr::new(ip, port)).await {
                     Ok(l) => {
                         bound.push(ip);
-                        let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
+                        state.txgate.add_ip(&state, ip);
+                        // HTTPS here as soon as there is a certificate (a tailnet name gets a real one); plain until then.
+                        let (app, tls, st2) = (router(state.clone()), state.tls.clone(), state.clone());
+                        let host_ok: tls::serve::HostCheck = Arc::new(move |h: &str| st2.host_ok(h));
                         tokio::spawn(async move {
-                            let _ = axum::serve(l, app).await;
+                            let _ = tls::serve::serve(l, app, Some(tls), host_ok, std::future::pending()).await;
                         });
                     }
                     Err(e) if !reported.contains(&ip) => {
@@ -498,12 +487,13 @@ async fn serve_tailnet(state: AppState, port: u16) {
                     Err(_) => {}
                 }
             }
+            let scheme = if state.tls.active() { "https" } else { "http" };
             if !bound.is_empty() {
-                state.remote.set_tailnet_url(s.url(port));
+                state.remote.set_tailnet_url(s.url_with(scheme, port));
             }
             if !announced && !bound.is_empty() {
                 announced = true;
-                if let Some(u) = s.url(port) {
+                if let Some(u) = s.url_with(scheme, port) {
                     println!("Your Tailscale devices can open the panel at {u}");
                 }
             }
@@ -530,39 +520,62 @@ async fn bind_retrying(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListe
 /// Run the panel until Ctrl+C. Blocking; builds its own tokio runtime.
 pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
     let path = opts.remote_config.clone().unwrap_or_else(remote::config::default_path);
-    let rem = remote::Remote::from_file(path)
-        .map_err(PanelError::Remote)?
-        .forced(opts.remote)
-        .with_whois(Arc::new(remote::SystemWhois));
+    let rem = remote::Remote::from_file(path).map_err(PanelError::Remote)?.forced(opts.remote).with_whois(Arc::new(remote::SystemWhois));
     let non_loopback = !opts.bind.to_canonical().is_loopback();
     if opts.tailscale && non_loopback {
-        return Err(PanelError::Remote(
-            "--tailscale already listens on this computer and on its Tailscale addresses: leave out --bind.".into(),
-        ));
+        return Err(PanelError::Remote("--tailscale already listens on this computer and on its Tailscale addresses: leave out --bind.".into()));
     }
     if non_loopback && rem.enabled() {
         rem.learn_self_names();
     }
-    let warnings = remote::bind_plan(opts.bind, rem.enabled(), opts.allow_public, &rem.config(), &rem.extra_hosts())
-        .map_err(PanelError::Remote)?;
+    let mut warnings = remote::bind_plan(opts.bind, rem.enabled(), opts.allow_public, &rem.config(), &rem.extra_hosts()).map_err(PanelError::Remote)?;
+    // HTTPS: load the certificate now (a listener that other computers can reach serves HTTPS as soon as there is one).
+    let home = kora_core::installer::registry::kora_home();
+    let tls_mgr = Arc::new(tls::manager::Manager::new(home, Arc::new(remote::SystemWhois)));
+    let mut hint_names = rem.extra_hosts();
+    if non_loopback && !opts.bind.is_unspecified() {
+        hint_names.push(opts.bind.to_string());
+    }
+    tls_mgr.set_hints(tls::manager::Hints { names: hint_names, tailnet: opts.tailscale });
+    let wants_tls = non_loopback || opts.tailscale;
+    if wants_tls {
+        if let Err(e) = tls_mgr.reload(true) {
+            warnings.push(format!("HTTPS is not available: {e}"));
+        }
+    }
+    let has_https = tls_mgr.state.active();
+    tls::rules::allow_public_check(opts.allow_public, opts.bind, has_https, rem.config().trusted_proxy.is_some()).map_err(PanelError::Remote)?;
+    if has_https {
+        warnings.retain(|w| w != remote::PLAIN_HTTP_WARNING);
+    } else if non_loopback && tls::rules::plain_is_risky(opts.bind) && rem.config().trusted_proxy.is_none() {
+        warnings.retain(|w| w != remote::PLAIN_HTTP_WARNING);
+        warnings.push(tls::plain_http_warning(&format!("{}:{}", opts.bind, opts.port)));
+    }
+    if let Some(e) = tls_mgr.state.last_error() {
+        warnings.push(format!("HTTPS: {e}"));
+    }
     let rem = Arc::new(rem);
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
+    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     rt.block_on(async move {
         let addr = SocketAddr::new(opts.bind, opts.port);
-        let listener = bind_retrying(addr)
-            .await
-            .map_err(|source| PanelError::Bind { addr, source })?;
+        let listener = bind_retrying(addr).await.map_err(|source| PanelError::Bind { addr, source })?;
         let addr = listener.local_addr()?;
         let token = opts.token.clone().unwrap_or_else(security::random_hex);
-        let state = AppState::system(token.clone(), addr).with_remote(rem);
+        // The real panel keeps its jobs in the store: history survives a restart, and what was running when the last panel died is
+        // marked interrupted. (Tests use `AppState::system` with the in-memory registry and never touch the Kora folder.)
+        let state =
+            AppState::system(token.clone(), addr).with_registry(JobRegistry::durable()).with_audit(kora_core::installer::registry::kora_home()).with_remote(rem).with_tls_manager(tls_mgr.clone());
+        tokio::spawn(tls_mgr.clone().maintain());
         for w in &warnings {
             eprintln!("{w}");
         }
+        let scheme = if non_loopback && has_https { "https" } else { "http" };
         if non_loopback {
-            println!("Kora Panel: http://{addr}/");
-            println!("Sign in with a user token (kora panel user add <name> --role <role>) or, if set up, your Tailscale account.");
+            println!("Kora Panel: {scheme}://{addr}/");
+            println!("Sign in with a passkey or one-time codes (`kora panel user invite <name> --role <role>`), or, if set up, your Tailscale account.");
+            if let Some(i) = tls_mgr.state.info().filter(|i| i.source == tls::CertSource::SelfSigned) {
+                println!("This panel uses a certificate Kora made. Fingerprint to compare in your browser: {}", i.fingerprint);
+            }
         } else if !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
             // A service: what it prints ends up in the system log, which other accounts may read
             // (Linux: the `adm` group). So no sign-in link there; `--print-link` makes one when asked.
@@ -599,15 +612,24 @@ pub fn run(opts: PanelOptions) -> Result<(), PanelError> {
         println!("Press Ctrl+C to stop.");
         // Sample the servers and raise alerts for as long as the panel runs.
         let monitor = handlers::monitor::start_system_monitor(state.backend.clone());
-        let served = axum::serve(
-            listener,
-            router(state).into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .with_graceful_shutdown(async {
+        // Make the backups the schedules ask for (only while the panel runs).
+        let backup_scheduler = handlers::backups::start_scheduler(state.backend.clone(), monitor.clone());
+        // Machine-level alerts: the panel's certificate and Kora's administrator service.
+        let machine_alerts = machine_alerts::start(monitor.clone(), tls_mgr.state.clone());
+        // Forward the game port on the router for servers that have it switched on (and run without a service).
+        let port_keeper = kora_core::reach::forward::keeper::spawn_panel_keeper();
+        // Loopback is plain HTTP by default; any other address serves HTTPS once there is a certificate.
+        let main_tls = (tls::rules::listener_kind(addr.ip(), false) == tls::rules::Listener::Tls).then(|| tls_mgr.state.clone());
+        let st_hosts = state.clone();
+        let host_ok: tls::serve::HostCheck = Arc::new(move |h: &str| st_hosts.host_ok(h));
+        let served = tls::serve::serve(listener, router(state), main_tls, host_ok, async {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await;
         monitor.stop();
+        machine_alerts.stop();
+        backup_scheduler.stop();
+        port_keeper.stop();
         served?;
         Ok(())
     })

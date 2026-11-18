@@ -1,0 +1,122 @@
+# The Kora desktop app (tray icon + native window): build, smoke test, checksums. See docs/desktop-app.md.
+#
+# `crates/kora-desktop` is its own Cargo workspace (own Cargo.lock): the GUI toolkit never touches the main build, so
+# ci.yml and supply-chain.yml are unaffected. Its decisions live in `crates/kora-shell`, which IS in the main workspace
+# and is tested by ci.yml. This workflow is the only thing that compiles the GUI layer.
+# The MSI, the .deb and release.yml are owned by the packaging work: the snippets to ship the app in them are in
+# docs/desktop-app.md.
+name: Desktop app
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/kora-desktop/**"
+      - "crates/kora-shell/**"
+      - "scripts/smoke/desktop-smoke.*"
+      - ".github/workflows/desktop.yml"
+  pull_request:
+    paths:
+      - "crates/kora-desktop/**"
+      - "crates/kora-shell/**"
+      - "scripts/smoke/desktop-smoke.*"
+      - ".github/workflows/desktop.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  # A newer push to the same branch/PR cancels the older run instead of stacking up (runners are limited).
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deny:
+    name: cargo deny (the desktop app's own dependencies)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: crates/kora-desktop/Cargo.toml
+          command: check
+          arguments: --config crates/kora-desktop/deny.toml
+
+  build:
+    name: build, smoke test, checksums (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    # The Windows runner is an elevated administrator account, where `kora panel` refuses to start unless this is set.
+    # Real people run Kora as a normal user.
+    env:
+      KORA_ALLOW_ROOT_PANEL: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build the panel UI (embedded in kora)
+        working-directory: web
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+      - name: System packages (Linux)
+        if: runner.os == 'Linux'
+        # WebKitGTK 4.1 + GTK 3 for the window, AppIndicator for the tray, xvfb and a session bus for the smoke test.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev libxdo-dev xvfb dbus-x11 jq
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: |
+            . -> target
+            crates/kora-desktop -> target
+      - name: Build kora (the program the app asks for the panel)
+        run: cargo build --release --locked -p kora-cli
+      - name: Build the desktop app
+        run: cargo build --release --locked --manifest-path crates/kora-desktop/Cargo.toml
+      - name: Clippy (desktop app)
+        run: cargo clippy --locked --manifest-path crates/kora-desktop/Cargo.toml -- -D warnings
+      - name: Collect the files
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp target/release/kora.exe dist/kora.exe
+            cp crates/kora-desktop/target/release/kora-desktop.exe dist/kora-desktop.exe
+          else
+            cp target/release/kora dist/kora
+            cp crates/kora-desktop/target/release/kora-desktop dist/kora-desktop
+          fi
+      - name: Smoke test (Linux, virtual screen)
+        if: runner.os == 'Linux'
+        run: bash scripts/smoke/desktop-smoke.sh dist
+      - name: Smoke test (Windows, real desktop session)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/smoke/desktop-smoke.ps1 -Dist dist
+      - name: Package with checksums
+        shell: bash
+        run: |
+          mkdir -p out
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp dist/kora-desktop.exe out/kora-desktop-windows-x86_64.exe
+          else
+            cp dist/kora-desktop out/kora-desktop-linux-x86_64
+          fi
+          cd out
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kora-desktop-${{ runner.os }}
+          path: out/
+          retention-days: 14

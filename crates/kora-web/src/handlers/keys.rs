@@ -9,12 +9,12 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
-use kora_core::api::Status;
+use kora_core::api::{wire, Status};
 use kora_core::installer::paused::{self, PausedStore};
 use kora_core::keystore::{KeyInfo, KeyStore};
 use kora_core::problem::{codes, Action, Problem};
 use kora_core::profile::{Field, Profile, ProfileStore};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::remote::{Caller, Role};
 use crate::{blocking, ApiError, AppState};
@@ -48,13 +48,13 @@ fn text(v: &Value, key: &str) -> Option<String> {
     v.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
-fn key_json(k: &KeyInfo) -> Value {
-    json!({"name": k.name, "last4": k.last4, "added": k.added})
+fn key_info(k: &KeyInfo) -> wire::SavedKeyInfo {
+    wire::SavedKeyInfo { name: k.name.clone(), last4: k.last4.clone(), added: k.added }
 }
 
 /// `GET /keys` → `{keys: [{name, last4, added, servers: [name], stopped_installs}], can_manage, path}`.
 /// Never a full key. `path` (where the file is) is only for local callers.
-pub async fn keys_list(State(st): State<AppState>, Extension(c): Extension<Caller>) -> Result<Json<Value>, ApiError> {
+pub async fn keys_list(State(st): State<AppState>, Extension(c): Extension<Caller>) -> Result<Json<wire::SavedKeys>, ApiError> {
     let can_manage = may_manage(&c);
     let remote = c.remote;
     blocking(move || {
@@ -62,29 +62,56 @@ pub async fn keys_list(State(st): State<AppState>, Extension(c): Extension<Calle
         let store = KeyStore::default();
         let pending = PausedStore::default();
         let saved = kora_core::installer::saved::path();
-        let keys: Vec<Value> = store
+        let keys: Vec<wire::SavedKey> = store
             .list_with_servers(&servers)
             .map_err(api)?
             .iter()
-            .map(|(k, used)| {
-                let mut v = key_json(k);
-                v["servers"] = json!(used);
-                v["stopped_installs"] = json!(pending.count_key_with_saved(&saved, &k.name));
-                v
+            .map(|(k, used)| wire::SavedKey {
+                name: k.name.clone(),
+                last4: k.last4.clone(),
+                added: k.added,
+                servers: used.clone(),
+                stopped_installs: u32::try_from(pending.count_key_with_saved(&saved, &k.name)).unwrap_or(u32::MAX),
+                kept: k.kept.clone(),
+                problem: k.problem.clone(),
             })
             .collect();
-        Ok(Json(json!({"keys": keys, "can_manage": can_manage, "path": (!remote).then(|| store.path().display().to_string())})))
+        Ok(Json(wire::SavedKeys { keys, can_manage, path: (!remote).then(|| store.path().display().to_string()), keychain: keychain_view(&store)? }))
+    })
+    .await
+}
+
+fn keychain_view(store: &KeyStore) -> Result<wire::KeychainView, ApiError> {
+    let st = store.keychain_status().map_err(api)?;
+    Ok(wire::KeychainView {
+        mode: if st.mode == kora_core::store::keychain::Mode::Off { "off".into() } else { "auto".into() },
+        line: st.line,
+        active: st.active.as_str().into(),
+        available: st.active != kora_core::store::keychain::Place::Store,
+    })
+}
+
+/// `PUT /keys/keychain` `{use_keychain}` (the computer that runs Kora): turn the keychain on and move the saved keys in, or
+/// off and move them back into Kora's private file. A key that cannot be moved stays where it is and is listed.
+pub async fn keychain_set(Extension(c): Extension<Caller>, Json(body): Json<wire::KeychainSet>) -> Result<Json<wire::KeychainChanged>, ApiError> {
+    if c.remote {
+        return Err(ApiError::forbidden("This can only be done on the computer that runs Kora, not over remote access."));
+    }
+    blocking(move || {
+        let store = KeyStore::default();
+        let moved = if body.use_keychain { store.keychain_on() } else { store.keychain_off() }.map_err(api)?;
+        Ok(Json(wire::KeychainChanged { keychain: keychain_view(&store)?, moved: moved.moved as u32, left: moved.left.into_iter().map(|(n, why)| format!("{n}: {why}")).collect() }))
     })
     .await
 }
 
 /// `POST /keys` `{name, license_key}` → `201 {key: {name, last4, added}}`.
-pub async fn key_add(Extension(c): Extension<Caller>, Json(body): Json<Value>) -> Result<(StatusCode, Json<Value>), ApiError> {
+pub async fn key_add(Extension(c): Extension<Caller>, Json(body): Json<Value>) -> Result<(StatusCode, Json<wire::KeyAdded>), ApiError> {
     require_manage(&c)?;
     let (name, key) = (text(&body, "name").unwrap_or_default(), text(&body, "license_key").unwrap_or_default());
     blocking(move || {
         let k = KeyStore::default().add(&name, &key).map_err(api)?;
-        Ok((StatusCode::CREATED, Json(json!({"key": key_json(&k)}))))
+        Ok((StatusCode::CREATED, Json(wire::KeyAdded { key: key_info(&k) })))
     })
     .await
 }
@@ -92,7 +119,7 @@ pub async fn key_add(Extension(c): Extension<Caller>, Json(body): Json<Value>) -
 /// `PUT /keys/{name}` `{new_name?, license_key?}` → `{key, notes}`. Rename, replace the key, or both.
 /// Stopped installs and saved answers that used the old name follow a rename. Servers already
 /// installed keep the key they have.
-pub async fn key_update(Extension(c): Extension<Caller>, Path(name): Path<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+pub async fn key_update(Extension(c): Extension<Caller>, Path(name): Path<String>, Json(body): Json<Value>) -> Result<Json<wire::KeyChange>, ApiError> {
     require_manage(&c)?;
     let (new_name, key) = (text(&body, "new_name"), text(&body, "license_key"));
     if new_name.is_none() && key.is_none() {
@@ -113,14 +140,14 @@ pub async fn key_update(Extension(c): Extension<Caller>, Path(name): Path<String
         if key.is_some() {
             notes.push("Servers that were already installed with the old key keep using it. Use \"Change licence key\" on a server to switch it.".to_string());
         }
-        Ok(Json(json!({"key": key_json(&k), "notes": notes})))
+        Ok(Json(wire::KeyChange { key: key_info(&k), notes }))
     })
     .await
 }
 
 /// `DELETE /keys/{name}` → `{removed, notes}`. Servers installed with the key are not touched; an
 /// unfinished install that used it is told it needs another key.
-pub async fn key_remove(Extension(c): Extension<Caller>, Path(name): Path<String>) -> Result<Json<Value>, ApiError> {
+pub async fn key_remove(Extension(c): Extension<Caller>, Path(name): Path<String>) -> Result<Json<wire::KeyRemoved>, ApiError> {
     require_manage(&c)?;
     blocking(move || {
         let waiting = PausedStore::default().count_key_with_saved(&kora_core::installer::saved::path(), &name);
@@ -133,7 +160,7 @@ pub async fn key_remove(Extension(c): Extension<Caller>, Path(name): Path<String
                 if waiting == 1 { "it" } else { "they" }
             ));
         }
-        Ok(Json(json!({"removed": true, "notes": notes})))
+        Ok(Json(wire::KeyRemoved { removed: true, notes }))
     })
     .await
 }
@@ -142,12 +169,7 @@ pub async fn key_remove(Extension(c): Extension<Caller>, Path(name): Path<String
 /// `{server, last4, key_name, running, restart_needed, message}`. Writes the key where the server's
 /// configuration keeps it. A running server only reads it when it starts: `restart_needed` says so and
 /// the panel offers the restart (`POST /servers/{s}/control`).
-pub async fn server_key_set(
-    State(st): State<AppState>,
-    Extension(c): Extension<Caller>,
-    Path(s): Path<String>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn server_key_set(State(st): State<AppState>, Extension(c): Extension<Caller>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Json<wire::ServerKeyChanged>, ApiError> {
     let (name, pasted, save_as) = (text(&body, "name"), text(&body, "license_key"), text(&body, "save_as").filter(|n| !n.trim().is_empty()));
     if pasted.is_some() || save_as.is_some() {
         require_manage(&c)?;
@@ -182,25 +204,19 @@ pub async fn server_key_set(
         } else {
             "The new licence key is saved in the server's configuration. No restart is needed: the server is stopped and will use it the next time it starts."
         };
-        Ok(Json(json!({
-            "server": e.name,
-            "last4": kora_core::keystore::last4(&key),
-            "key_name": key_name,
-            "running": running,
-            "restart_needed": running,
-            "message": message,
-        })))
+        Ok(Json(wire::ServerKeyChanged { server: e.name.clone(), last4: kora_core::keystore::last4(&key), key_name, running, restart_needed: running, message: message.to_string() }))
     })
     .await
 }
 
-fn profile_json(p: &Profile) -> Value {
-    json!({"cfx_username": p.cfx_username, "cfx_identifier": p.cfx_identifier, "github_owner": p.github_owner})
+/// What Kora remembers, as the panel reads it (`null` for what is not known yet).
+pub(crate) fn profile_view(p: &Profile) -> wire::Profile {
+    wire::Profile { cfx_username: p.cfx_username.clone(), cfx_identifier: p.cfx_identifier.clone(), github_owner: p.github_owner.clone() }
 }
 
 /// `GET /profile` → `{cfx_username, cfx_identifier, github_owner}` (each `null` until first used).
-pub async fn profile_get() -> Result<Json<Value>, ApiError> {
-    blocking(|| Ok(Json(profile_json(&ProfileStore::default().load())))).await
+pub async fn profile_get() -> Result<Json<wire::Profile>, ApiError> {
+    blocking(|| Ok(Json(profile_view(&ProfileStore::default().load())))).await
 }
 
 /// One field of `PUT /profile`: left out = keep, `null` = forget, text = set.
@@ -218,7 +234,7 @@ fn field(body: &Value, key: &str, check: impl Fn(&str) -> Result<(), String>) ->
 }
 
 /// `PUT /profile` `{cfx_username?, cfx_identifier?, github_owner?}` → the profile. `null` forgets a field.
-pub async fn profile_set(Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+pub async fn profile_set(Json(body): Json<Value>) -> Result<Json<wire::Profile>, ApiError> {
     let name = field(&body, "cfx_username", |n| {
         if kora_core::cfx::valid_username(n.trim_start_matches('@')) {
             Ok(())
@@ -235,10 +251,8 @@ pub async fn profile_set(Json(body): Json<Value>) -> Result<Json<Value>, ApiErro
     })?;
     let owner = field(&body, "github_owner", kora_core::git::owners::check_login_syntax)?;
     blocking(move || {
-        let p = ProfileStore::default()
-            .update(name, ident, owner)
-            .map_err(|e| ApiError::internal(format!("Kora could not save this ({e}).")))?;
-        Ok(Json(profile_json(&p)))
+        let p = ProfileStore::default().update(name, ident, owner).map_err(|e| ApiError::internal(format!("Kora could not save this ({e}).")))?;
+        Ok(Json(profile_view(&p)))
     })
     .await
 }

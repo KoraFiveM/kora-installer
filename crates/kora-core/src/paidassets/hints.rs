@@ -7,6 +7,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "AssetHintKind"))]
 #[serde(rename_all = "snake_case")]
 pub enum HintKind {
     /// "You lack the required entitlement".
@@ -18,6 +19,7 @@ pub enum HintKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "AssetHint"))]
 pub struct EntitlementHint {
     pub kind: HintKind,
     /// The asset, when the line names it.
@@ -45,30 +47,17 @@ fn kind_of(lower: &str) -> Option<HintKind> {
 
 fn token_at(line: &str, at: usize) -> Option<&str> {
     let rest = line.get(at..)?.trim_start_matches([' ', ':']);
-    let end = rest
-        .find(|c: char| c.is_whitespace() || matches!(c, '/' | ',' | ':' | ')' | '('))
-        .unwrap_or(rest.len());
-    let t = rest[..end]
-        .trim_matches(|c: char| matches!(c, '\'' | '"' | '`' | '@' | '[' | ']'))
-        .trim_end_matches('.');
+    let end = rest.find(|c: char| c.is_whitespace() || matches!(c, '/' | ',' | ':' | ')' | '(')).unwrap_or(rest.len());
+    let t = rest[..end].trim_matches(|c: char| matches!(c, '\'' | '"' | '`' | '@' | '[' | ']')).trim_end_matches('.');
     // "to use this resource" and the like are not names.
-    let filler = matches!(
-        t.to_ascii_lowercase().as_str(),
-        "this" | "the" | "a" | "resource" | "could" | "not"
-    );
+    let filler = matches!(t.to_ascii_lowercase().as_str(), "this" | "the" | "a" | "resource" | "could" | "not");
     (!t.is_empty() && !filler && super::valid_asset_name(t)).then_some(t)
 }
 
 /// The asset a console line is about, if it names one.
 fn resource_of(line: &str) -> Option<String> {
     let lower = line.to_ascii_lowercase();
-    for m in [
-        "protected resource ",
-        "to use ",
-        "in resource ",
-        "downloaded",
-        "@",
-    ] {
+    for m in ["protected resource ", "to use ", "in resource ", "downloaded", "@"] {
         for (i, _) in lower.match_indices(m) {
             if let Some(t) = token_at(line, i + m.len()) {
                 return Some(t.to_string());
@@ -76,11 +65,7 @@ fn resource_of(line: &str) -> Option<String> {
         }
     }
     // Lastly, a quoted name anywhere on the line.
-    line.split(['\'', '"'])
-        .skip(1)
-        .step_by(2)
-        .find(|t| super::valid_asset_name(t))
-        .map(String::from)
+    line.split(['\'', '"']).skip(1).step_by(2).find(|t| super::valid_asset_name(t)).map(String::from)
 }
 
 /// The fix for `kind`, naming `resource` when known.
@@ -112,12 +97,7 @@ pub fn entitlement_hints<S: AsRef<str>>(lines: &[S]) -> Vec<EntitlementHint> {
         out.retain(|h| !(h.kind == kind && h.resource == resource));
         let fix = fix_for(kind, resource.as_deref());
         let line: String = line.trim().chars().take(300).collect();
-        out.push(EntitlementHint {
-            kind,
-            resource,
-            line,
-            fix,
-        });
+        out.push(EntitlementHint { kind, resource, line, fix });
     }
     out
 }
@@ -127,7 +107,5 @@ pub fn hints_for_server(dir: &Path) -> Vec<EntitlementHint> {
     let Some(src) = crate::console::source(dir) else {
         return Vec::new();
     };
-    crate::api::logs::tail(&src, SCAN_LINES)
-        .map(|l| entitlement_hints(&l))
-        .unwrap_or_default()
+    crate::api::logs::tail(&src, SCAN_LINES).map(|l| entitlement_hints(&l)).unwrap_or_default()
 }

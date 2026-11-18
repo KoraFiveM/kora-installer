@@ -5,12 +5,12 @@
 #![allow(clippy::unused_async)]
 
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::{Extension, Json};
+use axum::Json;
 use kora_core::api::panel_updates::schedule_state_json;
 use kora_core::api::{Status, WebhookView};
-use kora_core::installer::{Mode, Ports};
+use kora_core::installer::Ports;
 use kora_core::notify::{self, NotifyConfig};
 use kora_core::service::ScheduleConfig;
 use serde_json::{json, Value};
@@ -20,13 +20,10 @@ use crate::{blocking, ApiError, AppState};
 fn webhook_state(c: &NotifyConfig) -> Value {
     let v = WebhookView::from(c);
     // `configured` is what the UI reads; `set` is the core's name for the same thing.
-    json!({"configured": v.set, "set": v.set, "redacted": v.redacted})
+    serde_json::to_value(kora_core::api::wire::WebhookState { configured: v.set, set: v.set, redacted: v.redacted }).unwrap_or(Value::Null)
 }
 
-pub async fn webhook_get(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn webhook_get(State(st): State<AppState>, Path(s): Path<String>) -> Result<Json<Value>, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
         let c = st.backend().notify_load(&e);
@@ -35,59 +32,36 @@ pub async fn webhook_get(
     .await
 }
 
-pub async fn webhook_set(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
-    let url = body
-        .get("url")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_string();
+pub async fn webhook_set(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+    let url = body.get("url").and_then(Value::as_str).unwrap_or("").trim().to_string();
     if url.is_empty() {
         return Err(ApiError::bad_request("Paste the Discord webhook address."));
     }
     notify::validate_webhook(&url).map_err(|e| ApiError::bad_request(e.to_string()))?;
     blocking(move || {
         let e = st.entry(&s)?;
-        let cfg = NotifyConfig {
-            discord_webhook: Some(url),
-        };
+        let cfg = NotifyConfig { discord_webhook: Some(url) };
         st.backend().notify_save(&e, &cfg).map_err(ApiError::core)?;
         Ok(Json(webhook_state(&cfg)))
     })
     .await
 }
 
-pub async fn webhook_remove(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-) -> Result<Response, ApiError> {
+pub async fn webhook_remove(State(st): State<AppState>, Path(s): Path<String>) -> Result<Response, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
-        st.backend()
-            .notify_save(&e, &NotifyConfig::default())
-            .map_err(ApiError::core)?;
+        st.backend().notify_save(&e, &NotifyConfig::default()).map_err(ApiError::core)?;
         Ok(StatusCode::NO_CONTENT.into_response())
     })
     .await
 }
 
-pub async fn webhook_test(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-) -> Result<Response, ApiError> {
+pub async fn webhook_test(State(st): State<AppState>, Path(s): Path<String>) -> Result<Response, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
         let mut b = st.backend();
         let cfg = b.notify_load(&e);
-        if !cfg
-            .discord_webhook
-            .as_deref()
-            .is_some_and(|u| !u.trim().is_empty())
-        {
+        if !cfg.discord_webhook.as_deref().is_some_and(|u| !u.trim().is_empty()) {
             return Err(ApiError::bad_request("Add a webhook first."));
         }
         b.notify_test(&e, &cfg).map_err(ApiError::core)?;
@@ -96,10 +70,7 @@ pub async fn webhook_test(
     .await
 }
 
-pub async fn schedule_get(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn schedule_get(State(st): State<AppState>, Path(s): Path<String>) -> Result<Json<Value>, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
         let cfg = st.backend().schedule_get(&e);
@@ -109,44 +80,34 @@ pub async fn schedule_get(
 }
 
 /// The schedule change needs administrator rights: on Windows the elevated worker does it (one
-/// permission prompt), on Linux the helper when it is installed; otherwise this is the
+/// permission prompt), elsewhere the administrator service; without it this is the
 /// `needs_elevation` answer with the command to run.
-fn run_elevated(ask: crate::elevated::AdminAsk, args: Vec<String>) -> Result<(), ApiError> {
+fn run_elevated(e: &kora_core::installer::registry::ServerEntry, mut args: Vec<String>) -> Result<(), ApiError> {
+    // The service takes the server's FOLDER (it checks that it is the caller's own), never a name looked up in the
+    // caller's server list; `kora schedule ... <folder>` is understood by the command line too.
+    if args.len() > 2 {
+        args[2] = e.dir.to_string_lossy().into_owned();
+    }
     let mut command = vec!["kora".to_string()];
     command.extend(args);
-    crate::elevated::privileged_as(
-        ask,
-        "change the automatic updates",
-        "Changing the automatic updates needs administrator rights. Run the command shown from a terminal opened as administrator, then come back here.",
-        command,
-        vec![],
-        &mut |_| {},
-    )
-    .map(|_| ())
+    let message = "Changing the automatic updates needs administrator rights. Run the command shown from a terminal opened as administrator, then come back here.";
+    // An update task that runs as the system account on a folder the person controls is administrator
+    // code for them: the service never makes one, so that choice stays an administrator-terminal command.
+    if command.iter().any(|a| a == "--as-system") {
+        return Err(ApiError::needs_elevation(message, command));
+    }
+    crate::elevated::privileged_as("change the automatic updates", message, command, vec![], &mut |_| {}).map(|_| ())
 }
 
-pub async fn schedule_set(
-    State(st): State<AppState>,
-    Extension(caller): Extension<crate::remote::Caller>,
-    headers: HeaderMap,
-    Path(s): Path<String>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
-    let ask = crate::elevated::AdminAsk::of(&caller, &headers);
+pub async fn schedule_set(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
     let cfg: ScheduleConfig = serde_json::from_value(body)
         .map_err(|_| ApiError::bad_request("The schedule needs a preset (daily, weekly or custom), a time like 04:00, a weekday for weekly, who it runs as, and whether it is on."))?;
-    cfg.validate()
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    cfg.validate().map_err(|e| ApiError::bad_request(e.to_string()))?;
     blocking(move || {
         let e = st.entry(&s)?;
-        if e.mode != Mode::Development {
-            return Err(ApiError::bad_request(
-                "Automatic updates are only for development servers.",
-            ));
-        }
         let mut b = st.backend();
         if let Some(args) = b.schedule_elevation(&e, Some(&cfg)) {
-            run_elevated(ask, args)?;
+            run_elevated(&e, args)?;
         } else {
             b.schedule_set(&e, &cfg).map_err(ApiError::core)?;
         }
@@ -156,18 +117,12 @@ pub async fn schedule_set(
     .await
 }
 
-pub async fn schedule_remove(
-    State(st): State<AppState>,
-    Extension(caller): Extension<crate::remote::Caller>,
-    headers: HeaderMap,
-    Path(s): Path<String>,
-) -> Result<Response, ApiError> {
-    let ask = crate::elevated::AdminAsk::of(&caller, &headers);
+pub async fn schedule_remove(State(st): State<AppState>, Path(s): Path<String>) -> Result<Response, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
         let mut b = st.backend();
         if let Some(args) = b.schedule_elevation(&e, None) {
-            run_elevated(ask, args)?;
+            run_elevated(&e, args)?;
         } else {
             b.schedule_remove(&e).map_err(ApiError::core)?;
         }
@@ -186,42 +141,24 @@ fn port_of(body: &Value, key: &str) -> Result<u16, ApiError> {
     }
 }
 
-pub async fn ports_set(
-    State(st): State<AppState>,
-    Path(s): Path<String>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn ports_set(State(st): State<AppState>, Path(s): Path<String>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
     let game = port_of(&body, "game")?;
     let txadmin = port_of(&body, "txadmin")?;
     if game == txadmin {
-        return Err(ApiError::bad_request(
-            "The game and txAdmin ports must be different.",
-        ));
+        return Err(ApiError::bad_request("The game and txAdmin ports must be different."));
     }
     blocking(move || {
         let e = st.entry(&s)?;
         let mut b = st.backend();
         match b.status(&e) {
             Status::Stopped => {}
-            Status::Running => {
-                return Err(ApiError::conflict(
-                    "Stop the server before changing its ports.",
-                ))
-            }
-            Status::Missing => {
-                return Err(ApiError::conflict(
-                    "The server's folder is missing, so its ports cannot be changed.",
-                ))
-            }
+            Status::Running => return Err(ApiError::conflict("Stop the server before changing its ports.")),
+            Status::Missing => return Err(ApiError::conflict("The server's folder is missing, so its ports cannot be changed.")),
         }
         if e.ports.game == game && e.ports.txadmin == txadmin {
-            return Ok(Json(
-                json!({"notes": ["Those are already the ports this server uses."]}),
-            ));
+            return Ok(Json(json!({"notes": ["Those are already the ports this server uses."]})));
         }
-        let notes = b
-            .ports_set(&e, Ports { game, txadmin })
-            .map_err(ApiError::core)?;
+        let notes = b.ports_set(&e, Ports { game, txadmin }).map_err(ApiError::core)?;
         Ok(Json(json!({"notes": notes})))
     })
     .await

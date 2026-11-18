@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -6,6 +6,36 @@ import { ApiError, type ApiErrorBody } from '@/api/client'
 import type { ProblemAction } from '@/api/types'
 import { detailsText, ProblemActions, toProblem } from '@/lib/problemActions'
 import { ErrorNotice } from './ErrorNotice'
+import { setLocale } from '@/i18n'
+
+describe('ErrorNotice in another language', () => {
+  afterEach(async () => {
+    await setLocale('en', false)
+    localStorage.clear()
+  })
+
+  it('a problem that names its message is shown in German; its parameters fill the sentence', async () => {
+    await setLocale('de', false)
+    const body: ApiErrorBody = { code: 'install.db_stopped', message: 'The database server MariaDB is installed but not running.', i18n: { id: 'errors.problems.dbStopped', params: { name: 'MariaDB' } } }
+    render(<ErrorNotice error={new ApiError(422, body)} />)
+    expect(screen.getByRole('alert')).toHaveTextContent('Der Datenbankserver MariaDB ist installiert, läuft aber nicht.')
+    // ... and the English message is what an English panel shows.
+    await setLocale('en', false)
+  })
+
+  it('an id this panel does not know, or no id at all, shows the server\'s English; with the debug switch it carries an EN mark', async () => {
+    await setLocale('de', false)
+    const { rerender } = render(<ErrorNotice error={new ApiError(422, { code: 'failed', message: 'English from the server.', i18n: { id: 'errors.problems.someFutureThing' } })} />)
+    expect(screen.getByRole('alert')).toHaveTextContent('English from the server.')
+    expect(screen.queryByText('EN', { exact: true })).toBeNull()
+    localStorage.setItem('kora.i18n.debug', '1')
+    rerender(<ErrorNotice error={new ApiError(422, { code: 'failed', message: 'English again.' })} />)
+    expect(screen.getByText('EN', { exact: true })).toBeInTheDocument()
+    // The id of another area is never read from the server.
+    rerender(<ErrorNotice error={new ApiError(422, { code: 'failed', message: 'Plain.', i18n: { id: 'core.status.updates', params: { count: '2' } } })} />)
+    expect(screen.getByRole('alert')).toHaveTextContent('Plain.')
+  })
+})
 
 describe('ErrorNotice', () => {
   it('shows an ordinary error as it is', () => {
@@ -131,6 +161,6 @@ describe('ErrorNotice with a Problem', () => {
   })
 
   it('copies the message, the details and the code', () => {
-    expect(detailsText({ code: 'github.gh_missing', message: 'No gh.', details: 'which gh: not found' })).toBe('No gh.\n\nwhich gh: not found\n\n(code: github.gh_missing)')
+    expect(detailsText({ code: 'github.gh_missing', message: 'No gh.', details: 'which gh: not found', actions: [] })).toBe('No gh.\n\nwhich gh: not found\n\n(code: github.gh_missing)')
   })
 })

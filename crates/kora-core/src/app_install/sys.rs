@@ -190,18 +190,14 @@ impl Sys for RealSys {
         if !cfg!(windows) {
             return Ok(None);
         }
-        let script = format!(
-            "$k = Get-Item -LiteralPath '{ENV_KEY}'; [Console]::Out.Write($k.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))"
-        );
+        let script = format!("$k = Get-Item -LiteralPath '{ENV_KEY}'; [Console]::Out.Write($k.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))");
         let out = powershell(&script, &[])?;
         Ok(Some(out))
     }
 
     fn set_machine_path(&mut self, value: &str) -> Result<()> {
         // Keep the registry type the machine already uses (REG_SZ or REG_EXPAND_SZ).
-        let script = format!(
-            "$k = Get-Item -LiteralPath '{ENV_KEY}'; $t = [string]$k.GetValueKind('Path'); Set-ItemProperty -LiteralPath '{ENV_KEY}' -Name Path -Type $t -Value $env:KORA_VALUE"
-        );
+        let script = format!("$k = Get-Item -LiteralPath '{ENV_KEY}'; $t = [string]$k.GetValueKind('Path'); Set-ItemProperty -LiteralPath '{ENV_KEY}' -Name Path -Type $t -Value $env:KORA_VALUE");
         powershell(&script, &[("KORA_VALUE", value.into())]).map(|_| ())
     }
 

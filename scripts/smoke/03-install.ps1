@@ -5,7 +5,7 @@ $fakeKey = 'cfxk_FAKEFAKEFAKEFAKEFAKE_smoke'
 $env:KORA_CATALOG = (Resolve-Path "$PWD/tests/fixtures/smoke-catalog.json").Path
 $env:CFX_LICENSE_KEY = $fakeKey
 
-$r = Invoke-Native $kora @('install', '--name', 'smoke', '--dir', $srv, '--game-port', '31120', '--txadmin-port', '41120', '--db', 'skip', '-y')
+$r = Invoke-Native $kora @('install', '--source', 'clone', '--versions', 'released', '--name', 'smoke', '--dir', $srv, '--game-port', '31120', '--txadmin-port', '41120', '--db', 'skip', '-y')
 Show 'kora install (production, no service)' $r
 Assert-That ($r.Code -eq 0) 'kora install exits 0'
 Assert-That ($r.Output -notmatch [regex]::Escape($fakeKey)) 'the license key is never printed'
@@ -38,11 +38,11 @@ Assert-That ($acl -match [regex]::Escape($env:USERNAME)) 'secrets.cfg ACL names 
 $readOk = $false; try { [void][IO.File]::ReadAllText("$srv\secrets.cfg"); $readOk = $true } catch {}
 Assert-That $readOk 'the installing user can still read secrets.cfg'
 
-$reg = Get-Content "$env:LOCALAPPDATA\Kora\servers.json" -Raw | ConvertFrom-Json
-Assert-That (@($reg.servers | Where-Object { $_.name -eq 'smoke' -and $_.ports.game -eq 31120 -and $_.ports.txadmin -eq 41120 }).Count -eq 1) 'registry (servers.json) has the smoke server with its ports'
+$reg = Get-RegistryText | ConvertFrom-Json
+Assert-That (@($reg.servers | Where-Object { $_.name -eq 'smoke' -and $_.ports.game -eq 31120 -and $_.ports.txadmin -eq 41120 }).Count -eq 1) 'the server list (Kora data file) has the smoke server with its ports'
 
 $st = Invoke-Native $kora @('status'); Show 'kora status' $st
-Assert-That ($st.Code -eq 0 -and $st.Output -match 'smoke\s+prod\s+31120\s+41120\s+stopped') 'kora status lists the server as stopped'
+Assert-That ($st.Code -eq 0 -and $st.Output -match 'smoke\s+clone, released\s+31120\s+41120\s+stopped') 'kora status lists the server as stopped'
 
 # Re-running the same install resumes cleanly (idempotent).
 $r = Invoke-Native $kora @('install', '--name', 'smoke', '--dir', $srv, '--game-port', '31120', '--txadmin-port', '41120', '--db', 'skip', '-y')

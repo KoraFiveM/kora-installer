@@ -1,6 +1,6 @@
 //! Auto-update scheduler: systemd `.service` + `.timer` and Windows `schtasks`.
 
-use super::{apply_plan, CommandRunner, ManagedServer, Platform, Plan, ServiceError, ServiceResult, SystemRunner, SystemStep};
+use super::{apply_plan, CommandRunner, ManagedServer, Plan, Platform, ServiceError, ServiceResult, SystemRunner, SystemStep};
 use crate::installer::registry::ServerEntry;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -58,7 +58,7 @@ impl Weekday {
     pub fn long_name(self) -> &'static str {
         ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][self as usize]
     }
-    fn xml(self) -> &'static str {
+    pub(super) fn xml(self) -> &'static str {
         self.long_name()
     }
     fn systemd(self) -> &'static str {
@@ -91,16 +91,14 @@ impl Default for Schedule {
 }
 
 impl Schedule {
-    fn validate(&self) -> ServiceResult<()> {
+    pub(super) fn validate(&self) -> ServiceResult<()> {
         match self {
-            Schedule::Custom(days, _) if days.is_empty() => {
-                Err(ServiceError::Invalid("pick at least one day for a custom schedule".into()))
-            }
+            Schedule::Custom(days, _) if days.is_empty() => Err(ServiceError::Invalid("pick at least one day for a custom schedule".into())),
             _ => Ok(()),
         }
     }
 
-    fn time(&self) -> TimeOfDay {
+    pub(super) fn time(&self) -> TimeOfDay {
         match self {
             Schedule::Daily(t) | Schedule::Weekly(_, t) | Schedule::Custom(_, t) => *t,
         }
@@ -133,7 +131,6 @@ impl Schedule {
     }
 }
 
-
 // ---------------------------------------------------------------------------------------------
 // Configuration model (what the manager and `kora schedule` use)
 // ---------------------------------------------------------------------------------------------
@@ -142,6 +139,7 @@ impl Schedule {
 pub type ServerRecord = ServerEntry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum Preset {
     Daily,
@@ -151,6 +149,7 @@ pub enum Preset {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum RunAs {
     /// The person who installed: their `gh`/`git` sign-in works, so private forks can be fetched.
@@ -160,6 +159,7 @@ pub enum RunAs {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ScheduleConfig {
     pub preset: Preset,
     /// `HH:MM`, 24 hours, server local time.
@@ -324,15 +324,7 @@ fn managed_for_lookup(rec: &ServerRecord) -> ManagedServer {
 
 fn managed_with_exe(rec: &ServerRecord, exe: String) -> ManagedServer {
     let dir = rec.dir.to_string_lossy().into_owned();
-    ManagedServer {
-        name: crate::installer::slug(&rec.name),
-        dir,
-        start_command: vec![exe.clone()],
-        user: "kora".into(),
-        env_file: None,
-        kora_exe: exe,
-        windows_run_as: None,
-    }
+    ManagedServer { name: crate::installer::slug(&rec.name), dir, start_command: vec![exe.clone()], user: "kora".into(), env_file: None, kora_exe: exe, windows_run_as: None }
 }
 
 /// What is stored for the server, checked against the OS: `None` when there is no schedule;
@@ -559,7 +551,7 @@ fn unit_path(s: &ManagedServer, ext: &str) -> String {
     format!("/etc/systemd/system/{}.{ext}", update_unit_name(s))
 }
 
-fn xml_escape(s: &str) -> String {
+pub(super) fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
 }
 
@@ -608,7 +600,7 @@ pub fn task_xml(s: &ManagedServer, schedule: &Schedule, run_as: RunAs, user: &st
 /// Where the task definition is written for `schtasks /XML` to read. NOT the server folder: other
 /// accounts can change files there, and could swap the definition (and so what runs as SYSTEM)
 /// between the write and the read. `%ProgramFiles%\Kora\tasks` only administrators can change.
-fn task_xml_path(s: &ManagedServer) -> String {
+pub(super) fn task_xml_path(s: &ManagedServer) -> String {
     let pf = std::env::var("ProgramFiles").ok().filter(|p| !p.trim().is_empty()).unwrap_or_else(|| "C:\\Program Files".into());
     format!("{}\\Kora\\tasks\\update-{}.xml", pf.trim_end_matches(['\\', '/']), s.name)
 }
@@ -642,12 +634,7 @@ pub fn scheduler_install_plan_as(s: &ManagedServer, schedule: &Schedule, run_as:
                     systemd_update_unit_as(s, run_as, user)?,
                     0o644,
                 ),
-                SystemStep::write(
-                    format!("Create the update schedule for '{}': {when} ({})", s.name, unit_path(s, "timer")),
-                    &unit_path(s, "timer"),
-                    systemd_timer_unit(s, schedule)?,
-                    0o644,
-                ),
+                SystemStep::write(format!("Create the update schedule for '{}': {when} ({})", s.name, unit_path(s, "timer")), &unit_path(s, "timer"), systemd_timer_unit(s, schedule)?, 0o644),
                 SystemStep::run("Tell systemd to read the new update job", "systemctl", &["daemon-reload"]),
                 SystemStep::run(format!("Turn on the automatic update schedule for '{}'", s.name), "systemctl", &["enable", "--now", &timer]),
             ])
@@ -680,11 +667,9 @@ pub fn scheduler_uninstall_plan(s: &ManagedServer, platform: Platform) -> Servic
                 SystemStep::run("Tell systemd the update job is gone", "systemctl", &["daemon-reload"]),
             ])
         }
-        Platform::Windows => Plan::new(vec![SystemStep::run(
-            format!("Delete the Windows scheduled task '{}' that Kora created", task_name(s)),
-            "schtasks.exe",
-            &["/Delete", "/TN", &task_name(s), "/F"],
-        )]),
+        Platform::Windows => {
+            Plan::new(vec![SystemStep::run(format!("Delete the Windows scheduled task '{}' that Kora created", task_name(s)), "schtasks.exe", &["/Delete", "/TN", &task_name(s), "/F"])])
+        }
     })
 }
 
@@ -745,11 +730,7 @@ pub fn repaired_update_unit(unit: &str, exe: &str, is_safe: &dyn Fn(&Path) -> bo
 /// Plan that rewrites every unsafe update unit in `units` (`(path, text)`) to run the program
 /// `choose` gives (made first when it is a copy), and the lines to tell the operator. `choose` is
 /// only asked when something needs repairing (it may hash this program).
-pub fn repair_plan(
-    units: &[(String, String)],
-    is_safe: &dyn Fn(&Path) -> bool,
-    choose: &dyn Fn() -> Result<super::binary::RootExe, String>,
-) -> Result<(Plan, Vec<String>, Option<PathBuf>), String> {
+pub fn repair_plan(units: &[(String, String)], is_safe: &dyn Fn(&Path) -> bool, choose: &dyn Fn() -> Result<super::binary::RootExe, String>) -> Result<(Plan, Vec<String>, Option<PathBuf>), String> {
     let mut plan = Plan::default();
     let mut lines = Vec::new();
     let mut exe = None;
@@ -769,9 +750,7 @@ pub fn repair_plan(
         let Some((_, repaired)) = repaired_update_unit(text, &new, is_safe) else { continue };
         let name = Path::new(path).file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         plan.steps.push(SystemStep::write(format!("Make {name} run {new}"), path, repaired, 0o644));
-        lines.push(format!(
-            "Repaired the automatic-update job {name}: it ran {old} as root, a file other accounts can change; it now runs {new}."
-        ));
+        lines.push(format!("Repaired the automatic-update job {name}: it ran {old} as root, a file other accounts can change; it now runs {new}."));
     }
     if lines.is_empty() {
         return Ok((Plan::default(), lines, None));
@@ -833,6 +812,8 @@ mod tests {
     #[test]
     fn reading_the_schedule_does_not_look_for_the_root_program() {
         let rec = ServerEntry {
+            source: None,
+            versions: None,
             name: "My Server".into(),
             dir: "/srv/my".into(),
             mode: crate::installer::Mode::Production,
@@ -874,14 +855,23 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert!(lines[0].contains("kora-update-main") && lines[0].contains("/home/sam/.local/bin/kora") && lines[0].contains("now runs /usr/local/bin/kora"), "{}", lines[0]);
         assert!(copy.is_none());
-        let written: Vec<&str> = plan.steps.iter().filter_map(|s| match &s.action { super::super::Action::WriteFile { contents, .. } => Some(contents.as_str()), _ => None }).collect();
+        let written: Vec<&str> = plan
+            .steps
+            .iter()
+            .filter_map(|s| match &s.action {
+                super::super::Action::WriteFile { contents, .. } => Some(contents.as_str()),
+                _ => None,
+            })
+            .collect();
         assert_eq!(written.len(), 1);
         assert_eq!(written[0], OLD.replace("/home/sam/.local/bin/kora update", "/usr/local/bin/kora update"));
         assert!(plan.steps.last().and_then(|s| s.command_line()).is_some_and(|l| l == "systemctl daemon-reload"));
         // No safe program yet: the pinned copy is made first and reported back.
         let (plan, _, copy) = repair_plan(&units[..1], &safe, &|| Ok(RootExe::Copy { src: "/home/sam/.local/bin/kora".into(), dest: "/opt/kora/1.0.0-abc/kora".into() })).unwrap();
         assert_eq!(copy.as_deref(), Some(Path::new("/opt/kora/1.0.0-abc/kora")));
-        assert!(plan.steps.iter().position(|s| matches!(&s.action, super::super::Action::CopyFile { .. })) < plan.steps.iter().position(|s| matches!(&s.action, super::super::Action::WriteFile { .. })));
+        assert!(
+            plan.steps.iter().position(|s| matches!(&s.action, super::super::Action::CopyFile { .. })) < plan.steps.iter().position(|s| matches!(&s.action, super::super::Action::WriteFile { .. }))
+        );
         // An ExecStart Kora did not write is left alone.
         assert!(repaired_update_unit("ExecStart=/home/x/evil --flag\n", "/usr/local/bin/kora", &safe).is_none());
     }

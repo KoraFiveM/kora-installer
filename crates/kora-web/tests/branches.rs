@@ -60,6 +60,7 @@ fn row(id: &str) -> ResourceBranch {
         state: State::Default,
         branch: Some("dev".into()),
         pr: None,
+        pr_title: None,
         default_branch: "dev".into(),
         label: "the normal version (dev)".into(),
         changed_count: 0,
@@ -72,32 +73,31 @@ fn row(id: &str) -> ResourceBranch {
 fn switched(status: Status) -> Reply {
     Reply::Switched(Box::new(SwitchResult {
         resource: "kora_hud".into(),
-        outcome: Outcome { status, now: where_(Kind::Branch, "feature"), stashed: Some(Stash { index: 0, message: "kept aside".into(), branch: "dev".into() }), saved_branch: None, title: None, message: "Now on branch feature.".into() },
+        outcome: Outcome {
+            status,
+            now: where_(Kind::Branch, "feature"),
+            stashed: Some(Stash { index: 0, message: "kept aside".into(), branch: "dev".into() }),
+            saved_branch: None,
+            title: None,
+            message: "Now on branch feature.".into(),
+        },
         needs_restart: status == Status::Switched,
         restart_note: Some("restart".into()),
     }))
 }
 
 #[tokio::test]
-async fn the_overview_and_the_choices_are_served_for_development_servers_only() {
+async fn the_overview_and_the_choices_are_served_for_every_server() {
     let fake = FakeBackend::sample();
     fake.state().branches = Some(Ok(Reply::Overview(vec![row("kora_hud")])));
     let app = app(&fake);
     let (s, v) = call(&app, "GET", "/servers/dev/branches", None).await;
     assert_eq!(s, 200, "{v}");
     assert_eq!(v["resources"][0]["label"], "the normal version (dev)");
-    // Production: refused before anything runs, as a guided problem.
-    for (m, u, b) in [
-        ("GET", "/servers/prod/branches", None),
-        ("GET", "/servers/prod/resources/kora_hud/branches", None),
-        ("GET", "/servers/prod/resources/kora_hud/prs", None),
-        ("POST", "/servers/prod/resources/kora_hud/branch", Some(json!({"action": "default"}))),
-        ("POST", "/servers/prod/branches/apply", Some(json!({"action": "default"}))),
-    ] {
-        let (s, v) = call(&app, m, u, b).await;
-        assert_eq!((s, v["error"]["code"].as_str()), (409, Some(codes::NOT_DEV)), "{u}: {v}");
-    }
-    assert_eq!(fake.calls().iter().filter(|c| c.starts_with("branches prod")).count(), 0);
+    // A server that follows released versions gets the same operations (the panel warns when a resource leaves its release).
+    let (s, _) = call(&app, "GET", "/servers/prod/branches", None).await;
+    assert_eq!(s, 200);
+    assert_eq!(fake.calls().iter().filter(|c| c.starts_with("branches prod")).count(), 1);
 
     fake.state().branches = Some(Ok(Reply::Choices(Box::new(Choices {
         resource: row("kora_hud"),
@@ -128,13 +128,16 @@ async fn pull_requests_come_back_labelled_and_sign_in_problems_keep_their_action
         draft: false,
         url: "https://github.com/KoraFiveM/kora_hud/pull/5".into(),
         updated: "2026-01-01T00:00:00Z".into(),
+        created: "2025-12-01T00:00:00Z".into(),
+        review: String::new(),
+        checks: kora_core::collab::Checks::None,
     };
     fake.state().branches = Some(Ok(Reply::Prs(PrChoices { prs: vec![pr], notes: vec![] })));
     let app = app(&fake);
     let (s, v) = call(&app, "GET", "/servers/dev/resources/kora_hud/prs", None).await;
     assert_eq!(s, 200);
     assert_eq!((v["prs"][0]["source"].as_str(), v["prs"][0]["author"].as_str()), (Some("upstream"), Some("sam")));
-    fake.state().branches = Some(Err(known::github_signed_out().into()));
+    fake.state().branches = Some(Err(known::github_signed_out()));
     let (s, v) = call(&app, "GET", "/servers/dev/resources/kora_hud/prs", None).await;
     assert_eq!(s, 422);
     assert_eq!(v["error"]["code"], "github.signed_out");
@@ -190,12 +193,12 @@ async fn failures_arrive_as_guided_problems_and_a_running_update_is_a_conflict()
     let app = app(&fake);
     let u = "/servers/dev/resources/kora_hud/branch";
     let closed = Problem::new(codes::PR_CLOSED, "Pull request #5 has already been merged.").with_action(Action::open_link("https://github.com/o/n/pull/5"));
-    fake.state().branches = Some(Err(closed.into()));
+    fake.state().branches = Some(Err(closed));
     let (s, v) = call(&app, "POST", u, Some(json!({"action": "pr", "pr": 5}))).await;
     assert_eq!((s, v["error"]["code"].as_str()), (422, Some(codes::PR_CLOSED)));
     assert_eq!(v["error"]["actions"][0]["kind"], "open_link");
     let busy = Problem::new(codes::BUSY, "An update is running for this server right now.");
-    fake.state().branches = Some(Err(busy.into()));
+    fake.state().branches = Some(Err(busy));
     let (s, v) = call(&app, "POST", u, Some(json!({"action": "default"}))).await;
     assert_eq!((s, v["error"]["code"].as_str()), (409, Some(codes::BUSY)));
 }

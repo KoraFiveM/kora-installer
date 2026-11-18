@@ -74,15 +74,7 @@ fn describe(i: &Item) -> String {
 }
 
 /// Run (or, with `dry_run`, preview) the uninstall for every registered server.
-pub fn run(
-    reg: &mut Registry,
-    opts: &Options,
-    env: &Env,
-    ask: &mut dyn Asker,
-    say: &mut dyn FnMut(&str),
-    delete: Deleter,
-    save: &mut dyn FnMut(&Registry) -> std::io::Result<()>,
-) -> Summary {
+pub fn run(reg: &mut Registry, opts: &Options, env: &Env, ask: &mut dyn Asker, say: &mut dyn FnMut(&str), delete: Deleter, save: &mut dyn FnMut(&Registry) -> crate::problem::Res<()>) -> Summary {
     let mut sum = Summary::default();
     let names: Vec<(String, std::path::PathBuf, super::registry::PortsRecord)> = reg
         .servers
@@ -106,7 +98,7 @@ pub fn run(
                 reg.remove(&name);
                 match save(reg) {
                     Ok(()) => sum.removed.push(format!("{name}: removed from the server list")),
-                    Err(e) => sum.failed.push(format!("{name}: cannot write the server list: {e}")),
+                    Err(e) => sum.failed.push(format!("{name}: cannot write the server list: {}", e.one_line())),
                 }
             } else {
                 sum.kept.push(format!("{name}: left in the server list (no records)"));
@@ -133,10 +125,13 @@ pub fn run(
 
         let reg_snapshot = reg.clone();
         let used = created.binary.as_deref().is_some_and(|b| system::binary_used_elsewhere(&reg_snapshot, b, &[dir.as_path()]));
-        let items = match system::items_for(&target, &created, env.platform, env.runner, !del_files, used) {
+        let items = match system::items_for(&target, &created, env.platform, env.runner, !del_files, used).map(|mut i| {
+            i.extend(system::backup_job_item(&target, env.platform, env.runner));
+            i
+        }) {
             Ok(i) => i,
             Err(e) => {
-                sum.failed.push(format!("{name}: {e}"));
+                sum.failed.push(format!("{name}: {}", e.one_line()));
                 continue;
             }
         };
@@ -165,7 +160,7 @@ pub fn run(
                     if system::clears_record(item) {
                         system::clear_record(&mut created, item.kind);
                         if let Err(e) = save_created_to(&dir, &created) {
-                            say(&format!("  note: removed, but could not update Kora's record: {e}"));
+                            say(&format!("  note: removed, but could not update Kora's record: {}", e.one_line()));
                         }
                     }
                     if !item.plan.steps.is_empty() {
@@ -179,8 +174,42 @@ pub fn run(
                 }
             }
         }
+        // A container server: its containers and private network are the system-wide part (no unit, no account).
+        match crate::container::lifecycle::target_of(&name, &dir) {
+            Ok(Some(t)) => {
+                let what = format!(
+                    "remove this server's containers and private network ({}){}",
+                    t.rec.engine().label(),
+                    if del_db { " and the database's data volume" } else { "; the database's data volume stays" }
+                );
+                if opts.dry_run {
+                    say(&format!("  {verb}: {what}"));
+                } else if ask.ask(&format!("{}?", crate::container::lifecycle::capitalised(&what)), true) {
+                    let runner = crate::container::lifecycle::system();
+                    match crate::container::lifecycle::Manager::new(&dir, &t.rec, &runner).remove_all(del_db) {
+                        Ok(done) => {
+                            for d in &done {
+                                say(&format!("  done: {d}"));
+                            }
+                            sum.removed.push(format!("{name}: containers and network"));
+                        }
+                        Err(p) => {
+                            sum.failed.push(format!("{name}: containers: {}", p.message));
+                            say(&format!("  FAILED: {}", p.message));
+                        }
+                    }
+                } else {
+                    sum.kept.push(format!("{name}: containers kept"));
+                }
+            }
+            Ok(None) => {}
+            Err(why) => sum.failed.push(format!("{name}: {why}")),
+        }
         if opts.dry_run {
-            say(&format!("  {verb} KEEP the server folder and database{}.", if opts.delete_files || opts.delete_databases { " except what --delete-files / --delete-databases name" } else { " (add --delete-files / --delete-databases to include them)" }));
+            say(&format!(
+                "  {verb} KEEP the server folder and database{}.",
+                if opts.delete_files || opts.delete_databases { " except what --delete-files / --delete-databases name" } else { " (add --delete-files / --delete-databases to include them)" }
+            ));
             say(&format!("  {verb} remove '{name}' from the server list{}.", if opts.delete_files || opts.delete_databases { " when its files or database are deleted" } else { " if you agree" }));
             continue;
         }
@@ -192,11 +221,23 @@ pub fn run(
                         say(&format!("  note: {n}"));
                     }
                     reg.remove(&name);
-                    sum.removed.push(format!("{name}: {}{}", if del_files { "server folder" } else { "" }, if del_db { if del_files { " + database" } else { "database" } } else { "" }));
+                    sum.removed.push(format!(
+                        "{name}: {}{}",
+                        if del_files { "server folder" } else { "" },
+                        if del_db {
+                            if del_files {
+                                " + database"
+                            } else {
+                                "database"
+                            }
+                        } else {
+                            ""
+                        }
+                    ));
                 }
                 Err(e) => {
-                    sum.failed.push(format!("{name}: {e}"));
-                    say(&format!("  FAILED: {e}"));
+                    sum.failed.push(format!("{name}: {}", e.one_line()));
+                    say(&format!("  FAILED: {}", e.one_line()));
                 }
             }
         } else if ask.ask(&format!("Forget '{name}' in the Kora server list? (its folder and database stay)"), true) {
@@ -206,7 +247,7 @@ pub fn run(
             sum.kept.push(format!("{name}: left in the server list"));
         }
         if let Err(e) = save(reg) {
-            sum.failed.push(format!("{name}: cannot write the server list: {e}"));
+            sum.failed.push(format!("{name}: cannot write the server list: {}", e.one_line()));
         }
     }
     sum
@@ -260,8 +301,8 @@ pub fn mariadb_cleanup(
             say("  done: removed the MariaDB server Kora installed");
         }
         Err(e) => {
-            sum.failed.push(format!("MariaDB: {e}"));
-            say(&format!("  FAILED: {e}"));
+            sum.failed.push(format!("MariaDB: {}", e.one_line()));
+            say(&format!("  FAILED: {}", e.one_line()));
         }
     }
 }
@@ -284,6 +325,8 @@ mod tests {
 
     fn request(name: &str, dir: &Path) -> InstallRequest {
         InstallRequest {
+            source: None,
+            versions: None,
             mode: Mode::Production,
             name: name.into(),
             dir: dir.to_path_buf(),
@@ -304,6 +347,7 @@ mod tests {
             dry_run: false,
             db_admin: None,
             start: false,
+            container: None,
             app: None,
         }
     }
@@ -316,7 +360,7 @@ mod tests {
         std::fs::write(dir.join("precious.txt"), b"keep me").unwrap();
         std::fs::write(dir.join(".kora/request.json"), serde_json::to_vec(&request(name, &dir)).unwrap()).unwrap();
         std::fs::write(dir.join(".kora/created.json"), serde_json::to_vec(c).unwrap()).unwrap();
-        ServerEntry { name: name.into(), dir, mode: Mode::Production, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 0 }
+        ServerEntry { source: None, versions: None, name: name.into(), dir, mode: Mode::Production, ports: PortsRecord { game: 30120, txadmin: 40120 }, created_unix: 0 }
     }
 
     const BIN: &str = "/opt/kora/0.1.0-0123456789ab/kora";
@@ -364,11 +408,18 @@ mod tests {
         let mut del = vec![];
         let (sum, rig) = go(&mut reg, &Options { dry_run: true, ..Default::default() }, true, &r, &mut Defaults, &mut del);
         let text = rig.out.join("\n");
-        for want in ["Stop and remove the background service kora-alpha", "systemctl disable kora-alpha", "userdel kora-alpha", "Delete the root-owned copy", "KEEP the server folder and database"] {
+        for want in [
+            "Stop and remove the background service kora-alpha",
+            "systemctl disable kora-alpha",
+            "userdel kora-alpha",
+            "Delete the root-owned copy",
+            "Remove the scheduled-backup job",
+            "KEEP the server folder and database",
+        ] {
             assert!(text.contains(want), "missing {want:?} in:\n{text}");
         }
-        // the only commands run were the read-only `id -u`
-        assert!(r.calls().iter().all(|c| c.starts_with("id -u")), "{:?}", r.calls());
+        // the only commands run were the read-only `id -u` and the look for the backup job's timer file
+        assert!(r.calls().iter().all(|c| c.starts_with("id -u") || c.starts_with("cat /etc/systemd/system/kora-backup-")), "{:?}", r.calls());
         assert!(sum.removed.is_empty() && del.is_empty() && reg.servers.len() == 1 && rig.saved == 0);
     }
 
@@ -483,7 +534,7 @@ mod tests {
         let dir = t.path().join("stranger");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("x"), b"x").unwrap();
-        let entry = ServerEntry { name: "stranger".into(), dir: dir.clone(), mode: Mode::Production, ports: PortsRecord { game: 1, txadmin: 2 }, created_unix: 0 };
+        let entry = ServerEntry { source: None, versions: None, name: "stranger".into(), dir: dir.clone(), mode: Mode::Production, ports: PortsRecord { game: 1, txadmin: 2 }, created_unix: 0 };
         let mut reg = Registry { servers: vec![entry] };
         let r = FakeRunner::default();
         let mut del = vec![];
@@ -526,7 +577,13 @@ mod tests {
     }
 
     fn rec() -> super::super::windows_db::Record {
-        super::super::windows_db::Record { service: "KoraMariaDB_ab12".into(), version: "11.4.13".into(), port: 3307, root: PathBuf::from("C:\\PD\\Kora\\mariadb\\11.4.13"), client: PathBuf::from("c.exe") }
+        super::super::windows_db::Record {
+            service: "KoraMariaDB_ab12".into(),
+            version: "11.4.13".into(),
+            port: 3307,
+            root: PathBuf::from("C:\\PD\\Kora\\mariadb\\11.4.13"),
+            client: PathBuf::from("c.exe"),
+        }
     }
 
     #[test]
@@ -538,7 +595,19 @@ mod tests {
         let run = |opts: Options, admin: bool, ans: bool| {
             let mut sum = Summary::default();
             let mut said = Vec::new();
-            mariadb_cleanup(&reg, &opts, admin, Some((rec(), base.clone())), &mut Script(vec![("Remove the MariaDB", ans)], vec![]), &mut |s| said.push(s.to_string()), &mut |r, _| { removed.borrow_mut().push(r.service.clone()); Ok(()) }, &mut sum);
+            mariadb_cleanup(
+                &reg,
+                &opts,
+                admin,
+                Some((rec(), base.clone())),
+                &mut Script(vec![("Remove the MariaDB", ans)], vec![]),
+                &mut |s| said.push(s.to_string()),
+                &mut |r, _| {
+                    removed.borrow_mut().push(r.service.clone());
+                    Ok(())
+                },
+                &mut sum,
+            );
             sum
         };
         let s = run(Options::default(), true, true);
@@ -564,7 +633,16 @@ mod tests {
         std::fs::write(e.dir.join(".kora/db-provision.json"), b"{}").unwrap();
         let reg = Registry { servers: vec![e] };
         let mut sum = Summary::default();
-        mariadb_cleanup(&reg, &Options { delete_databases: true, ..Options::default() }, true, Some((rec(), t.path().to_path_buf())), &mut Defaults, &mut |_| {}, &mut |_, _| panic!("must not remove"), &mut sum);
+        mariadb_cleanup(
+            &reg,
+            &Options { delete_databases: true, ..Options::default() },
+            true,
+            Some((rec(), t.path().to_path_buf())),
+            &mut Defaults,
+            &mut |_| {},
+            &mut |_, _| panic!("must not remove"),
+            &mut sum,
+        );
         assert!(sum.removed.is_empty() && sum.kept.iter().any(|k| k.contains("in use")));
     }
 }

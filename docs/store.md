@@ -1,0 +1,163 @@
+# Kora's data file (the store)
+
+From version 0.8 Kora keeps everything it remembers about itself in **one database file** in the Kora folder:
+
+| | |
+|---|---|
+| Linux | `~/.kora/store/kora.db` (or `$KORA_HOME/store/kora.db`) |
+| Windows | `%LOCALAPPDATA%\Kora\store\kora.db` |
+
+It is a SQLite database (bundled with Kora: nothing to install). It replaces the small JSON files that were each rewritten whole, so the
+panel and a `kora` command running at the same moment can no longer overwrite each other's change.
+
+## What is in it, and what stays a file
+
+**In the data file:** the server list (was `servers.json`), the saved licence keys (`secrets.json`), what Kora remembers about you
+(`profile.json`), the answers of an install that stopped (`last-install.json`, `paused-installs/`), remote-access settings and users
+(`panel.json`), the nodes (`hub.json`), the **job history** (new: it survives a restart) and the **audit log** (new).
+
+**Still files**, on purpose:
+
+- everything the game server or you read directly: each server's `server.cfg`, `secrets.cfg`, txAdmin's files, logs, the downloaded
+  tools and caches (`update-check.json`, `forks-cache.json`, `org-cache.json`: they can be thrown away);
+- everything inside a server folder: `kora-server.json` (read by tools outside Kora), `.kora/` (the install's plan state, the update
+  schedule, alert settings, paid-asset records, the **update lock**, which must stay a lock file). They travel with the folder when
+  you move or copy it, and are written by the privileged side as the server's own account;
+- `%ProgramFiles%\Kora\owners.json` (Windows): it belongs to the privileged side.
+
+## Who can read it
+
+It holds your saved licence keys and the hashes of remote-access tokens, so it is as private as `secrets.json` was:
+
+- the `store` folder and the file are readable by you only: `0700`/`0600` from the moment they are created on Linux (the `-wal` and
+  `-shm` files SQLite makes next to it too); on Windows the folder's inherited permissions are removed and only your account is
+  granted access (the same `icacls` rule `secrets.json` had), so everything SQLite creates in it inherits that;
+- Kora never writes through a link: a link in place of the folder or the file is refused;
+- `sudo kora ...` inside someone else's Kora folder hands every file it creates back to that folder's owner (`lchown`), so you can still open your own data afterwards.
+
+Saved licence keys are **not encrypted in the file** (as before) unless the operating system keeps them (below): the file's privacy
+is the protection. The key values go through one small trait (`kora_core::store::material::KeyMaterial`).
+
+### Saved licence keys in the system keychain (0.8)
+
+Where each key's value lives is chosen per key and shown in Settings > Licence keys and `kora keys keychain status`:
+
+| kept in | what | when |
+|---|---|---|
+| Kora's private file | the `license_key_material` table, as before | no keychain, the keychain is turned off, or it is locked/unreachable when the key is saved |
+| your system keychain | an item in the Secret Service of the desktop (GNOME Keyring, KWallet, KeePassXC), over the user's D-Bus session bus | Linux, with a session bus and an unlocked default collection |
+| Windows (protected for your account) | the value sealed with DPAPI (`CryptProtectData`, this user only), the sealed text kept in the same table | Windows |
+
+Names, order and dates stay in the database either way; `license_key_location` records the place per key (no row: the private file,
+which is every key saved before this version). The choice is automatic and can be turned off: `kora keys keychain off` moves every key
+back into the private file and keeps new ones there; `kora keys keychain on` moves them in again (the Settings button does the same).
+`KORA_KEYCHAIN=off` in the environment disables it for a whole machine.
+
+Rules that keep a key from being lost: a server or background panel with no desktop session simply keeps keys in the private file (Settings
+says "no system keychain on this computer"); a **locked** keyring is never prompted (a background panel has no screen): new keys wait in the
+private file and a key that is in the keyring reads as "locked" until it is unlocked; a **different session** (a background service, SSH,
+another account) that cannot reach the keyring, or an entry the user deleted in their Passwords app, or a DPAPI value from another Windows
+account, is reported as a guided problem naming the key with **Enter it again** (it is never treated as an empty key, never overwritten
+blind, and the install that needs it stops with that problem). The keyring write comes first and the database row second; keyring items are
+only deleted afterwards, for items no key points to, so a rolled-back change leaves at worst an orphan, never a lost key. The installer
+reads the value in the unprivileged panel or CLI process of the person (the privileged side is handed the value in the operation and never
+reads a keychain), and writes it into the server's `secrets.cfg` as before.
+
+**Backups and moving to another computer.** The database file alone does not carry keychain values (and a DPAPI-sealed value cannot be
+opened by another user or on another computer). `kora_core::keystore::export_keys` returns every value whatever its place, which is what
+`kora store export-json` (the way back to Kora 0.7, `secrets.json`) uses; a key that cannot be read from here is left out and named in
+`keys-not-exported.txt` next to it. SEAM for the backup feature: if a backup includes secrets, it must call `export_keys` (and write the
+result protected as that feature decides), and a restore must `KeyStore::add` each key (which puts it wherever the new computer keeps keys).
+
+Threat model: a copy of the Kora folder (a backup, a disk image, another account reading the file) does not contain keys in clear once they
+are in a keychain. It does not protect from malware running as the same user, which can ask the keyring or DPAPI too. On Linux the
+Secret Service session uses the `plain` algorithm: the value crosses the user's own session bus unencrypted.
+
+## The first start of a new version
+
+The first time 0.8 opens the folder, every old JSON file is imported **in one transaction**, the rows are read back and compared with
+what was parsed, and only then are the old files **moved** (not deleted) to `store/before-sqlite/` with their names (and
+`paused-installs/<job>.json`). Before any later change of the data file's format, and before an old file is imported over existing
+data, a consistent copy is made in `store/backups/` (the newest ten are kept).
+
+- A file that cannot be read is **never lost or replaced**. A damaged saved-keys, server-list, remote-access or nodes file stays exactly
+  where it is, the part of Kora that needs it says so in plain words (for keys: "Kora cannot read your saved licence keys ... no key
+  was lost"), everything else works, and fixing the file is enough: it is imported the next time Kora starts. A damaged profile,
+  saved-answers or stopped-install file only saves typing: it is moved to `before-sqlite` and Kora carries on.
+- Importing twice does nothing. If Kora was stopped between the import and the move, the files are just moved next time. Two programs
+  starting at once import once.
+- Old Kora 0.6.x files have the same shape as 0.7's, so both are read.
+- A saved key whose name only differs by case from another (possible in a hand-edited file) is kept as "Name (2)": no key is dropped.
+
+## Going back to an older Kora (downgrade)
+
+An older Kora (0.7 or earlier) does not know the data file and would start with an empty server list. To go back **without losing what you changed
+since upgrading**:
+
+1. With the new Kora still installed run `kora store export-json`. It writes the old-format files (`servers.json`, `secrets.json`,
+   `profile.json`, `last-install.json`, `panel.json`, `hub.json`, `paused-installs/`) into `store/export-json/<time>/` (or the folder
+   you give with `--to`; the files hold your saved licence keys, so they are `0600`).
+2. Install the older Kora.
+3. Copy those files into the Kora folder (`~/.kora`, `%LOCALAPPDATA%\Kora`).
+
+If you already went back without exporting, the files from before the upgrade are in `store/before-sqlite/`: copy them back (you lose
+what changed since). Leave the `store` folder where it is: the older Kora ignores it.
+
+If you later upgrade again, the old-format files that are in the Kora folder are imported again (a file that differs from what was
+imported replaces that part of the store, after a backup), so what the older Kora changed comes with you.
+
+A newer data file meeting an **older** Kora that does know it (a version between) is refused politely ("saved by a newer version of
+Kora ... update Kora"), and nothing is changed.
+
+## Backups of the data file
+
+`kora store backup` makes a consistent copy (SQLite's own `VACUUM INTO`, safe while the panel runs) in `store/backups/`, or where
+`--to` says. It holds your saved licence keys: keep it as private as the original. `kora store status` shows the version, what is in
+the file and the backups. (Backups of servers and their databases are separate and not part of this.)
+
+To restore one: `kora store restore <backup>`. It refuses while Kora Panel is running (or a job of another Kora program is), checks that the
+backup opens, passes SQLite's integrity check and is a version this Kora understands (a newer one is refused), makes a backup
+of the current data file first (`kora-<time>-before-restore.db`, printed, so the restore itself can be undone with another
+`kora store restore`), then swaps the file in and brings an older backup up to date.
+
+## Jobs
+
+Jobs (updates, installs, deletes ...) are written down as they run: the job, its events (the newest 1000), and how it ended. The
+Settings page lists them (also after a restart). A job that was running when Kora Panel was closed or the computer restarted is shown
+as **stopped by a restart**, with what to do. An install that used a **saved** licence key can be carried on ("Carry on" on the install page);
+a pasted key you did not save is kept in memory only, as before, so it must be pasted again. Secrets never enter a job record or its events.
+Finished jobs are kept for 30 days (at most 300).
+
+## The audit log
+
+An append-only record of every change made through the panel (on this computer, or from another device with its sign-in name,
+provider and role) and through `kora` commands: when, which operation, which server, who, and the result (`ok`, `failed`,
+`refused`, or `started` for a slow job, followed by a second row when it ends). No secrets, no request contents. Administrators
+see it in **Settings > Activity log**; on the command line `kora audit [--server S] [--actor A] [--result R] [--days N] [--json]`.
+Entries are kept 365 days (at most 100 000). It is a record for the person who runs Kora, not tamper-proof evidence: anyone who can open
+the (private) data file could change it.
+
+**The administrator service has its own audit log**, separate on purpose (`docs/privileged-service.md`, "Audit"): it records every
+operation the service did or refused for an account (when, which account, what, the result; never a path or a secret) in a file only
+administrators can read or change (`%ProgramFiles%\Kora\data\audit.log`, `/var/log/kora/audit.log` and the journal), because the
+people it audits must not be able to edit it, and the service never opens a person's data file (`store::forbid_in_this_process`,
+`store::peek`). The Activity log here is the person's own record; the Settings card points at the service's file. An administrator reads
+the service's log in a terminal (`kora service` has no command for it yet); showing it in this view would need an administrators-only
+read through the service and is not done.
+
+## Adding to the store (for developers of Kora)
+
+- **A new field on a server entry** needs no migration: the server list is stored as JSON per server. Add the field to `ServerEntry`
+  with `#[serde(default)]` (see its doc comment). Records written before it still read; a field a newer Kora added survives an older Kora saving the list.
+- **A new small state file in the Kora home** (like `reach-consent.json`): add a line to `EXTRA_HOME_FILES` in `store/legacy.rs` and read/write it
+  through `store::documents` (`get`, `put`, `update` = read-modify-write in one transaction). The file is imported once, checked, and moved to `before-sqlite/`.
+- **State inside a server folder** stays a file (see above).
+- **A new table or column** is a new numbered migration in `store/schema.rs`; never edit a released one.
+
+## For developers
+
+Code: `crates/kora-core/src/store/` (`mod.rs` open/migrate, `schema.rs` the numbered migrations, `privacy.rs`, `legacy.rs` the
+import, `backup.rs`, `export.rs`, `jobs.rs`, `audit.rs`, `material.rs`). Rules: migrations only go forward and are never edited once
+released (add a new one); every change is one `BEGIN IMMEDIATE` transaction; read-modify-write belongs inside it
+(`Registry::update`, `RemoteConfig::update_at`). Tests: `crates/kora-core/tests/store_processes.rs` runs several processes at once and
+kills one mid-write; `store/legacy/tests.rs` imports v0.7-shaped homes.

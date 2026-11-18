@@ -10,7 +10,7 @@ export function Field({ label, hint, error, children }: { label: string; hint?: 
       <Label htmlFor={id}>{label}</Label>
       {cloneElement(children, { id, 'aria-describedby': describedBy, 'aria-invalid': error ? true : undefined })}
       {hint && <p id={`${id}-hint`} className="text-xs text-muted-foreground">{hint}</p>}
-      {error && <p id={`${id}-err`} role="alert" className="text-xs text-destructive">{error}</p>}
+      {error && <p id={`${id}-err`} role="alert" className="text-xs text-danger-text">{error}</p>}
     </div>
   )
 }

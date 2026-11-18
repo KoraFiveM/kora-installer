@@ -38,20 +38,13 @@ fn content_type(path: &str) -> &'static str {
 }
 
 fn find(path: &str) -> Option<&'static [u8]> {
-    embedded::FILES
-        .iter()
-        .find(|(p, _)| *p == path)
-        .map(|(_, b)| *b)
+    embedded::FILES.iter().find(|(p, _)| *p == path).map(|(_, b)| *b)
 }
 
 fn respond(path: &str, body: &'static [u8], cache: &'static str) -> Response {
     let mut r = (StatusCode::OK, body).into_response();
-    r.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static(content_type(path)),
-    );
-    r.headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
+    r.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type(path)));
+    r.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
     r
 }
 
@@ -60,11 +53,7 @@ pub fn serve(uri_path: &str) -> Response {
     let rel = uri_path.trim_start_matches('/');
     if !rel.is_empty() && !rel.split('/').any(|s| s == ".." || s.is_empty()) {
         if let Some(b) = find(rel) {
-            let cache = if rel.starts_with("assets/") {
-                "public, max-age=31536000, immutable"
-            } else {
-                "no-cache"
-            };
+            let cache = if rel.starts_with("assets/") { "public, max-age=31536000, immutable" } else { "no-cache" };
             return respond(rel, b, cache);
         }
         // A missing file under /assets/ is a real 404, not the SPA shell.

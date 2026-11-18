@@ -54,27 +54,16 @@ impl Section {
 impl Catalog {
     /// Resources of a section a server of this mode may see, in install order.
     pub fn section(&self, s: Section, dev: bool) -> Vec<&Resource> {
-        self.offered_install_order(dev)
-            .into_iter()
-            .filter(|r| s.holds(r))
-            .collect()
+        self.offered_install_order(dev).into_iter().filter(|r| s.holds(r)).collect()
     }
 
     /// Creators that have at least one resource this mode may see, in catalog order.
     pub fn creators_with_resources(&self, dev: bool) -> Vec<&Creator> {
-        self.creators
-            .iter()
-            .filter(|c| !self.creator_resources(&c.id, dev).is_empty())
-            .collect()
+        self.creators.iter().filter(|c| !self.creator_resources(&c.id, dev).is_empty()).collect()
     }
 
     pub fn creator_resources(&self, creator: &str, dev: bool) -> Vec<&Resource> {
-        self.offered_install_order(dev)
-            .into_iter()
-            .filter(|r| {
-                r.res_type == Some(ResType::Creator) && r.creator.as_deref() == Some(creator)
-            })
-            .collect()
+        self.offered_install_order(dev).into_iter().filter(|r| r.res_type == Some(ResType::Creator) && r.creator.as_deref() == Some(creator)).collect()
     }
 }
 
@@ -105,22 +94,12 @@ pub struct Picker<'a> {
 impl<'a> Picker<'a> {
     /// `dev` = the server is a development server (see [`Resource::offered_to`]).
     pub fn new(cat: &'a Catalog, installed: impl IntoIterator<Item = String>, dev: bool) -> Self {
-        Self {
-            cat,
-            picked: BTreeSet::new(),
-            installed: installed.into_iter().map(|i| normalize_id(&i)).collect(),
-            dev,
-        }
+        Self { cat, picked: BTreeSet::new(), installed: installed.into_iter().map(|i| normalize_id(&i)).collect(), dev }
     }
 
     /// Start from explicit ids (e.g. the list a website code returned). Unknown, internal, or
     /// development-only ids (on a production server) are an error.
-    pub fn with_ids(
-        cat: &'a Catalog,
-        installed: impl IntoIterator<Item = String>,
-        dev: bool,
-        ids: &[String],
-    ) -> Result<Self, PickError> {
+    pub fn with_ids(cat: &'a Catalog, installed: impl IntoIterator<Item = String>, dev: bool, ids: &[String]) -> Result<Self, PickError> {
         let mut p = Self::new(cat, installed, dev);
         for id in ids {
             p.check_pickable(id)?;
@@ -132,10 +111,7 @@ impl<'a> Picker<'a> {
     }
 
     fn check_pickable(&self, id: &str) -> Result<&'a Resource, PickError> {
-        let r = self
-            .cat
-            .find_normalized(id)
-            .ok_or_else(|| PickError::Unknown(id.to_string()))?;
+        let r = self.cat.find_normalized(id).ok_or_else(|| PickError::Unknown(id.to_string()))?;
         if r.is_internal() {
             return Err(PickError::Internal(id.to_string()));
         }
@@ -160,11 +136,7 @@ impl<'a> Picker<'a> {
             .iter()
             .filter(|p| **p != n)
             .filter(|p| self.cat.with_dependencies([(*p).clone()]).contains(&n))
-            .map(|p| {
-                self.cat
-                    .find_normalized(p)
-                    .map_or_else(|| p.clone(), |r| r.id.clone())
-            })
+            .map(|p| self.cat.find_normalized(p).map_or_else(|| p.clone(), |r| r.id.clone()))
             .collect()
     }
 
@@ -183,10 +155,7 @@ impl<'a> Picker<'a> {
         let n = normalize_id(id);
         let by = self.needed_by(id);
         if !by.is_empty() {
-            return Err(PickError::Needed {
-                id: id.to_string(),
-                by,
-            });
+            return Err(PickError::Needed { id: id.to_string(), by });
         }
         if self.picked.remove(&n) {
             Ok(false)
@@ -222,10 +191,7 @@ impl<'a> Picker<'a> {
             let by = self.needed_by(id);
             if !by.is_empty() {
                 self.picked.insert(n);
-                blocked.push(PickError::Needed {
-                    id: (*id).to_string(),
-                    by,
-                });
+                blocked.push(PickError::Needed { id: (*id).to_string(), by });
             }
         }
         blocked
@@ -262,12 +228,7 @@ impl<'a> Picker<'a> {
 
     /// The explicitly picked ids (as written in the catalog), in catalog order.
     pub fn picked_ids(&self) -> Vec<String> {
-        self.cat
-            .resources
-            .iter()
-            .filter(|r| self.picked.contains(&normalize_id(&r.id)))
-            .map(|r| r.id.clone())
-            .collect()
+        self.cat.resources.iter().filter(|r| self.picked.contains(&normalize_id(&r.id))).map(|r| r.id.clone()).collect()
     }
 
     pub fn picked_count(&self) -> usize {
@@ -282,23 +243,14 @@ mod tests {
     fn cat() -> Catalog {
         let rel = r#""versions":[{"version":"1.0.0","tag":"v1.0.0","commit":"0123456789012345678901234567890123456789"}],"latest":"1.0.0""#;
         let r = |id: &str, extra: &str| {
-            let kind = if id == "hidden" {
-                "internal"
-            } else {
-                "optional"
-            };
-            format!(
-                r#"{{"id":"{id}","repository":"https://github.com/o/{id}.git","path":"{id}","group":"other","kind":"{kind}","branch":"main",{rel}{extra}}}"#
-            )
+            let kind = if id == "hidden" { "internal" } else { "optional" };
+            format!(r#"{{"id":"{id}","repository":"https://github.com/o/{id}.git","path":"{id}","group":"other","kind":"{kind}","branch":"main",{rel}{extra}}}"#)
         };
         let json = format!(
             r#"{{"schemaVersion":3,"creators":[{{"id":"acme","name":"Acme"}},{{"id":"empty","name":"Empty"}}],"resources":[{},{},{},{},{}]}}"#,
             r("compat-a", r#","type":"compat""#),
             r("bridge-x", r#","type":"bridge","dependsOn":["compat-a"]"#),
-            r(
-                "acme-one",
-                r#","type":"creator","creator":"acme","dependsOn":["bridge-x"]"#
-            ),
+            r("acme-one", r#","type":"creator","creator":"acme","dependsOn":["bridge-x"]"#),
             r("acme-two", r#","type":"creator","creator":"acme""#),
             r("hidden", r#","type":"creator","creator":"acme""#),
         );
@@ -314,21 +266,9 @@ mod tests {
         let c = cat();
         assert_eq!(ids(c.section(Section::Compat, false)), ["compat-a"]);
         assert_eq!(ids(c.section(Section::Bridges, false)), ["bridge-x"]);
-        assert_eq!(
-            ids(c.creator_resources("acme", false)),
-            ["acme-one", "acme-two"],
-            "internal is hidden"
-        );
-        let cs: Vec<&str> = c
-            .creators_with_resources(false)
-            .iter()
-            .map(|c| c.id.as_str())
-            .collect();
-        assert_eq!(
-            cs,
-            ["acme"],
-            "a creator without public resources is not listed"
-        );
+        assert_eq!(ids(c.creator_resources("acme", false)), ["acme-one", "acme-two"], "internal is hidden");
+        let cs: Vec<&str> = c.creators_with_resources(false).iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(cs, ["acme"], "a creator without public resources is not listed");
     }
 
     #[test]
@@ -354,13 +294,7 @@ mod tests {
         let mut p = Picker::new(&c, [], false);
         p.toggle("acme-one").unwrap();
         let e = p.toggle("bridge-x").unwrap_err();
-        assert_eq!(
-            e,
-            PickError::Needed {
-                id: "bridge-x".into(),
-                by: vec!["acme-one".into()]
-            }
-        );
+        assert_eq!(e, PickError::Needed { id: "bridge-x".into(), by: vec!["acme-one".into()] });
         assert!(p.toggle("compat-a").is_err());
         // picked explicitly too, still blocked while needed
         p.select_all(["bridge-x"]);
@@ -393,10 +327,7 @@ mod tests {
         let c = cat();
         let mut p = Picker::new(&c, ["compat_a".to_string()], false);
         assert!(p.is_checked("compat-a"));
-        assert_eq!(
-            p.toggle("compat-a"),
-            Err(PickError::Installed("compat-a".into()))
-        );
+        assert_eq!(p.toggle("compat-a"), Err(PickError::Installed("compat-a".into())));
         p.toggle("bridge-x").unwrap();
         assert_eq!(ids(p.resolved()), ["bridge-x"]);
     }

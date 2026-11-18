@@ -3,7 +3,9 @@
 //! The engine types keep their on-disk / CLI formats (the catalog is camelCase, skip reasons are
 //! enums); these small functions turn them into the plain JSON the web UI expects.
 
-use serde_json::{json, Value};
+use serde_json::Value;
+
+use super::wire;
 
 use crate::catalog::{Catalog, Resource};
 use crate::service::ScheduleConfig;
@@ -12,43 +14,35 @@ use crate::update::{DeferReason, SkipReason, UpdateReport};
 
 use super::UpdateBadge;
 
-/// The badge as the UI reads it: `{kind, count?}`.
+/// The badge as the UI reads it: `{kind, count?}` ([`wire::Badge`]).
 pub fn badge_json(b: UpdateBadge) -> Value {
-    match b {
-        UpdateBadge::UpToDate => json!({"kind": "up_to_date"}),
-        UpdateBadge::Updates(n) => json!({"kind": "updates", "count": n}),
-        UpdateBadge::NeedsAttention => json!({"kind": "needs_attention"}),
-        UpdateBadge::NewRelease => json!({"kind": "new_release"}),
-    }
+    to_value(&wire::Badge::from(b))
 }
 
-/// A job event for one update progress event.
+fn to_value<T: serde::Serialize>(v: &T) -> Value {
+    serde_json::to_value(v).unwrap_or(Value::Null)
+}
+
+/// A job event for one update progress event ([`wire::UpdateEvent`]).
 pub fn update_event_json(e: &UpdateEvent) -> Value {
-    match e {
-        UpdateEvent::Resource { id, state } => {
-            json!({"type": "resource", "id": id, "state": state})
-        }
-        UpdateEvent::Snapshot(id) => json!({"type": "snapshot", "id": id}),
-        UpdateEvent::Health(m) => json!({"type": "health", "message": m}),
-        UpdateEvent::Progress(m) => json!({"type": "progress", "message": m}),
-        UpdateEvent::Checked { done, total, id } => json!({"type": "checked", "done": done, "total": total, "id": id}),
-        UpdateEvent::Planned(ids) => json!({"type": "planned", "ids": ids}),
-        UpdateEvent::Done => json!({"type": "done"}),
-    }
+    to_value(&match e {
+        UpdateEvent::Resource { id, state } => wire::UpdateEvent::Resource { id: id.clone(), state: state.clone() },
+        UpdateEvent::Snapshot(id) => wire::UpdateEvent::Snapshot { id: id.clone() },
+        UpdateEvent::Health(m) => wire::UpdateEvent::Health { message: m.clone() },
+        UpdateEvent::Progress(m) => wire::UpdateEvent::Progress { message: m.clone() },
+        UpdateEvent::Checked { done, total, id } => wire::UpdateEvent::Checked { done: *done as u32, total: *total as u32, id: id.clone() },
+        UpdateEvent::Planned(ids) => wire::UpdateEvent::Planned { ids: ids.clone() },
+        UpdateEvent::Done => wire::UpdateEvent::Done,
+    })
 }
 
 fn skip_text(r: &SkipReason) -> String {
     match r {
         SkipReason::LocalCommits => "It has changes of your own, so it was left alone.".into(),
         SkipReason::Dirty => "It has files you changed, so it was not touched.".into(),
-        SkipReason::Diverged => {
-            "It has changes of your own and upstream has new ones, so it was not touched.".into()
-        }
+        SkipReason::Diverged => "It has changes of your own and upstream has new ones, so it was not touched.".into(),
         SkipReason::Error(e) => e.clone(),
-        SkipReason::OtherBranch(b) => format!(
-            "It is {}, so it was not updated. Go back to the normal version to update it again.",
-            crate::git::branches::describe_other(b)
-        ),
+        SkipReason::OtherBranch(b) => format!("It is {}, so it was not updated. Go back to the normal version to update it again.", crate::git::branches::describe_other(b)),
     }
 }
 
@@ -61,51 +55,43 @@ fn defer_text(r: &DeferReason) -> String {
     }
 }
 
-/// An update report with reasons as plain text (`[id, text]` pairs), like the UI's `UpdateReport`.
+/// An update report with reasons as plain text (`[id, text]` pairs), like the UI's `UpdateReport` ([`wire::UpdateReport`]).
 pub fn report_json(r: &UpdateReport) -> Value {
-    json!({
-        "server": r.server,
-        "updated": r.updated.iter().map(|u| json!({"id": u.id, "from": u.from, "to": u.to})).collect::<Vec<_>>(),
-        "skipped": r.skipped.iter().map(|(id, why)| json!([id, skip_text(why)])).collect::<Vec<_>>(),
-        "deferred": r.deferred.iter().map(|(id, why)| json!([id, defer_text(why)])).collect::<Vec<_>>(),
-        "rolled_back": r.rolled_back,
-        "sql_flagged": r.sql_flagged,
-        "needs_attention": r.needs_attention,
-        "forks_synced": r.forks_synced,
-        "forks_left_alone": r.forks_left_alone,
-        "not_attempted": r.not_attempted,
-        "held": r.held,
-        "notes": r.notes,
+    to_value(&wire::UpdateReport {
+        server: r.server.clone(),
+        updated: r.updated.iter().map(|u| wire::UpdatedResource { id: u.id.clone(), from: u.from.clone(), to: u.to.clone() }).collect(),
+        skipped: r.skipped.iter().map(|(id, why)| (id.clone(), skip_text(why))).collect(),
+        deferred: r.deferred.iter().map(|(id, why)| (id.clone(), defer_text(why))).collect(),
+        rolled_back: r.rolled_back.clone(),
+        sql_flagged: r.sql_flagged.clone(),
+        needs_attention: r.needs_attention.clone(),
+        forks_synced: r.forks_synced.clone(),
+        forks_left_alone: r.forks_left_alone.clone(),
+        not_attempted: r.not_attempted.clone(),
+        held: r.held.clone(),
+        notes: r.notes.clone(),
     })
 }
 
-fn resource_json(r: &Resource) -> Value {
-    let mut v = json!({
-        "id": r.id,
-        "repository": r.repository,
-        "path": r.path,
-        "group": r.group,
-        "kind": r.kind,
-        "branch": r.branch,
-        "versions": r.versions.iter().map(|x| json!({"version": x.version, "tag": x.tag, "commit": x.commit})).collect::<Vec<_>>(),
-        "depends_on": r.depends_on,
-    });
-    if let Some(t) = &r.title {
-        v["title"] = json!(t);
+fn resource_json(r: &Resource) -> wire::CatalogResource {
+    wire::CatalogResource {
+        id: r.id.clone(),
+        title: r.title.clone(),
+        description: r.description.clone(),
+        repository: r.repository.clone(),
+        path: r.path.clone(),
+        group: r.group,
+        kind: r.kind,
+        branch: r.branch.clone(),
+        latest: r.latest.clone(),
+        versions: r.versions.iter().map(|x| wire::CatalogRelease { version: x.version.clone(), tag: x.tag.clone(), commit: x.commit.clone() }).collect(),
+        depends_on: r.depends_on.clone(),
+        creator: r.creator.clone(),
+        dev_only: r.dev_only.then_some(true),
     }
-    if let Some(l) = &r.latest {
-        v["latest"] = json!(l);
-    }
-    if let Some(c) = &r.creator {
-        v["creator"] = json!(c);
-    }
-    if r.dev_only {
-        v["dev_only"] = json!(true);
-    }
-    v
 }
 
-/// The catalog in the UI's snake_case shape. With `dev = Some(is_development)` only the
+/// The catalog in the UI's snake_case shape ([`wire::Catalog`]). With `dev = Some(is_development)` only the
 /// resources that kind of server may be offered are kept (no internal ones); `None` keeps them all
 /// (the install wizard reads the whole catalog).
 pub fn catalog_json(c: &Catalog, dev: Option<bool>) -> Value {
@@ -113,20 +99,12 @@ pub fn catalog_json(c: &Catalog, dev: Option<bool>) -> Value {
         Some(d) => r.offered_to(d),
         None => true,
     };
-    json!({
-        "schema_version": c.schema_version,
-        "resources": c.resources.iter().filter(keep).map(resource_json).collect::<Vec<_>>(),
-        "creators": c.creators,
-    })
+    to_value(&wire::Catalog { schema_version: c.schema_version, resources: c.resources.iter().filter(keep).map(resource_json).collect(), creators: c.creators.clone() })
 }
 
 /// What the UI shows for a schedule: the config, a sentence about it, and the "run as" help.
 pub fn schedule_state_json(cfg: Option<&ScheduleConfig>) -> Value {
-    json!({
-        "schedule": cfg,
-        "description": cfg.map(crate::service::describe),
-        "run_as_help": crate::service::RUN_AS_HELP,
-    })
+    to_value(&wire::ScheduleState { schedule: cfg.cloned(), description: cfg.map(crate::service::describe), run_as_help: crate::service::RUN_AS_HELP.to_string() })
 }
 
 #[cfg(test)]
@@ -135,16 +113,21 @@ mod tests {
 
     #[test]
     fn report_reasons_become_text() {
-        let r = UpdateReport {
-            server: "s".into(),
-            skipped: vec![("a".into(), SkipReason::Dirty)],
-            deferred: vec![("b".into(), DeferReason::PlayersOnline(2))],
-            ..UpdateReport::default()
-        };
+        let r = UpdateReport { server: "s".into(), skipped: vec![("a".into(), SkipReason::Dirty)], deferred: vec![("b".into(), DeferReason::PlayersOnline(2))], ..UpdateReport::default() };
         let v = report_json(&r);
         assert_eq!(v["skipped"][0][0], "a");
         assert!(v["skipped"][0][1].is_string());
         assert_eq!(v["deferred"][0][1], "2 players are online.");
+    }
+
+    /// The pickers show a sentence under each name; the catalog file has it, so the API must send it
+    /// (the panel's TypeScript always declared `description`, the answer used to leave it out).
+    #[test]
+    fn catalog_carries_each_resources_description() {
+        let c = Catalog::embedded().unwrap();
+        let v = catalog_json(&c, None);
+        let with: Vec<&Value> = v["resources"].as_array().unwrap().iter().filter(|r| r["description"].is_string()).collect();
+        assert!(!with.is_empty(), "the bundled catalog has descriptions, none came through");
     }
 
     #[test]
@@ -154,8 +137,6 @@ mod tests {
         assert!(v["schema_version"].is_number());
         let list = v["resources"].as_array().unwrap();
         assert!(!list.is_empty());
-        assert!(list.iter().all(|r| r["kind"] != "internal"
-            && r.get("dependsOn").is_none()
-            && r["depends_on"].is_array()));
+        assert!(list.iter().all(|r| r["kind"] != "internal" && r.get("dependsOn").is_none() && r["depends_on"].is_array()));
     }
 }

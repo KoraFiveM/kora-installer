@@ -11,15 +11,42 @@ build = "build.rs"
 [dependencies]
 axum = { version = "0.7", default-features = false, features = ["http1", "json", "tokio", "query"] }
 getrandom = "0.4.3"
+# The txAdmin gateway (src/txgate): an HTTP client connection and upgrades. All three are already in the
+# dependency tree through axum, so nothing new is downloaded or audited.
+http-body-util = "0.1"
+hyper = { version = "1", default-features = false, features = ["client", "http1", "server"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio", "service"] }
+tower-service = "0.3"
+# HTTPS for the panel (src/tls): rustls with the `ring` provider (already in the tree through ureq; no aws-lc,
+# no OpenSSL, no C compiler needed beyond what `ring` already asks for), a local CA and certificate made with rcgen,
+# and x509-parser to read what a person-supplied certificate says (names, expiry).
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring", "x509-parser"] }
+time = "0.3"
+x509-parser = "0.18"
+# Remote sign-in (src/remote/auth): passkeys through webauthn-rs 0.6 (pure Rust on RustCrypto via `crypto-glue`: no OpenSSL
+# and no system library, so the Windows and static Linux builds are unaffected; MPL-2.0, see deny.toml), password hashing with
+# argon2 (RustCrypto), one-time codes from hmac + sha1 (RustCrypto, RFC 6238), QR codes from `qrcode` for the enrolment screen.
+webauthn-rs = "0.6"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+argon2 = "0.5"
+hmac = "0.13"
+sha1 = "0.11"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 sha2 = "0.11.1"
 kora-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "io-util"] }
 tokio-stream = { version = "0.1", default-features = false }
 
 [dev-dependencies]
-kora-core = { workspace = true, features = ["fake"] }
+kora-core = { workspace = true, features = ["fake", "ts"] }
 tower = { version = "0.5", default-features = false, features = ["util"] }
 tempfile.workspace = true
+# A software passkey, so the sign-in ceremonies are tested end to end (same RustCrypto stack: no OpenSSL).
+webauthn-authenticator-rs = { version = "0.6", default-features = false, features = ["softpasskey"] }
+zip = { version = "9.5.1", default-features = false, features = ["deflate"] }

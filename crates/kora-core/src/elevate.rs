@@ -8,7 +8,7 @@
 use std::ffi::{OsStr, OsString};
 
 use crate::db;
-use crate::installer::{DbChoice, InstallRequest, Mode};
+use crate::installer::{DbChoice, InstallRequest, Versions};
 
 /// Set in the elevated copy so it can wait for a key before its console window closes.
 pub const RELAUNCHED_ENV: &str = "KORA_RELAUNCHED";
@@ -82,27 +82,15 @@ pub fn admin_reasons_with(req: &InstallRequest, windows: bool, db_missing: bool,
         v.push("create the new database in Kora's own database server (its administrator login is kept for administrators only)".to_string());
     }
     if db_missing {
-        v.push(if windows {
-            "install the database server (MariaDB) as a Windows service".to_string()
-        } else {
-            "install the database server (MariaDB)".to_string()
-        });
+        v.push(if windows { "install the database server (MariaDB) as a Windows service".to_string() } else { "install the database server (MariaDB)".to_string() });
     }
     if req.service {
-        v.push(if windows {
-            "register the server as a Windows service".to_string()
-        } else {
-            "register the server as a system service (systemd)".to_string()
-        });
+        v.push(if windows { "register the server as a Windows service".to_string() } else { "register the server as a system service (systemd)".to_string() });
     }
     if req.firewall {
-        v.push(if req.txadmin_public {
-            "open the game and txAdmin ports in the firewall".to_string()
-        } else {
-            "open the game port in the firewall".to_string()
-        });
+        v.push(if req.txadmin_public { "open the game and txAdmin ports in the firewall".to_string() } else { "open the game port in the firewall".to_string() });
     }
-    if req.service && req.mode == Mode::Development {
+    if req.service && req.versions() == Versions::Latest {
         v.push("set up the daily automatic update task".to_string());
     }
     v
@@ -279,13 +267,19 @@ impl Elevator for SystemElevator {
 /// What kind of command is being run (drives the Windows "always elevated" rule).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CmdKind {
-    Install { dry_run: bool },
+    Install {
+        dry_run: bool,
+    },
     Delete,
-    Uninstall { dry_run: bool },
+    Uninstall {
+        dry_run: bool,
+    },
     Start,
     Stop,
     Restart,
-    Update { auto: bool },
+    Update {
+        auto: bool,
+    },
     Status,
     /// `--version`, `--help`, the Windows service host, anything read-only.
     Other,
@@ -384,8 +378,36 @@ pub fn ensure_elevated(need: &Need, args: &[OsString], elevator: &dyn Elevator, 
 
 /// Keep the console window open until a key is pressed? (Windows only: a window that Kora's
 /// own relaunch or a double-click created closes the moment the program ends.)
-pub fn should_pause(windows: bool, owns_console: bool, relaunched: bool, stdin_tty: bool, stdout_tty: bool) -> bool {
-    windows && stdin_tty && stdout_tty && (owns_console || relaunched)
+///
+/// Never when `no_desktop`: in session 0 (services, scheduled jobs) or for a command an installer runs (the MSI's custom
+/// actions get a console of their own that nobody can see, also in the person's session), so "Press Enter" would wait for ever (the installer hung on it).
+pub fn should_pause(windows: bool, owns_console: bool, relaunched: bool, stdin_tty: bool, stdout_tty: bool, no_desktop: bool) -> bool {
+    windows && !no_desktop && stdin_tty && stdout_tty && (owns_console || relaunched)
+}
+
+/// Is nobody looking at this process's window? Session 0, or a command that installers run (`automated`) unless Kora
+/// relaunched it itself in a window for a person.
+pub fn unattended(session_zero: bool, automated_command: bool, relaunched: bool) -> bool {
+    session_zero || (automated_command && !relaunched)
+}
+
+/// True when this process runs in Windows session 0: no person is looking at its window.
+#[cfg(windows)]
+pub fn in_session_zero() -> bool {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn ProcessIdToSessionId(process_id: u32, session_id: *mut u32) -> i32;
+        fn GetCurrentProcessId() -> u32;
+    }
+    let mut session = u32::MAX;
+    // SAFETY: `session` is a valid out pointer; the call only reads the process table.
+    let ok = unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut session) };
+    ok != 0 && session == 0
+}
+
+#[cfg(not(windows))]
+pub fn in_session_zero() -> bool {
+    false
 }
 
 /// True when this process is the only one attached to its console (double-click, or our elevated copy).
@@ -434,11 +456,15 @@ pub fn not_elevated_db_message(version: &str, folder: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(unused_imports)]
+    use crate::installer::Mode;
     use crate::installer::{Ports, ResourceSelection};
     use std::cell::{Cell, RefCell};
 
     fn req() -> InstallRequest {
         InstallRequest {
+            source: None,
+            versions: None,
             mode: Mode::Production,
             name: "s".into(),
             dir: "d".into(),
@@ -459,6 +485,7 @@ mod tests {
             dry_run: false,
             db_admin: None,
             start: false,
+            container: None,
             app: None,
         }
     }
@@ -527,12 +554,11 @@ mod tests {
 
     #[test]
     fn quoted_arguments_round_trip() {
-        let args: Vec<OsString> = [
-            "install", "--name", "My \"Best\" Server", "--dir", "C:\\Users\\Jo Smith\\kora\\", "--license-key", "a&b|c^d%PATH%", "--x", "", "ünï 日本語 🎮", "back\\\\slash", "end\\\\", "q\\\"x",
-        ]
-        .iter()
-        .map(OsString::from)
-        .collect();
+        let args: Vec<OsString> =
+            ["install", "--name", "My \"Best\" Server", "--dir", "C:\\Users\\Jo Smith\\kora\\", "--license-key", "a&b|c^d%PATH%", "--x", "", "ünï 日本語 🎮", "back\\\\slash", "end\\\\", "q\\\"x"]
+                .iter()
+                .map(OsString::from)
+                .collect();
         let line = join_windows_args(&args);
         let back = parse(&line);
         let want: Vec<String> = args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
@@ -732,10 +758,7 @@ mod tests {
             }
         }
         let privileged: Vec<CmdKind> = ALL.into_iter().filter(|k| k.privileged()).collect();
-        assert_eq!(
-            privileged,
-            [CmdKind::Install { dry_run: false }, CmdKind::Delete, CmdKind::Uninstall { dry_run: false }, CmdKind::Start, CmdKind::Update { auto: false }]
-        );
+        assert_eq!(privileged, [CmdKind::Install { dry_run: false }, CmdKind::Delete, CmdKind::Uninstall { dry_run: false }, CmdKind::Start, CmdKind::Update { auto: false }]);
         assert!(CmdKind::Stop.privileged() && CmdKind::Restart.privileged());
         assert!(!CmdKind::Status.privileged() && !CmdKind::Other.privileged(), "--version/--help/status stay unelevated");
     }
@@ -756,12 +779,17 @@ mod tests {
     #[test]
     fn pause_only_for_windows_consoles_that_would_close() {
         // (windows, owns_console, relaunched, stdin_tty, stdout_tty)
-        assert!(should_pause(true, true, false, true, true), "double-click");
-        assert!(should_pause(true, false, true, true, true), "our elevated copy");
-        assert!(!should_pause(true, false, false, true, true), "ran from an open terminal");
-        assert!(!should_pause(true, true, true, false, true), "no stdin: scheduler/CI, never block");
-        assert!(!should_pause(true, true, true, true, false), "output piped");
-        assert!(!should_pause(false, true, true, true, true), "not Windows");
+        assert!(should_pause(true, true, false, true, true, false), "double-click");
+        assert!(should_pause(true, false, true, true, true, false), "our elevated copy");
+        assert!(!should_pause(true, false, false, true, true, false), "ran from an open terminal");
+        assert!(!should_pause(true, true, true, false, true, false), "no stdin: scheduler/CI, never block");
+        assert!(!should_pause(true, true, true, true, false, false), "output piped");
+        assert!(!should_pause(false, true, true, true, true, false), "not Windows");
+        assert!(unattended(true, false, false), "session 0");
+        assert!(unattended(false, true, false), "an installer's `kora service ...`");
+        assert!(!unattended(false, true, true), "our own elevated window for a person keeps its output");
+        assert!(!unattended(false, false, false), "an ordinary run");
+        assert!(!should_pause(true, true, true, true, true, true), "session 0 (the installer's actions, services): nobody can press Enter");
     }
 
     #[test]

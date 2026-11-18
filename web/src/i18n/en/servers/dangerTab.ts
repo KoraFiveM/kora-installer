@@ -1,0 +1,40 @@
+import { register } from '../../index'
+
+const messages = {
+  'servers.dangerTab.removeFromList': 'Remove from list',
+  'servers.dangerTab.addedServerFromExisting': 'You added this server from an existing folder. Kora will stop managing it, but your files and database are not touched.',
+  'servers.dangerTab.removeNameFromList': 'Remove {name} from the list?',
+  'servers.dangerTab.filesStayWhereThey': 'Your files stay where they are.',
+  'servers.dangerTab.deleteServer': 'Delete server',
+  'servers.dangerTab.stopsServerRemovesIts': 'Stops the server, removes its background service and firewall rules, and takes it out of your list. You choose what happens to the files and the database.',
+  'servers.dangerTab.deleteServer2': 'Delete server...',
+  'servers.dangerTab.serverCouldDeleted': 'The server could not be deleted',
+  'servers.dangerTab.databaseLoginNeeded': 'Database login needed',
+  'servers.dangerTab.databaseAdministratorPassword': 'Database administrator password',
+  'servers.dangerTab.usedOnceDeleteDatabase': 'Used once to delete the database. Kora does not store it.',
+  'servers.dangerTab.tryAgainPassword': 'Try again with this password',
+  'servers.dangerTab.keepDatabaseFinish': 'Keep the database and finish',
+  'servers.dangerTab.keepServerFiles': 'Keep the server files?',
+  'servers.dangerTab.keepDatabase': 'Keep the database?',
+  'servers.dangerTab.deleteName': 'Delete {name}',
+  'servers.dangerTab.folderDir': 'The folder is {dir}',
+  'servers.dangerTab.databaseHoldsPlayersCharacters': 'The database holds your players, characters and everything they own.',
+  'servers.dangerTab.cannotUndone': 'This cannot be undone.',
+  'servers.dangerTab.next': 'Next',
+  'servers.dangerTab.serverFiles': 'Server files',
+  'servers.dangerTab.inputNodeKeepFiles': '{input, node} Keep the files',
+  'servers.dangerTab.inputNodeDeleteFiles': '{input, node} Delete the files',
+  'servers.dangerTab.database': 'Database',
+  'servers.dangerTab.inputNodeKeepDatabase': '{input, node} Keep the database',
+  'servers.dangerTab.inputNodeDeleteDatabase': '{input, node} Delete the database',
+  'servers.dangerTab.filesKept': 'Files kept.',
+  'servers.dangerTab.filesDeleted': 'The files will be deleted.',
+  'servers.dangerTab.databaseKept': 'Database kept.',
+  'servers.dangerTab.databaseDeleted': 'The database will be deleted.',
+  'servers.dangerTab.typeNameConfirm': 'Type {name} to confirm',
+  'servers.dangerTab.deleted': '{name} was deleted.',
+  'servers.dangerTab.removedFromList': '{name} was removed from your list.',
+} as const
+
+register('en', messages)
+export default messages

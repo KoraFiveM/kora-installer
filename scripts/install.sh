@@ -1,7 +1,14 @@
 #!/bin/sh
 # Kora installer bootstrap for Linux: downloads the `kora` program from the newest stable release,
-# checks its SHA-256 and puts it on your PATH. It does not need root and never replaces a file
-# it cannot identify as an earlier kora.
+# checks its SHA-256 and installs it.
+#
+# On a computer where you can use administrator rights it first offers the SYSTEM install (one
+# administrator approval, asked for once): Kora goes into /usr/lib/kora (the .deb on Debian and Ubuntu,
+# the same layout elsewhere) together with Kora's small administrator service, so installing servers,
+# firewall rules and databases later needs no password and no terminal. Answer no (or have no sudo)
+# and it installs just for you instead (~/.local/bin, no administrator rights; the parts of a server
+# that need them are then "continue without" or a command to run). It never replaces a file it cannot
+# identify as an earlier kora.
 #
 # It also makes a launcher in your applications menu (yours only, desktop sessions only) that opens
 # Kora Panel in your browser.
@@ -18,7 +25,10 @@
 #                      Default: the newest stable release (not a pre-release, not a draft).
 #   KORA_PRERELEASE=1  without KORA_VERSION: take the newest release even if it is a pre-release.
 #   KORA_RELEASE_BASE  where the release files live. Must be https:// (http:// only for localhost).
-#   KORA_INSTALL_DIR   target folder. Default: /usr/local/bin as root, else ~/.local/bin.
+#   KORA_SYSTEM        1: do the system install (fail if it cannot); 0: never, install just for you; unset: ask
+#                      when someone can answer, and only when KORA_INSTALL_DIR is not set.
+#   KORA_INSTALL_DIR   target folder (a per-user install: no system install is offered). Default:
+#                      /usr/local/bin as root, else ~/.local/bin.
 #   KORA_FORCE=1       replace an existing file at the target even if it is not a kora program.
 #   KORA_NO_LAUNCH=1   only install the program: do not start Kora Panel or open a browser.
 #   KORA_NO_SHORTCUTS=1   do not make the applications-menu launcher.
@@ -176,6 +186,55 @@ main() {
   ACTUAL="$(hash_of "$TMP/kora")"
   [ "$ACTUAL" = "$EXPECTED" ] || die "the download is corrupt or has been tampered with (SHA-256 mismatch). Nothing was installed."
   say "Checksum OK ($ACTUAL)."
+
+  # --- the system install first: one administrator approval, then no more prompts --------------
+  # Debian / Ubuntu: the .deb. Other systemd distributions: `kora service install` (the same layout).
+  # Anything that goes wrong falls back to the per-user install below (unless KORA_SYSTEM=1).
+  SYSTEM_MODE="${KORA_SYSTEM:-}"
+  want_system() {
+    [ "$SYSTEM_MODE" = "0" ] && return 1
+    [ "$SYSTEM_MODE" = "1" ] && return 0
+    [ -z "${KORA_INSTALL_DIR:-}" ] || return 1
+    [ -d /run/systemd/system ] || return 1
+    [ "$(id -u)" = "0" ] || command -v sudo >/dev/null 2>&1 || return 1
+    # Ask only when somebody can answer (stdin is the script itself under curl | sh).
+    ( : </dev/tty ) 2>/dev/null || return 1
+    printf 'Install Kora for this whole computer (recommended)?\n  Asks for your password once; after that Kora can set up servers, firewall rules and\n  databases by itself. Answer n to install just for you, without administrator rights. [Y/n] ' >/dev/tty
+    read -r _ans </dev/tty || return 1
+    case "$_ans" in "" | y | Y | yes | YES | Yes) return 0 ;; *) return 1 ;; esac
+  }
+  system_install() {
+    _sudo=""; [ "$(id -u)" = "0" ] || _sudo="sudo"
+    _who="$(id -un)"; [ "$(id -u)" = "0" ] && _who="${SUDO_USER:-}"
+    if command -v dpkg >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+      fetch "$BASE/$ASSET.deb" "$TMP/kora.deb" || { say "Could not download the package $BASE/$ASSET.deb"; return 1; }
+      fetch "$BASE/$ASSET.deb.sha256" "$TMP/kora.deb.sha256" || { say "Could not download the package checksum."; return 1; }
+      _want="$(cut -d ' ' -f 1 "$TMP/kora.deb.sha256" | head -n 1 | tr 'A-F' 'a-f')"
+      [ "$(hash_of "$TMP/kora.deb")" = "$_want" ] || { say "The package does not match its checksum (SHA-256). Nothing was installed."; return 1; }
+      say "Installing the Kora package (it asks for your password once) ..."
+      # dpkg's maintainer script allows the account that ran sudo (SUDO_UID) and KORA_SERVICE_USERS.
+      $_sudo env KORA_SERVICE_USERS="$_who" dpkg -i "$TMP/kora.deb" || return 1
+    else
+      chmod 0755 "$TMP/kora"
+      say "Installing Kora's administrator service (it asks for your password once) ..."
+      if [ -n "$_who" ]; then $_sudo "$TMP/kora" service install --allow "$_who" || return 1; else $_sudo "$TMP/kora" service install || return 1; fi
+    fi
+    [ -x /usr/lib/kora/kora ]
+  }
+  if want_system; then
+    if system_install; then
+      DEST_DIR=/usr/bin; DEST=/usr/bin/kora
+      # A copy from an earlier per-user install would come first on PATH and run an older Kora.
+      if [ "$(id -u)" != "0" ] && [ -f "$HOME/.local/bin/kora" ] && grep -aq 'Kora installer and server manager' "$HOME/.local/bin/kora"; then
+        mv -f "$HOME/.local/bin/kora" "$HOME/.local/bin/kora.previous" && say "Your earlier per-user copy was kept as ~/.local/bin/kora.previous (the system one is used now)."
+      fi
+      say "Kora is installed for this computer, with its administrator service."
+    elif [ "$SYSTEM_MODE" = "1" ]; then
+      die "the system install did not work (KORA_SYSTEM=1, so nothing else was tried). Run it again, or KORA_SYSTEM=0 to install just for you."
+    else
+      say "The system install was not done; installing just for you instead (no administrator rights needed)."
+    fi
+  fi
 
   # --- never overwrite blindly ---------------------------------------------------------------
   BACKUP=""

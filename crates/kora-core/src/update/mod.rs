@@ -79,6 +79,10 @@ pub trait GitOps {
     fn current_branch(&self, _repo: &Path) -> GitResult<Option<String>> {
         Ok(None)
     }
+    /// True for the view a server on released versions uses: resources sit on a commit, so a named branch was put there on purpose.
+    fn pinned_releases(&self) -> bool {
+        false
+    }
     /// Check out `branch` (`"HEAD"` = detach). Used to put a resource back on the branch a snapshot was taken on.
     fn switch_branch(&self, _repo: &Path, _branch: &str) -> GitResult<()> {
         Err(UpdateError::Git("switching branches is not supported here".into()))
@@ -111,11 +115,7 @@ pub trait GitOps {
     /// (never forced), when the user is signed in to gh. Returns one outcome per fork that was
     /// looked at; empty when not possible. `progress(done, total)` is called as forks are looked at.
     /// Default: nothing.
-    fn sync_forks(
-        &self,
-        _targets: &[UpdateTarget],
-        _progress: &mut dyn FnMut(usize, usize),
-    ) -> Vec<(String, crate::git::SyncOutcome)> {
+    fn sync_forks(&self, _targets: &[UpdateTarget], _progress: &mut dyn FnMut(usize, usize)) -> Vec<(String, crate::git::SyncOutcome)> {
         Vec::new()
     }
 }
@@ -260,18 +260,22 @@ pub struct UpdatePlan {
 
 impl UpdatePlan {
     pub fn pending(&self) -> impl Iterator<Item = &PlanItem> {
-        self.items
-            .iter()
-            .filter(|i| matches!(i.action, Action::FastForward | Action::NeedsRestart))
+        self.items.iter().filter(|i| matches!(i.action, Action::FastForward | Action::NeedsRestart))
     }
 }
 
 /// Development: the branch a resource is on when it is not the one updates follow (`upstream/<branch>`); `None` = fine.
+///
+/// Released versions: a resource is checked out on a commit of its own (no branch), so a named branch or a pull request is
+/// always something a person put there on purpose.
 pub(crate) fn off_branch(git: &dyn GitOps, path: &Path, followed: &str) -> Option<String> {
-    let want = followed.strip_prefix("upstream/")?;
-    match git.current_branch(path) {
-        Ok(Some(cur)) if cur != want => Some(cur),
-        _ => None,
+    match followed.strip_prefix("upstream/") {
+        Some(want) => match git.current_branch(path) {
+            Ok(Some(cur)) if cur != want => Some(cur),
+            _ => None,
+        },
+        None if git.pinned_releases() => git.current_branch(path).ok().flatten().filter(|cur| cur != "HEAD"),
+        None => None,
     }
 }
 
@@ -335,13 +339,7 @@ pub fn plan_fetch_with(git: &dyn GitOps, targets: &[UpdateTarget], mode: FetchMo
                 Some((_, e)) => Err(UpdateError::Git(e.trim_start_matches("git error: ").to_string())),
                 None => classify_fetched(git, t),
             }
-            .unwrap_or_else(|e| PlanItem {
-                target: t.clone(),
-                current: String::new(),
-                upstream: String::new(),
-                behind: 0,
-                action: Action::Skipped(SkipReason::Error(e.to_string())),
-            });
+            .unwrap_or_else(|e| PlanItem { target: t.clone(), current: String::new(), upstream: String::new(), behind: 0, action: Action::Skipped(SkipReason::Error(e.to_string())) });
             progress(n + 1, total, &t.id);
             item
         })
@@ -372,10 +370,7 @@ pub struct Snapshot {
 impl Snapshot {
     /// Written atomically (temp file in the same folder, then rename): a reader never sees half a snapshot.
     pub fn save(&self, file: &Path) -> Result<(), UpdateError> {
-        let dir = file
-            .parent()
-            .filter(|d| !d.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
+        let dir = file.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
         // Root (the update timer) writes this into the server folder: never through a planted link.
         let name = file.file_name().map(|n| n.to_os_string()).unwrap_or_else(|| "snapshot".into());
         crate::fsutil::write_no_follow(&dir.join(name), &serde_json::to_vec_pretty(self)?, 0o644)?;
@@ -422,17 +417,8 @@ pub fn list_snapshots(server_dir: &Path) -> Vec<(String, Snapshot)> {
         out.push((id.to_string(), s));
     }
     // Same second: `1700-10` is newer than `1700-9`, so compare the counter as a number.
-    let order = |id: &str| {
-        id.rsplit_once('-')
-            .and_then(|(_, n)| n.parse::<u64>().ok())
-            .unwrap_or(1)
-    };
-    out.sort_by(|(ia, a), (ib, b)| {
-        b.created_unix
-            .cmp(&a.created_unix)
-            .then_with(|| order(ib).cmp(&order(ia)))
-            .then_with(|| ib.cmp(ia))
-    });
+    let order = |id: &str| id.rsplit_once('-').and_then(|(_, n)| n.parse::<u64>().ok()).unwrap_or(1);
+    out.sort_by(|(ia, a), (ib, b)| b.created_unix.cmp(&a.created_unix).then_with(|| order(ib).cmp(&order(ia))).then_with(|| ib.cmp(ia)));
     out
 }
 
@@ -452,10 +438,7 @@ pub fn holds_path(server_dir: &Path) -> PathBuf {
 }
 
 pub fn load_holds(server_dir: &Path) -> std::collections::BTreeMap<String, String> {
-    std::fs::read(holds_path(server_dir))
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+    std::fs::read(holds_path(server_dir)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
 fn save_holds(server_dir: &Path, h: &std::collections::BTreeMap<String, String>) {
@@ -630,9 +613,7 @@ fn short(c: &str) -> &str {
 
 impl UpdateReport {
     pub fn has_problems(&self) -> bool {
-        !self.needs_attention.is_empty()
-            || !self.rolled_back.is_empty()
-            || !self.not_attempted.is_empty()
+        !self.needs_attention.is_empty() || !self.rolled_back.is_empty() || !self.not_attempted.is_empty()
     }
 
     pub fn summary(&self) -> String {
@@ -682,10 +663,7 @@ impl UpdateReport {
     pub fn discord_payload(&self) -> serde_json::Value {
         let color = if !self.rolled_back.is_empty() {
             0xe74c3c
-        } else if !self.needs_attention.is_empty()
-            || !self.not_attempted.is_empty()
-            || !self.held.is_empty()
-        {
+        } else if !self.needs_attention.is_empty() || !self.not_attempted.is_empty() || !self.held.is_empty() {
             0xf39c12
         } else {
             0x2ecc71
@@ -713,10 +691,7 @@ impl UpdateReport {
             fields.as_array_mut().expect("array").push(serde_json::json!({"name": "Held back", "value": list(self.held.iter().map(|(i, m)| format!("{i}: {m}")).collect())}));
         }
         if !self.notes.is_empty() {
-            fields
-                .as_array_mut()
-                .expect("array")
-                .push(serde_json::json!({"name": "Notes", "value": list(self.notes.clone())}));
+            fields.as_array_mut().expect("array").push(serde_json::json!({"name": "Notes", "value": list(self.notes.clone())}));
         }
         serde_json::json!({
             "username": "Kora Updater",
@@ -761,13 +736,7 @@ pub enum RunEvent {
 }
 
 /// Apply a plan: snapshot, fast-forward, health check, auto-rollback on failure.
-pub fn run_update(
-    git: &dyn GitOps,
-    health: &dyn HealthCheck,
-    migrations: &dyn MigrationDetector,
-    plan: &UpdatePlan,
-    opts: &RunOptions,
-) -> Result<UpdateReport, UpdateError> {
+pub fn run_update(git: &dyn GitOps, health: &dyn HealthCheck, migrations: &dyn MigrationDetector, plan: &UpdatePlan, opts: &RunOptions) -> Result<UpdateReport, UpdateError> {
     run_update_with(git, health, migrations, plan, opts, &mut |_| {})
 }
 
@@ -811,10 +780,7 @@ pub fn run_update_with(
     .save(opts.snapshot_file)?;
     events(RunEvent::Snapshotted);
 
-    let sql: Vec<bool> = apply
-        .iter()
-        .map(|i| migrations.has_migrations(&i.target.path, &i.current, &i.upstream))
-        .collect();
+    let sql: Vec<bool> = apply.iter().map(|i| migrations.has_migrations(&i.target.path, &i.current, &i.upstream)).collect();
 
     let mut applied: Vec<usize> = Vec::new();
     let mut failure: Option<(String, String)> = None;
@@ -861,10 +827,7 @@ pub fn run_update_with(
         to_roll = applied.clone();
     } else {
         events(RunEvent::HealthCheck);
-        let req = HealthRequest {
-            full_restart,
-            updated: applied.iter().map(|&n| apply[n].target.id.clone()).collect(),
-        };
+        let req = HealthRequest { full_restart, updated: applied.iter().map(|&n| apply[n].target.id.clone()).collect() };
         if let HealthOutcome::Unhealthy { reason: r, failed } = health.check(&req) {
             reason = if failed.is_empty() { r } else { format!("{r} (failed: {})", failed.join(", ")) };
             to_roll = applied.clone();
@@ -878,9 +841,7 @@ pub fn run_update_with(
         let item = apply[n];
         let id = item.target.id.clone();
         if sql[n] {
-            report
-                .needs_attention
-                .push((id, format!("SQL migration included; not rolled back automatically ({reason})")));
+            report.needs_attention.push((id, format!("SQL migration included; not rolled back automatically ({reason})")));
             continue;
         }
         events(RunEvent::RollingBack(id.clone()));
@@ -896,25 +857,16 @@ pub fn run_update_with(
     // Restart again only if the health check ran: a run that stopped before it never restarted the
     // server, which still runs the old code. The same restart rules as the check apply.
     if let (false, Some(req)) = (rolled_ids.is_empty(), checked) {
-        health.recover(&HealthRequest {
-            full_restart: req.full_restart,
-            updated: rolled_ids,
-        });
+        health.recover(&HealthRequest { full_restart: req.full_restart, updated: rolled_ids });
     }
 
     for &n in &kept {
         let item = apply[n];
-        report.updated.push(Updated {
-            id: item.target.id.clone(),
-            from: item.current.clone(),
-            to: item.upstream.clone(),
-        });
+        report.updated.push(Updated { id: item.target.id.clone(), from: item.current.clone(), to: item.upstream.clone() });
         if sql[n] {
             report.sql_flagged.push(item.target.id.clone());
             if to_roll.is_empty() {
-                report
-                    .needs_attention
-                    .push((item.target.id.clone(), "SQL migration applied; review and run it manually".into()));
+                report.needs_attention.push((item.target.id.clone(), "SQL migration applied; review and run it manually".into()));
             }
         }
     }
@@ -961,9 +913,7 @@ mod tests {
             let mut m = self.0.borrow_mut();
             let r = m.get_mut(p).unwrap();
             if r.ff_breaks {
-                return Err(UpdateError::Git(
-                    "fatal: Unable to create index.lock".into(),
-                ));
+                return Err(UpdateError::Git("fatal: Unable to create index.lock".into()));
             }
             if r.ff_fails {
                 r.ahead = true;
@@ -1014,23 +964,10 @@ mod tests {
     }
 
     fn repo(head: &str, up: &str, behind: u32) -> Repo {
-        Repo {
-            head: head.into(),
-            upstream: up.into(),
-            dirty: false,
-            ahead: false,
-            behind,
-            ff_fails: false,
-            ff_breaks: false,
-        }
+        Repo { head: head.into(), upstream: up.into(), dirty: false, ahead: false, behind, ff_fails: false, ff_breaks: false }
     }
     fn target(id: &str, path: &str) -> UpdateTarget {
-        UpdateTarget {
-            id: id.into(),
-            path: path.into(),
-            upstream_ref: "upstream/dev".into(),
-            class: ResourceClass::from_id(id),
-        }
+        UpdateTarget { id: id.into(), path: path.into(), upstream_ref: "upstream/dev".into(), class: ResourceClass::from_id(id) }
     }
     fn opts<'a>(dir: &'a Path, d: RestartDecision, f: &'a Path) -> RunOptions<'a> {
         let _ = dir;
@@ -1099,10 +1036,7 @@ mod tests {
     fn fork_sync_results_are_listed_without_failing_the_update() {
         use crate::git::SyncOutcome as O;
         let mut r = UpdateReport::default();
-        add_fork_sync(
-            &mut r,
-            vec![("a".into(), O::Synced { commits: 2 }), ("b".into(), O::UpToDate), ("c".into(), O::Ahead { ahead: 1 }), ("d".into(), O::Diverged { ahead: 1, behind: 2 })],
-        );
+        add_fork_sync(&mut r, vec![("a".into(), O::Synced { commits: 2 }), ("b".into(), O::UpToDate), ("c".into(), O::Ahead { ahead: 1 }), ("d".into(), O::Diverged { ahead: 1, behind: 2 })]);
         assert_eq!(r.forks_synced, vec!["a".to_string()]);
         assert_eq!(r.forks_left_alone.len(), 2);
         assert!(!r.has_problems());
@@ -1203,51 +1137,18 @@ mod tests {
     fn a_mid_run_failure_lists_the_rest_as_not_attempted_and_restarts_nothing() {
         let mut bad = repo("b1", "b2", 1);
         bad.ff_breaks = true;
-        let git = FakeGit::new(vec![
-            ("/a", repo("a1", "a2", 1)),
-            ("/b", bad),
-            ("/c", repo("c1", "c2", 1)),
-            ("/d", repo("d1", "d2", 1)),
-        ]);
+        let git = FakeGit::new(vec![("/a", repo("a1", "a2", 1)), ("/b", bad), ("/c", repo("c1", "c2", 1)), ("/d", repo("d1", "d2", 1))]);
         let tmp = tempfile::tempdir().unwrap();
         let snap = tmp.path().join("s.json");
-        let p = plan(
-            &git,
-            &[
-                target("kora-a", "/a"),
-                target("kora-b", "/b"),
-                target("kora-c", "/c"),
-                target("kora-core", "/d"),
-            ],
-        );
+        let p = plan(&git, &[target("kora-a", "/a"), target("kora-b", "/b"), target("kora-c", "/c"), target("kora-core", "/d")]);
         let h = FakeHealth::new(HealthOutcome::Healthy);
-        let r = run_update(
-            &git,
-            &h,
-            &NoMigrations,
-            &p,
-            &opts(tmp.path(), RestartDecision::Proceed, &snap),
-        )
-        .unwrap();
-        assert_eq!(
-            r.not_attempted,
-            vec!["kora-c".to_string(), "kora-core".to_string()]
-        );
+        let r = run_update(&git, &h, &NoMigrations, &p, &opts(tmp.path(), RestartDecision::Proceed, &snap)).unwrap();
+        assert_eq!(r.not_attempted, vec!["kora-c".to_string(), "kora-core".to_string()]);
         assert_eq!(r.rolled_back.len(), 1, "the one that moved goes back");
-        assert_eq!(
-            (git.head("/a"), git.head("/c"), git.head("/d")),
-            ("a1".into(), "c1".into(), "d1".into())
-        );
-        assert!(
-            h.recovered.borrow().is_empty(),
-            "the server was never restarted, so it is not restarted now"
-        );
+        assert_eq!((git.head("/a"), git.head("/c"), git.head("/d")), ("a1".into(), "c1".into(), "d1".into()));
+        assert!(h.recovered.borrow().is_empty(), "the server was never restarted, so it is not restarted now");
         assert!(r.has_problems());
-        assert!(
-            r.summary().contains("not attempted kora-c"),
-            "{}",
-            r.summary()
-        );
+        assert!(r.summary().contains("not attempted kora-c"), "{}", r.summary());
     }
 
     #[test]
@@ -1256,25 +1157,12 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let snap = tmp.path().join("s.json");
         let p = plan(&git, &[target("kora-x", "/o")]);
-        let h = FakeHealth::new(HealthOutcome::Unhealthy {
-            reason: "x".into(),
-            failed: vec![],
-        });
-        let r = run_update(
-            &git,
-            &h,
-            &NoMigrations,
-            &p,
-            &opts(tmp.path(), RestartDecision::Proceed, &snap),
-        )
-        .unwrap();
+        let h = FakeHealth::new(HealthOutcome::Unhealthy { reason: "x".into(), failed: vec![] });
+        let r = run_update(&git, &h, &NoMigrations, &p, &opts(tmp.path(), RestartDecision::Proceed, &snap)).unwrap();
         assert_eq!(r.rolled_back.len(), 1);
         let rec = h.recovered.borrow();
         assert_eq!(rec.len(), 1);
-        assert!(
-            !rec[0].full_restart,
-            "only a live resource changed: no full restart to recover with"
-        );
+        assert!(!rec[0].full_restart, "only a live resource changed: no full restart to recover with");
     }
 
     #[test]
@@ -1283,32 +1171,13 @@ mod tests {
         let d = snapshot_dir(t.path());
         for (i, now) in [5u64, 5, 7, 6].into_iter().enumerate() {
             let id = new_snapshot_id(&d, now);
-            Snapshot {
-                created_unix: now,
-                entries: vec![SnapshotEntry {
-                    id: format!("r{i}"),
-                    path: "/x".into(),
-                    commit: "c".into(),
-                    branch: None,
-                }],
-            }
-            .save(&d.join(format!("{id}.json")))
-            .unwrap();
+            Snapshot { created_unix: now, entries: vec![SnapshotEntry { id: format!("r{i}"), path: "/x".into(), commit: "c".into(), branch: None }] }.save(&d.join(format!("{id}.json"))).unwrap();
         }
-        let ids: Vec<String> = list_snapshots(t.path())
-            .into_iter()
-            .map(|(i, _)| i)
-            .collect();
+        let ids: Vec<String> = list_snapshots(t.path()).into_iter().map(|(i, _)| i).collect();
         assert_eq!(ids, vec!["7", "6", "5-2", "5"]);
-        assert!(std::fs::read_dir(&d)
-            .unwrap()
-            .flatten()
-            .all(|e| !e.file_name().to_string_lossy().ends_with(".tmp")));
+        assert!(std::fs::read_dir(&d).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().ends_with(".tmp")));
         prune_snapshots(t.path(), 2);
-        let ids: Vec<String> = list_snapshots(t.path())
-            .into_iter()
-            .map(|(i, _)| i)
-            .collect();
+        let ids: Vec<String> = list_snapshots(t.path()).into_iter().map(|(i, _)| i).collect();
         assert_eq!(ids, vec!["7", "6"]);
     }
 
@@ -1318,37 +1187,17 @@ mod tests {
         let git = FakeGit::new(vec![("/o", repo("o1", "o2", 1))]);
         let snap = t.path().join("s.json");
         let p = plan(&git, &[target("kora-x", "/o")]);
-        let h = FakeHealth::new(HealthOutcome::Unhealthy {
-            reason: "x".into(),
-            failed: vec![],
-        });
-        let r = run_update(
-            &git,
-            &h,
-            &NoMigrations,
-            &p,
-            &opts(t.path(), RestartDecision::Proceed, &snap),
-        )
-        .unwrap();
+        let h = FakeHealth::new(HealthOutcome::Unhealthy { reason: "x".into(), failed: vec![] });
+        let r = run_update(&git, &h, &NoMigrations, &p, &opts(t.path(), RestartDecision::Proceed, &snap)).unwrap();
         record_holds(t.path(), &p, &r);
-        assert_eq!(
-            load_holds(t.path()).get("kora-x").map(String::as_str),
-            Some("o2")
-        );
+        assert_eq!(load_holds(t.path()).get("kora-x").map(String::as_str), Some("o2"));
         git.0.borrow_mut().get_mut(Path::new("/o")).unwrap().behind = 1;
         // Next night: same target, held, nothing moves.
         let mut p = plan(&git, &[target("kora-x", "/o")]);
-        assert_eq!(
-            apply_holds(t.path(), &mut p),
-            vec![("kora-x".to_string(), "o2".to_string())]
-        );
+        assert_eq!(apply_holds(t.path(), &mut p), vec![("kora-x".to_string(), "o2".to_string())]);
         assert!(p.pending().next().is_none());
         // Upstream moves on: the hold is lifted and the new target is tried.
-        git.0
-            .borrow_mut()
-            .get_mut(Path::new("/o"))
-            .unwrap()
-            .upstream = "o3".into();
+        git.0.borrow_mut().get_mut(Path::new("/o")).unwrap().upstream = "o3".into();
         let mut p = plan(&git, &[target("kora-x", "/o")]);
         assert!(apply_holds(t.path(), &mut p).is_empty());
         assert_eq!(p.pending().count(), 1);

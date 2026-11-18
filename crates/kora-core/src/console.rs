@@ -191,8 +191,7 @@ fn cfg_lines(dir: &Path) -> String {
 
 /// Is the helper resource in place and ensured by `server.cfg`?
 pub fn is_installed(dir: &Path) -> bool {
-    resource_dir(dir).join("server.lua").is_file()
-        && std::fs::read_to_string(dir.join("server.cfg")).is_ok_and(|c| c.lines().any(|l| l.trim() == format!("ensure {RESOURCE}")))
+    resource_dir(dir).join("server.lua").is_file() && std::fs::read_to_string(dir.join("server.cfg")).is_ok_and(|c| c.lines().any(|l| l.trim() == format!("ensure {RESOURCE}")))
 }
 
 /// Add the helper resource and its `server.cfg` lines. `Ok(true)` = something changed (the server needs

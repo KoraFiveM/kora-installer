@@ -40,9 +40,7 @@ impl std::str::FromStr for Role {
             "viewer" => Ok(Role::Viewer),
             "operator" => Ok(Role::Operator),
             "admin" => Ok(Role::Admin),
-            _ => Err(format!(
-                "'{s}' is not a role. Use viewer, operator or admin."
-            )),
+            _ => Err(format!("'{s}' is not a role. Use viewer, operator or admin.")),
         }
     }
 }
@@ -58,6 +56,8 @@ pub fn min_role(op: Op) -> Role {
         | Op::ServersList
         | Op::ServerGet
         | Op::ResourcesList
+        | Op::ResourceGet
+        | Op::ResourceLog
         | Op::BranchesList
         | Op::SnapshotsList
         | Op::CatalogForServer
@@ -71,11 +71,21 @@ pub fn min_role(op: Op) -> Role {
         | Op::AppStatus
         | Op::JobsGet
         | Op::JobEvents
+        // The list only holds the jobs the caller could start (the handler filters).
+        | Op::JobsList
         | Op::Events
         | Op::SessionLogout
         // Monitoring charts are status, like the server list.
         | Op::MetricsGet
-        | Op::AlertsList => Viewer,
+        | Op::AlertsList
+        // Whether outside lookups are allowed is just a yes/no.
+        | Op::ReachSettingsGet
+        | Op::AuthOptions
+        | Op::AuthLogin
+        | Op::AuthEnrol
+        | Op::AuthReauth
+        | Op::AuthAccount
+        | Op::AuthAccountChange => Viewer,
         // Running servers day to day. Logs and the console can hold player names and addresses,
         // so they are operator and above even though they only read.
         Op::ServerControl
@@ -89,6 +99,10 @@ pub fn min_role(op: Op) -> Role {
         // Branch lists, pull request lists and the "who has this branch" check only read (they may ask GitHub).
         | Op::BranchChoices
         | Op::PrList
+        | Op::ResourceChanges
+        | Op::PrView
+        | Op::IssuesList
+        | Op::ResourceReleases
         | Op::BranchBulkPreview
         | Op::UpdatePreview
         | Op::UpdateApply
@@ -109,7 +123,15 @@ pub fn min_role(op: Op) -> Role {
         // one needs an admin (the handler checks that).
         | Op::KeysList
         | Op::ServerKeySet
-        | Op::ProfileGet => Operator,
+        | Op::ProfileGet
+        // The checklist reads the machine and (if allowed) asks the outside services the person chose.
+        | Op::BackupsList
+        | Op::BackupCreate
+        | Op::BackupVerify
+        | Op::BackupPreview
+        | Op::BackupsOverview
+        | Op::SupportSummary
+        | Op::ReachCheck => Operator,
         // Everything that changes the machine, accounts, settings or the panel itself.
         Op::ServerDelete
         | Op::ServerUnregister
@@ -143,6 +165,9 @@ pub fn min_role(op: Op) -> Role {
         | Op::RemoteGet
         | Op::RemoteSet
         | Op::UsersList
+        // Who did what: names of remote users and what they changed.
+        | Op::AuditList
+        | Op::AuditServiceList
         | Op::UserAdd
         | Op::UserRemove
         // Alert settings hold webhook addresses; the node list holds tokens.
@@ -165,6 +190,7 @@ pub fn min_role(op: Op) -> Role {
         | Op::AssetDownloads
         | Op::ToolInstall
         | Op::DbStart
+        | Op::AdminServiceInstall
         // Adding, renaming, replacing and deleting saved licence keys.
         | Op::KeyAdd
         | Op::KeyUpdate
@@ -173,7 +199,46 @@ pub fn min_role(op: Op) -> Role {
         // Moving a resource onto another branch or a pull request changes the code the server runs.
         | Op::BranchSwitch
         | Op::StashRestore
-        | Op::BranchBulkApply => Admin,
+        | Op::BranchBulkApply
+        | Op::ResourceCommit
+        | Op::ResourcePush
+        | Op::ResourceNewBranch
+        | Op::PrComment
+        | Op::PrReview
+        | Op::PrMerge
+        | Op::IssueComment
+        | Op::ResourcesFork
+        | Op::VersionsSet
+
+        // Forwarding a port on the router and opening the firewall change the network around the machine; a
+        // txAdmin ticket opens full control of the game server (it can run code through resources).
+        | Op::ForwardingSet
+        | Op::ReachFirewallOpen
+        | Op::ReachSettingsSet
+        | Op::UserCredentials
+        | Op::UserReset
+        | Op::ApiTokensList
+        | Op::ApiTokenCreate
+        | Op::ApiTokenRevoke
+        | Op::TlsStatus
+        | Op::TlsRenew
+        | Op::TlsCa
+        | Op::KeychainSet
+        | Op::BackupSettingsSet
+        | Op::BackupPrune
+        | Op::BackupUndo
+        | Op::BackupRestore
+        | Op::BackupDelete
+        | Op::BackupDownload
+        | Op::SupportBundlePreview
+        | Op::SupportBundleFile
+        | Op::SupportBundleCreate
+        | Op::SupportBundleDownload
+        | Op::BackupImportUpload
+        | Op::BackupImportInspect
+        | Op::BackupImportStart
+        | Op::BackupsArchived
+        | Op::TxAdminTicket => Admin,
     }
 }
 
@@ -193,8 +258,21 @@ pub fn destructive(op: Op) -> bool {
         | Op::ConsoleSend
         | Op::SelfUpdateApply
         | Op::ScheduleSet
-        | Op::ScheduleRemove => true,
+        | Op::ScheduleRemove
+        | Op::ResourcePush
+        | Op::PrMerge
+
+        // txAdmin is full control of the game server, including running code through resources: as serious as
+        // console input.
+        | Op::BackupSettingsSet
+        | Op::BackupPrune
+        | Op::BackupUndo
+        | Op::BackupRestore
+        | Op::BackupDelete
+        | Op::BackupDownload
+        | Op::TxAdminTicket => true,
         Op::Meta
+        | Op::AdminServiceInstall
         | Op::SessionCreate
         | Op::SystemInfo
         | Op::ServersList
@@ -208,6 +286,7 @@ pub fn destructive(op: Op) -> bool {
         | Op::ConsoleStream
         | Op::ConsoleEnable
         | Op::ResourcesList
+        | Op::ResourceGet
         | Op::ResourceEnsure
         | Op::ResourceControl
         | Op::BranchesList
@@ -216,6 +295,18 @@ pub fn destructive(op: Op) -> bool {
         | Op::StashRestore
         | Op::BranchSwitch
         | Op::BranchBulkApply
+        | Op::ResourceChanges
+        | Op::ResourceLog
+        | Op::ResourceCommit
+        | Op::ResourceNewBranch
+        | Op::PrView
+        | Op::PrComment
+        | Op::PrReview
+        | Op::IssuesList
+        | Op::IssueComment
+        | Op::ResourceReleases
+        | Op::ResourcesFork
+        | Op::VersionsSet
         | Op::BranchBulkPreview
         | Op::UpdatePreview
         | Op::UpdateApply
@@ -255,6 +346,9 @@ pub fn destructive(op: Op) -> bool {
         | Op::UninstallPlan
         | Op::JobsGet
         | Op::JobEvents
+        | Op::JobsList
+        | Op::AuditList
+        | Op::AuditServiceList
         | Op::Events
         | Op::SessionLogout
         | Op::SessionLink
@@ -293,7 +387,41 @@ pub fn destructive(op: Op) -> bool {
         | Op::KeyRemove
         | Op::ServerKeySet
         | Op::ProfileGet
-        | Op::ProfileSet => false,
+        | Op::ProfileSet
+        | Op::ReachCheck
+        | Op::ReachSettingsGet
+        | Op::ReachSettingsSet
+        | Op::ForwardingSet
+        | Op::AuthOptions
+        | Op::AuthLogin
+        | Op::AuthEnrol
+        | Op::AuthReauth
+        | Op::AuthAccount
+        | Op::AuthAccountChange
+        | Op::UserCredentials
+        | Op::UserReset
+        | Op::ApiTokensList
+        | Op::ApiTokenCreate
+        | Op::ApiTokenRevoke
+        | Op::TlsStatus
+        | Op::TlsRenew
+        | Op::TlsCa
+        | Op::KeychainSet
+        | Op::BackupsList
+        | Op::BackupCreate
+        | Op::BackupVerify
+        | Op::BackupPreview
+        | Op::BackupsOverview
+        | Op::SupportSummary
+        | Op::SupportBundlePreview
+        | Op::SupportBundleFile
+        | Op::SupportBundleCreate
+        | Op::SupportBundleDownload
+        | Op::BackupImportUpload
+        | Op::BackupImportInspect
+        | Op::BackupImportStart
+        | Op::BackupsArchived
+        | Op::ReachFirewallOpen => false,
     }
 }
 
@@ -302,7 +430,7 @@ pub fn destructive(op: Op) -> bool {
 /// undone by removing the server it made; removing is what token sessions cannot do until the switch is on.
 pub fn installs(op: Op) -> bool {
     match op {
-        Op::InstallStart | Op::InstallResume => true,
+        Op::InstallStart | Op::InstallResume | Op::BackupImportUpload | Op::BackupImportInspect | Op::BackupImportStart => true,
         Op::Meta
         | Op::SessionCreate
         | Op::SystemInfo
@@ -320,6 +448,7 @@ pub fn installs(op: Op) -> bool {
         | Op::ConsoleSend
         | Op::ConsoleEnable
         | Op::ResourcesList
+        | Op::ResourceGet
         | Op::ResourceEnsure
         | Op::ResourceControl
         | Op::UpdatePreview
@@ -356,6 +485,7 @@ pub fn installs(op: Op) -> bool {
         | Op::InstallLog
         | Op::SelfUpdateCheck
         | Op::SelfUpdateApply
+        | Op::AdminServiceInstall
         | Op::AppStatus
         | Op::AppInstall
         | Op::AppUninstall
@@ -363,6 +493,9 @@ pub fn installs(op: Op) -> bool {
         | Op::UninstallRun
         | Op::JobsGet
         | Op::JobEvents
+        | Op::JobsList
+        | Op::AuditList
+        | Op::AuditServiceList
         | Op::Events
         | Op::SessionLogout
         | Op::SessionLink
@@ -405,7 +538,59 @@ pub fn installs(op: Op) -> bool {
         | Op::BranchSwitch
         | Op::StashRestore
         | Op::BranchBulkPreview
-        | Op::BranchBulkApply => false,
+        | Op::ResourceChanges
+        | Op::ResourceLog
+        | Op::ResourceCommit
+        | Op::ResourcePush
+        | Op::ResourceNewBranch
+        | Op::PrView
+        | Op::PrComment
+        | Op::PrReview
+        | Op::PrMerge
+        | Op::IssuesList
+        | Op::IssueComment
+        | Op::ResourceReleases
+        | Op::ResourcesFork
+        | Op::VersionsSet
+        | Op::BranchBulkApply
+        | Op::ReachCheck
+        | Op::ReachSettingsGet
+        | Op::ReachSettingsSet
+        | Op::ForwardingSet
+        | Op::ReachFirewallOpen
+        | Op::AuthOptions
+        | Op::AuthLogin
+        | Op::AuthEnrol
+        | Op::AuthReauth
+        | Op::AuthAccount
+        | Op::AuthAccountChange
+        | Op::UserCredentials
+        | Op::UserReset
+        | Op::ApiTokensList
+        | Op::ApiTokenCreate
+        | Op::ApiTokenRevoke
+        | Op::TlsStatus
+        | Op::TlsRenew
+        | Op::TlsCa
+        | Op::KeychainSet
+        | Op::BackupsList
+        | Op::BackupCreate
+        | Op::BackupVerify
+        | Op::BackupPreview
+        | Op::BackupSettingsSet
+        | Op::BackupPrune
+        | Op::BackupUndo
+        | Op::BackupRestore
+        | Op::BackupDelete
+        | Op::BackupDownload
+        | Op::BackupsOverview
+        | Op::SupportSummary
+        | Op::SupportBundlePreview
+        | Op::SupportBundleFile
+        | Op::SupportBundleCreate
+        | Op::SupportBundleDownload
+        | Op::BackupsArchived
+        | Op::TxAdminTicket => false,
     }
 }
 
@@ -458,7 +643,16 @@ pub fn local_only(op: Op) -> bool {
         // Restarting stops this computer's panel (and drops every session).
         | Op::PanelRestart
         // Lists files in the Downloads folder of the computer that runs Kora.
-        | Op::AssetDownloads => true,
+        | Op::AssetDownloads
+        | Op::UserCredentials
+        | Op::UserReset
+        | Op::ApiTokensList
+        | Op::ApiTokenCreate
+        | Op::ApiTokenRevoke
+        | Op::TlsRenew
+        | Op::KeychainSet
+        // Runs an installer that asks for administrator approval on this computer's desktop.
+        | Op::AdminServiceInstall => true,
         Op::Meta
         | Op::SessionCreate
         | Op::SystemInfo
@@ -475,6 +669,7 @@ pub fn local_only(op: Op) -> bool {
         | Op::ConsoleSend
         | Op::ConsoleEnable
         | Op::ResourcesList
+        | Op::ResourceGet
         | Op::ResourceEnsure
         | Op::ResourceControl
         | Op::BranchesList
@@ -484,6 +679,20 @@ pub fn local_only(op: Op) -> bool {
         | Op::BranchBulkPreview
         | Op::BranchSwitch
         | Op::BranchBulkApply
+        | Op::ResourceChanges
+        | Op::ResourceLog
+        | Op::ResourceCommit
+        | Op::ResourcePush
+        | Op::ResourceNewBranch
+        | Op::PrView
+        | Op::PrComment
+        | Op::PrReview
+        | Op::PrMerge
+        | Op::IssuesList
+        | Op::IssueComment
+        | Op::ResourceReleases
+        | Op::ResourcesFork
+        | Op::VersionsSet
         | Op::UpdatePreview
         | Op::UpdateApply
         | Op::UpdateAuto
@@ -527,6 +736,9 @@ pub fn local_only(op: Op) -> bool {
         | Op::UninstallRun
         | Op::JobsGet
         | Op::JobEvents
+        | Op::JobsList
+        | Op::AuditList
+        | Op::AuditServiceList
         | Op::Events
         | Op::SessionLogout
         | Op::MetricsGet
@@ -550,7 +762,41 @@ pub fn local_only(op: Op) -> bool {
         | Op::KeyRemove
         | Op::ServerKeySet
         | Op::ProfileGet
-        | Op::ProfileSet => false,
+        | Op::ProfileSet
+        | Op::ReachCheck
+        | Op::ReachSettingsGet
+        | Op::ReachSettingsSet
+        | Op::ForwardingSet
+        | Op::ReachFirewallOpen
+        | Op::AuthOptions
+        | Op::AuthLogin
+        | Op::AuthEnrol
+        | Op::AuthReauth
+        | Op::AuthAccount
+        | Op::AuthAccountChange
+        | Op::TlsStatus
+        | Op::TlsCa
+        | Op::BackupsList
+        | Op::BackupCreate
+        | Op::BackupVerify
+        | Op::BackupPreview
+        | Op::BackupSettingsSet
+        | Op::BackupPrune
+        | Op::BackupUndo
+        | Op::BackupRestore
+        | Op::BackupDelete
+        | Op::BackupDownload
+        | Op::BackupsOverview
+        | Op::SupportSummary
+        | Op::SupportBundlePreview
+        | Op::SupportBundleFile
+        | Op::SupportBundleCreate
+        | Op::SupportBundleDownload
+        | Op::BackupImportUpload
+        | Op::BackupImportInspect
+        | Op::BackupImportStart
+        | Op::BackupsArchived
+        | Op::TxAdminTicket => false,
     }
 }
 
@@ -611,10 +857,7 @@ pub fn op_for(method: &str, path: &str) -> Option<Op> {
         }
     }
     let (_, pattern) = best?;
-    Op::ALL
-        .iter()
-        .copied()
-        .find(|op| op.route().1 == pattern && op.route().0 == m)
+    Op::ALL.iter().copied().find(|op| op.route().1 == pattern && op.route().0 == m)
 }
 
 #[cfg(test)]
@@ -628,22 +871,69 @@ mod tests {
         for op in Op::ALL {
             let role = min_role(*op);
             if destructive(*op) || local_only(*op) {
-                assert_eq!(
-                    role,
-                    Role::Admin,
-                    "{op:?} is destructive or local-only, so admin"
-                );
+                assert_eq!(role, Role::Admin, "{op:?} is destructive or local-only, so admin");
             }
             let (m, p) = op.route();
-            let path = format!(
-                "{PREFIX}{}",
-                p.replace("{s}", "prod")
-                    .replace("{id}", "x")
-                    .replace("{file}", "f.log")
-                    .replace("{job}", "j")
-                    .replace("{name}", "bob")
-            );
+            let path = format!("{PREFIX}{}", p.replace("{s}", "prod").replace("{id}", "x").replace("{file}", "f.log").replace("{job}", "j").replace("{name}", "bob"));
             assert_eq!(op_for(m.as_str(), &path), Some(*op), "{op:?} {path}");
+        }
+    }
+
+    #[test]
+    fn reach_and_txadmin_roles() {
+        // Looking is day-to-day work; changing the router or firewall, and txAdmin (which can run code), are admin.
+        assert_eq!(min_role(Op::ReachCheck), Role::Operator);
+        assert_eq!(min_role(Op::ReachSettingsGet), Role::Viewer);
+        for op in [Op::ReachSettingsSet, Op::ForwardingSet, Op::ReachFirewallOpen, Op::TxAdminTicket] {
+            assert_eq!(min_role(op), Role::Admin, "{op:?}");
+            assert!(!local_only(op), "{op:?} is for remote sessions too");
+        }
+        // txAdmin is as serious as console input: a token session needs the switch.
+        assert!(destructive(Op::TxAdminTicket));
+        assert!(!remote_allowed(Op::TxAdminTicket, Role::Admin, Via::Token, false));
+        assert!(remote_allowed(Op::TxAdminTicket, Role::Admin, Via::Token, true));
+        assert!(remote_allowed(Op::TxAdminTicket, Role::Admin, Via::Tailscale, false));
+        assert!(!remote_allowed(Op::TxAdminTicket, Role::Operator, Via::Tailscale, true));
+    }
+
+    /// Backups: reading and making one is operator work; anything that replaces data, removes a backup,
+    /// changes where they go, or hands out the secrets inside one is an administrator's, and held back from a
+    /// user-token session until the remote-destructive switch is on.
+    #[test]
+    fn backup_roles() {
+        for op in [Op::BackupsList, Op::BackupCreate, Op::BackupVerify, Op::BackupPreview] {
+            assert_eq!(min_role(op), Role::Operator, "{op:?}");
+            assert!(!destructive(op), "{op:?}");
+        }
+        for op in [Op::BackupRestore, Op::BackupUndo, Op::BackupDelete, Op::BackupDownload, Op::BackupSettingsSet, Op::BackupPrune] {
+            assert_eq!(min_role(op), Role::Admin, "{op:?}");
+            assert!(destructive(op) && !local_only(op), "{op:?}");
+            assert!(!remote_allowed(op, Role::Operator, Via::Tailscale, true), "{op:?}: an operator may not");
+            assert!(!remote_allowed(op, Role::Admin, Via::Token, false), "{op:?}: a token admin needs the switch");
+            assert!(remote_allowed(op, Role::Admin, Via::Tailscale, false), "{op:?}: a Tailscale admin may");
+        }
+        assert!(Op::BackupVerify.is_read_only_job() && Op::BackupRestore.is_job() && Op::BackupCreate.is_job());
+    }
+
+    /// The support bundle: an administrator's (it carries the computer's diagnostics even with every secret removed);
+    /// only the short cleaned summary for a bug report is an operator's.
+    #[test]
+    fn support_roles() {
+        for op in [Op::SupportBundlePreview, Op::SupportBundleFile, Op::SupportBundleCreate, Op::SupportBundleDownload] {
+            assert_eq!(min_role(op), Role::Admin, "{op:?}");
+            assert!(!local_only(op) && !destructive(op), "{op:?}");
+        }
+        assert_eq!(min_role(Op::SupportSummary), Role::Operator);
+    }
+
+    /// Bringing a server in is installing: an administrator's, never held back by the remote-destructive switch.
+    #[test]
+    fn importing_is_an_install_class_operation() {
+        for op in [Op::BackupImportUpload, Op::BackupImportInspect, Op::BackupImportStart] {
+            assert!(installs(op) && !destructive(op) && !local_only(op), "{op:?}");
+            assert_eq!(min_role(op), Role::Admin, "{op:?}");
+            assert!(remote_allowed(op, Role::Admin, Via::Token, false), "{op:?}");
+            assert!(!remote_allowed(op, Role::Operator, Via::Tailscale, true), "{op:?}");
         }
     }
 
@@ -653,7 +943,7 @@ mod tests {
             if min_role(*op) == Role::Viewer {
                 let m = op.route().0;
                 assert!(
-                    m == Method::Get || matches!(op, Op::SessionCreate | Op::SessionLogout),
+                    m == Method::Get || matches!(op, Op::SessionCreate | Op::SessionLogout | Op::AuthLogin | Op::AuthEnrol | Op::AuthReauth | Op::AuthAccountChange),
                     "{op:?} is a viewer op but not a GET"
                 );
             }
@@ -671,6 +961,15 @@ mod tests {
             Op::SelfUpdateApply,
             Op::ScheduleSet,
             Op::ScheduleRemove,
+            Op::TxAdminTicket,
+            Op::BackupRestore,
+            Op::BackupUndo,
+            Op::BackupDelete,
+            Op::BackupDownload,
+            Op::BackupSettingsSet,
+            Op::BackupPrune,
+            Op::ResourcePush,
+            Op::PrMerge,
         ];
         for op in Op::ALL {
             assert_eq!(destructive(*op), want.contains(op), "{op:?}");
@@ -680,7 +979,7 @@ mod tests {
     #[test]
     fn installing_is_its_own_class_and_not_destructive() {
         for op in Op::ALL {
-            assert_eq!(installs(*op), matches!(op, Op::InstallStart | Op::InstallResume), "{op:?}");
+            assert_eq!(installs(*op), matches!(op, Op::InstallStart | Op::InstallResume | Op::BackupImportUpload | Op::BackupImportInspect | Op::BackupImportStart), "{op:?}");
             if installs(*op) {
                 assert!(!destructive(*op), "{op:?}: the switch must not hold an install back");
                 assert_eq!(min_role(*op), Role::Admin, "{op:?}");
@@ -733,19 +1032,10 @@ mod tests {
 
     #[test]
     fn literal_segments_beat_parameters() {
-        assert_eq!(
-            op_for("POST", "/api/v1/servers/scan"),
-            Some(Op::ServersScan)
-        );
-        assert_eq!(
-            op_for("POST", "/api/v1/servers/adopt"),
-            Some(Op::ServersAdopt)
-        );
+        assert_eq!(op_for("POST", "/api/v1/servers/scan"), Some(Op::ServersScan));
+        assert_eq!(op_for("POST", "/api/v1/servers/adopt"), Some(Op::ServersAdopt));
         assert_eq!(op_for("GET", "/api/v1/servers/scan"), None);
-        assert_eq!(
-            op_for("DELETE", "/api/v1/servers/prod"),
-            Some(Op::ServerDelete)
-        );
+        assert_eq!(op_for("DELETE", "/api/v1/servers/prod"), Some(Op::ServerDelete));
         assert_eq!(op_for("HEAD", "/api/v1/servers/prod"), Some(Op::ServerGet));
         assert_eq!(op_for("GET", "/api/v1/nothing"), None);
         assert_eq!(op_for("PATCH", "/api/v1/servers"), None);

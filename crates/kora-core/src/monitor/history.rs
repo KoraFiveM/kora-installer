@@ -38,12 +38,7 @@ impl History {
         while ring.len() > CAP {
             ring.pop_front();
         }
-        Self {
-            ring,
-            path,
-            dir: dir.to_path_buf(),
-            file_lines: lines,
-        }
+        Self { ring, path, dir: dir.to_path_buf(), file_lines: lines }
     }
 
     pub fn push(&mut self, s: Sample) {
@@ -66,11 +61,7 @@ impl History {
             return;
         };
         let _ = std::fs::create_dir_all(self.path.parent().unwrap_or(Path::new(".")));
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-        {
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&self.path) {
             if writeln!(f, "{line}").is_ok() {
                 self.file_lines += 1;
             }
@@ -86,9 +77,7 @@ impl History {
             }
         }
         let tmp = self.path.with_extension("jsonl.tmp");
-        if std::fs::write(&tmp, text).is_ok()
-            && crate::fsutil::rename_retrying(&tmp, &self.path).is_ok()
-        {
+        if std::fs::write(&tmp, text).is_ok() && crate::fsutil::rename_retrying(&tmp, &self.path).is_ok() {
             self.file_lines = self.ring.len();
         } else {
             let _ = std::fs::remove_file(&tmp);
@@ -112,12 +101,7 @@ impl History {
         let from = now.saturating_sub(secs);
         let all: Vec<&Sample> = self.ring.iter().filter(|s| s.t >= from).collect();
         let step = all.len().div_ceil(max_points.max(1)).max(1);
-        let mut out: Vec<Sample> = all
-            .iter()
-            .rev()
-            .step_by(step)
-            .map(|s| (*s).clone())
-            .collect();
+        let mut out: Vec<Sample> = all.iter().rev().step_by(step).map(|s| (*s).clone()).collect();
         out.reverse();
         out
     }
@@ -128,12 +112,7 @@ mod tests {
     use super::*;
 
     fn s(t: u64) -> Sample {
-        Sample {
-            t,
-            up: true,
-            players: Some((t % 50) as u32),
-            ..Sample::default()
-        }
+        Sample { t, up: true, players: Some((t % 50) as u32), ..Sample::default() }
     }
 
     #[test]
@@ -157,10 +136,7 @@ mod tests {
             h.push(s(10_000_000 - 1000 + i as u64 % 1000));
         }
         assert_eq!(h.len(), CAP);
-        let lines = std::fs::read_to_string(file_path(dir.path()))
-            .unwrap()
-            .lines()
-            .count();
+        let lines = std::fs::read_to_string(file_path(dir.path())).unwrap().lines().count();
         assert!(lines <= CAP + 10, "file was rewritten: {lines} lines");
     }
 
@@ -168,15 +144,7 @@ mod tests {
     fn a_damaged_line_is_skipped() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".kora")).unwrap();
-        std::fs::write(
-            file_path(dir.path()),
-            format!(
-                "{}\nnot json\n{}\n",
-                serde_json::to_string(&s(50)).unwrap(),
-                serde_json::to_string(&s(60)).unwrap()
-            ),
-        )
-        .unwrap();
+        std::fs::write(file_path(dir.path()), format!("{}\nnot json\n{}\n", serde_json::to_string(&s(50)).unwrap(), serde_json::to_string(&s(60)).unwrap())).unwrap();
         assert_eq!(History::load(dir.path(), 100).len(), 2);
     }
 
@@ -190,11 +158,7 @@ mod tests {
         let hour = h.range(100_000, 3600, 10_000);
         assert_eq!(hour.len(), 241);
         let thin = h.range(100_000, 86_400, 100);
-        assert!(
-            thin.len() <= 100 && thin.last().unwrap().t == 100_000,
-            "{}",
-            thin.len()
-        );
+        assert!(thin.len() <= 100 && thin.last().unwrap().t == 100_000, "{}", thin.len());
         assert!(thin.windows(2).all(|w| w[0].t < w[1].t));
     }
 }

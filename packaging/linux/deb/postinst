@@ -1,0 +1,35 @@
+#!/bin/sh
+# Enrol who may use the service, start it. Safe to run again (upgrades).
+set -e
+KORA=/usr/lib/kora/kora
+case "$1" in
+  configure)
+    install -d -m 0755 /etc/kora /var/lib/kora
+    install -d -m 0750 /var/log/kora
+    # Who may use the service: the account that ran sudo / pkexec, plus KORA_SERVICE_USERS
+    # (comma-separated account names, for automated installs). Nobody else, ever, without
+    # `kora service allow` by an administrator.
+    for uid in "${SUDO_UID:-}" "${PKEXEC_UID:-}"; do
+      case "$uid" in ""|0|*[!0-9]*) continue ;; esac
+      "$KORA" service allow "uid:$uid" || echo "kora: could not allow uid $uid (run: sudo kora service allow <account>)" >&2
+    done
+    OLDIFS="$IFS"; IFS=','
+    for name in ${KORA_SERVICE_USERS:-}; do
+      [ -n "$name" ] && { "$KORA" service allow "$name" || echo "kora: could not allow $name" >&2; }
+    done
+    IFS="$OLDIFS"
+    # Bring an earlier layout over (the old kora-helper service, servers set up by a root install) without
+    # touching servers or data. Safe to run again; never blocks the install.
+    "$KORA" service migrate --quiet || echo "kora: could not finish upgrading an earlier layout (run: sudo kora service migrate)" >&2
+    if [ -d /run/systemd/system ]; then
+      systemctl daemon-reload || true
+      systemctl enable kora.service || true
+      # restart (not start): an upgrade must run the new program
+      systemctl restart kora.service || echo "kora: the service did not start; see: journalctl -u kora" >&2
+    fi
+    if [ ! -s /etc/kora/service.json ] || ! "$KORA" service list 2>/dev/null | grep -q 'uid:'; then
+      echo "kora: no account may use Kora's administrator service yet. Run: sudo kora service allow <your account>" >&2
+    fi
+    ;;
+esac
+exit 0

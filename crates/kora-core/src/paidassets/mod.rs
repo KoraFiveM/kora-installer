@@ -47,10 +47,11 @@ const MAX_RATIO: u64 = 100;
 /// Backups kept per asset.
 pub const KEEP_BACKUPS: usize = 3;
 
-pub type Res<T> = Result<T, String>;
+pub type Res<T> = Result<T, crate::problem::Problem>;
 
 /// What a problem is about. `blocking` problems stop the import.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "AssetProblemKind"))]
 #[serde(rename_all = "snake_case")]
 pub enum ProblemKind {
     NotAZip,
@@ -69,6 +70,7 @@ pub enum ProblemKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "AssetProblem"))]
 pub struct Problem {
     pub kind: ProblemKind,
     /// The resource it is about, when there is one.
@@ -79,6 +81,7 @@ pub struct Problem {
 
 /// One resource folder found in a zip.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "FoundAsset"))]
 pub struct FoundResource {
     /// The folder name (kept exactly; it is what `ensure` uses).
     pub name: String,
@@ -99,6 +102,7 @@ pub struct FoundResource {
 
 /// What importing a zip would do. Nothing is written to make it.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "AssetPlan"))]
 pub struct ImportPlan {
     /// The zip's file name.
     pub zip_name: String,
@@ -115,21 +119,16 @@ impl ImportPlan {
         self.resources.iter().filter(|r| r.has_fxmanifest)
     }
     fn refresh(&mut self) {
-        self.can_import =
-            self.importable().next().is_some() && !self.problems.iter().any(|p| p.blocking);
+        self.can_import = self.importable().next().is_some() && !self.problems.iter().any(|p| p.blocking);
     }
     /// The blocking problems, one per line.
     pub fn blocking_text(&self) -> String {
-        self.problems
-            .iter()
-            .filter(|p| p.blocking)
-            .map(|p| p.message.clone())
-            .collect::<Vec<_>>()
-            .join("\n")
+        self.problems.iter().filter(|p| p.blocking).map(|p| p.message.clone()).collect::<Vec<_>>().join("\n")
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ImportedAsset {
     pub name: String,
     pub version: Option<String>,
@@ -140,6 +139,7 @@ pub struct ImportedAsset {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "AssetImportReport"))]
 pub struct ImportReport {
     pub zip_name: String,
     pub imported: Vec<ImportedAsset>,
@@ -163,6 +163,7 @@ impl Default for ImportOpts {
 
 /// An imported paid asset, as listed for a server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct PaidAsset {
     pub name: String,
     /// Relative to `resources/`.
@@ -190,6 +191,7 @@ pub fn view(dir: &Path) -> Res<AssetsView> {
 
 /// A zip in the Downloads folder.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct DownloadZip {
     pub name: String,
     pub size: u64,
@@ -219,25 +221,15 @@ fn clean_name(name: &str) -> Result<Option<PathBuf>, ()> {
             _ => return Err(()),
         }
     }
-    Ok(if out.as_os_str().is_empty() {
-        None
-    } else {
-        Some(out)
-    })
+    Ok(if out.as_os_str().is_empty() { None } else { Some(out) })
 }
 
 fn is_manifest(p: &Path) -> bool {
-    p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
-        n.eq_ignore_ascii_case("fxmanifest.lua") || n.eq_ignore_ascii_case("__resource.lua")
-    })
+    p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.eq_ignore_ascii_case("fxmanifest.lua") || n.eq_ignore_ascii_case("__resource.lua"))
 }
 
 fn junk(p: &Path) -> bool {
-    p.components()
-        .next()
-        .is_some_and(|c| c.as_os_str() == "__MACOSX")
-        || p.file_name()
-            .is_some_and(|n| n == ".DS_Store" || n == "Thumbs.db")
+    p.components().next().is_some_and(|c| c.as_os_str() == "__MACOSX") || p.file_name().is_some_and(|n| n == ".DS_Store" || n == "Thumbs.db")
 }
 
 /// `version '1.2.3'` / `version "1.2.3"` from a manifest.
@@ -285,32 +277,19 @@ struct Scan {
     problems: Vec<Problem>,
 }
 
-fn problem(
-    kind: ProblemKind,
-    resource: Option<&str>,
-    blocking: bool,
-    message: impl Into<String>,
-) -> Problem {
-    Problem {
-        kind,
-        resource: resource.map(String::from),
-        message: message.into(),
-        blocking,
-    }
+fn problem(kind: ProblemKind, resource: Option<&str>, blocking: bool, message: impl Into<String>) -> Problem {
+    Problem { kind, resource: resource.map(String::from), message: message.into(), blocking }
 }
 
 type Zip = zip::ZipArchive<io::BufReader<fs::File>>;
 
 fn open_zip(path: &Path) -> Res<Zip> {
-    let f = fs::File::open(path).map_err(|e| format!("Can't open {}: {e}", path.display()))?;
-    zip::ZipArchive::new(io::BufReader::new(f))
-        .map_err(|_| format!("{} is not a zip file Kora can read.", file_name(path)))
+    let f = fs::File::open(path).map_err(|e| crate::problem::Problem::from(e).lead(&format!("Can't open {}", path.display())))?;
+    zip::ZipArchive::new(io::BufReader::new(f)).map_err(|_| crate::problem::Problem::generic(format!("{} is not a zip file Kora can read.", file_name(path))))
 }
 
 fn file_name(p: &Path) -> String {
-    p.file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| p.display().to_string())
+    p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string())
 }
 
 /// Unix file-type bits of a zip entry that is neither a regular file nor a folder (a link, device,
@@ -333,12 +312,7 @@ fn scan(z: &mut Zip) -> Scan {
     let (mut total, mut packed) = (0u64, 0u64);
     for i in 0..z.len() {
         let Ok(f) = z.by_index_raw(i) else {
-            s.problems.push(problem(
-                ProblemKind::NotAZip,
-                None,
-                true,
-                "The zip is damaged. Download it again from the Cfx.re Portal.",
-            ));
+            s.problems.push(problem(ProblemKind::NotAZip, None, true, "The zip is damaged. Download it again from the Cfx.re Portal."));
             return s;
         };
         let name = match f.name() {
@@ -367,52 +341,25 @@ fn scan(z: &mut Zip) -> Scan {
             continue;
         }
         if f.encrypted() {
-            s.problems.push(problem(
-                ProblemKind::Encrypted,
-                None,
-                true,
-                "The zip is password-protected. Use the zip exactly as the Cfx.re Portal gives it.",
-            ));
+            s.problems.push(problem(ProblemKind::Encrypted, None, true, "The zip is password-protected. Use the zip exactly as the Cfx.re Portal gives it."));
             return s;
         }
         if !seen.insert(rel.to_string_lossy().to_lowercase()) {
-            s.problems.push(problem(
-                ProblemKind::UnsafePath,
-                None,
-                true,
-                format!(
-                    "{} appears twice in the zip, so it was refused.",
-                    rel.display()
-                ),
-            ));
+            s.problems.push(problem(ProblemKind::UnsafePath, None, true, format!("{} appears twice in the zip, so it was refused.", rel.display())));
             continue;
         }
         let kind = if f.is_dir() { Kind::Dir } else { Kind::File };
-        let (size, csize) = if kind == Kind::File {
-            (f.size(), f.compressed_size())
-        } else {
-            (0, 0)
-        };
+        let (size, csize) = if kind == Kind::File { (f.size(), f.compressed_size()) } else { (0, 0) };
         if kind == Kind::File && size > BOMB_FLOOR && size / csize.max(1) > MAX_RATIO * 10 {
             s.problems.push(problem(ProblemKind::ZipBomb, None, true, format!("{} would unpack to far more than its size in the zip; this looks like a zip bomb, so it was refused.", rel.display())));
             return s;
         }
         total = total.saturating_add(size);
         packed = packed.saturating_add(csize);
-        s.entries.push(Entry {
-            idx: i,
-            rel,
-            kind,
-            size,
-        });
+        s.entries.push(Entry { idx: i, rel, kind, size });
     }
     if unsafe_n > 3 {
-        s.problems.push(problem(
-            ProblemKind::UnsafePath,
-            None,
-            true,
-            format!("{} more unsafe paths were found.", unsafe_n - 3),
-        ));
+        s.problems.push(problem(ProblemKind::UnsafePath, None, true, format!("{} more unsafe paths were found.", unsafe_n - 3)));
     }
     if !skipped.is_empty() {
         let shown: Vec<_> = skipped.iter().take(3).cloned().collect();
@@ -420,26 +367,11 @@ fn scan(z: &mut Zip) -> Scan {
             ProblemKind::SkippedEntry,
             None,
             false,
-            format!(
-                "{} link or special entr{} will be skipped ({}{}).",
-                skipped.len(),
-                if skipped.len() == 1 { "y" } else { "ies" },
-                shown.join(", "),
-                if skipped.len() > 3 { ", ..." } else { "" }
-            ),
+            format!("{} link or special entr{} will be skipped ({}{}).", skipped.len(), if skipped.len() == 1 { "y" } else { "ies" }, shown.join(", "), if skipped.len() > 3 { ", ..." } else { "" }),
         ));
     }
     if total > MAX_TOTAL {
-        s.problems.push(problem(
-            ProblemKind::TooBig,
-            None,
-            true,
-            format!(
-                "The zip would unpack to {}, more than the {} limit.",
-                human(total),
-                human(MAX_TOTAL)
-            ),
-        ));
+        s.problems.push(problem(ProblemKind::TooBig, None, true, format!("The zip would unpack to {}, more than the {} limit.", human(total), human(MAX_TOTAL))));
     } else if total > BOMB_FLOOR && total / packed.max(1) > MAX_RATIO {
         s.problems.push(problem(ProblemKind::ZipBomb, None, true, "The zip would unpack to far more than its own size; this looks like a zip bomb, so it was refused."));
     }
@@ -479,11 +411,7 @@ fn starts_with_fxap(z: &mut Zip, idx: usize) -> bool {
 /// Resource roots: folders holding a manifest, outermost first; a manifest inside another root is
 /// part of that resource.
 fn roots_of(entries: &[Entry]) -> Vec<PathBuf> {
-    let mut cands: Vec<PathBuf> = entries
-        .iter()
-        .filter(|e| e.kind == Kind::File && is_manifest(&e.rel))
-        .map(|e| e.rel.parent().map(Path::to_path_buf).unwrap_or_default())
-        .collect();
+    let mut cands: Vec<PathBuf> = entries.iter().filter(|e| e.kind == Kind::File && is_manifest(&e.rel)).map(|e| e.rel.parent().map(Path::to_path_buf).unwrap_or_default()).collect();
     cands.sort_by_key(|p| p.components().count());
     cands.dedup();
     let mut roots: Vec<PathBuf> = Vec::new();
@@ -496,9 +424,7 @@ fn roots_of(entries: &[Entry]) -> Vec<PathBuf> {
 }
 
 fn stem(zip: &Path) -> String {
-    zip.file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default()
+    zip.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 /// Where a resource called `name` already is under `resources/` (FXServer looks in `resources/`
@@ -531,15 +457,11 @@ pub fn find_resource(resources: &Path, name: &str) -> Option<PathBuf> {
 
 /// What importing `zip` into the server at `server_dir` would do. Reads only.
 pub fn inspect(server_dir: &Path, zip: &Path) -> ImportPlan {
-    let mut plan = ImportPlan {
-        zip_name: file_name(zip),
-        ..Default::default()
-    };
+    let mut plan = ImportPlan { zip_name: file_name(zip), ..Default::default() };
     let mut z = match open_zip(zip) {
         Ok(z) => z,
         Err(m) => {
-            plan.problems
-                .push(problem(ProblemKind::NotAZip, None, true, m));
+            plan.problems.push(problem(ProblemKind::NotAZip, None, true, m.one_line()));
             plan.refresh();
             return plan;
         }
@@ -553,77 +475,44 @@ pub fn inspect(server_dir: &Path, zip: &Path) -> ImportPlan {
     let mut names_seen: HashSet<String> = HashSet::new();
     for root in &roots {
         let top = root.as_os_str().is_empty();
-        let name = if top {
-            stem(zip)
-        } else {
-            root.file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default()
-        };
-        let mine: Vec<&Entry> = entries
-            .iter()
-            .filter(|e| e.rel.starts_with(root) && e.rel != *root)
-            .collect();
-        let rel_of = |e: &Entry| {
-            e.rel
-                .strip_prefix(root)
-                .map(Path::to_path_buf)
-                .unwrap_or_default()
-        };
-        let has_fxap = mine
-            .iter()
-            .any(|e| e.kind == Kind::File && rel_of(e) == Path::new(".fxap"));
-        let manifest = mine
-            .iter()
-            .find(|e| {
-                e.kind == Kind::File && rel_of(e).components().count() == 1 && is_manifest(&e.rel)
-            })
-            .map(|e| e.idx);
-        let text = manifest
-            .and_then(|i| read_text(&mut z, i, 256 * 1024))
-            .unwrap_or_default();
+        let name = if top { stem(zip) } else { root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default() };
+        let mine: Vec<&Entry> = entries.iter().filter(|e| e.rel.starts_with(root) && e.rel != *root).collect();
+        let rel_of = |e: &Entry| e.rel.strip_prefix(root).map(Path::to_path_buf).unwrap_or_default();
+        let has_fxap = mine.iter().any(|e| e.kind == Kind::File && rel_of(e) == Path::new(".fxap"));
+        let manifest = mine.iter().find(|e| e.kind == Kind::File && rel_of(e).components().count() == 1 && is_manifest(&e.rel)).map(|e| e.idx);
+        let text = manifest.and_then(|i| read_text(&mut z, i, 256 * 1024)).unwrap_or_default();
         let version = manifest_version(&text);
         let mut escrowed = has_fxap || text.contains("escrow_ignore");
         if !escrowed {
-            let luas: Vec<usize> = mine
-                .iter()
-                .filter(|e| {
-                    e.kind == Kind::File
-                        && e.rel
-                            .extension()
-                            .is_some_and(|x| x.eq_ignore_ascii_case("lua"))
-                        && !is_manifest(&e.rel)
-                })
-                .take(40)
-                .map(|e| e.idx)
-                .collect();
+            let luas: Vec<usize> =
+                mine.iter().filter(|e| e.kind == Kind::File && e.rel.extension().is_some_and(|x| x.eq_ignore_ascii_case("lua")) && !is_manifest(&e.rel)).take(40).map(|e| e.idx).collect();
             escrowed = luas.into_iter().any(|i| starts_with_fxap(&mut z, i));
         }
         let size: u64 = mine.iter().map(|e| e.size).sum();
         let files = mine.iter().filter(|e| e.kind == Kind::File).count();
         let n = name.as_str();
         if top {
-            plan.problems.push(problem(ProblemKind::NoFolder, Some(n), false, format!("The zip has no folder around the resource, so it is named after the zip: {n}. If that is not the asset's real name, rename the zip to the name the creator uses before importing.")));
-        }
-        if !valid_asset_name(n) {
             plan.problems.push(problem(
-                ProblemKind::BadName,
+                ProblemKind::NoFolder,
                 Some(n),
-                true,
+                false,
                 format!(
-                    "'{n}' can't be used as a resource name (letters, digits, _ . and - only)."
+                    "The zip has no folder around the resource, so it is named after the zip: {n}. If that is not the asset's real name, rename the zip to the name the creator uses before importing."
                 ),
             ));
+        }
+        if !valid_asset_name(n) {
+            plan.problems.push(problem(ProblemKind::BadName, Some(n), true, format!("'{n}' can't be used as a resource name (letters, digits, _ . and - only).")));
         } else if !names_seen.insert(n.to_lowercase()) {
-            plan.problems.push(problem(
-                ProblemKind::Duplicate,
-                Some(n),
-                true,
-                format!("The zip holds two resources called {n}; FXServer can only load one."),
-            ));
+            plan.problems.push(problem(ProblemKind::Duplicate, Some(n), true, format!("The zip holds two resources called {n}; FXServer can only load one.")));
         }
         if escrowed && !has_fxap {
-            plan.problems.push(problem(ProblemKind::MissingFxap, Some(n), false, format!("{n} looks escrowed but has no hidden .fxap file, so it will not start. Download it again from the Cfx.re Portal and import the zip as it is (do not unpack and re-zip it).")));
+            plan.problems.push(problem(
+                ProblemKind::MissingFxap,
+                Some(n),
+                false,
+                format!("{n} looks escrowed but has no hidden .fxap file, so it will not start. Download it again from the Cfx.re Portal and import the zip as it is (do not unpack and re-zip it)."),
+            ));
         }
         let mut replaces = false;
         if valid_asset_name(n) {
@@ -632,82 +521,38 @@ pub fn inspect(server_dir: &Path, zip: &Path) -> ImportPlan {
             match find_resource(&resources_dir, n) {
                 Some(p) if p == ours => replaces = true,
                 Some(p) => {
-                    let rel = p
-                        .strip_prefix(server_dir)
-                        .unwrap_or(&p)
-                        .display()
-                        .to_string();
-                    plan.problems.push(problem(ProblemKind::NameTaken, Some(n), true, format!("There is already a resource called {n} in {rel}. Two resources with the same name can't both load: remove or move that one first, then import again.")));
+                    let rel = p.strip_prefix(server_dir).unwrap_or(&p).display().to_string();
+                    plan.problems.push(problem(
+                        ProblemKind::NameTaken,
+                        Some(n),
+                        true,
+                        format!("There is already a resource called {n} in {rel}. Two resources with the same name can't both load: remove or move that one first, then import again."),
+                    ));
                 }
                 None => replaces = recorded && ours.exists(),
             }
         }
-        plan.resources.push(FoundResource {
-            name,
-            zip_path: zip_display(root),
-            has_fxmanifest: true,
-            has_fxap,
-            escrowed,
-            size,
-            files,
-            version,
-            replaces,
-        });
+        plan.resources.push(FoundResource { name, zip_path: zip_display(root), has_fxmanifest: true, has_fxap, escrowed, size, files, version, replaces });
     }
     // Top-level folders holding no resource at all.
-    let mut tops: Vec<PathBuf> = entries
-        .iter()
-        .filter(|e| e.rel.components().count() > 1 || e.kind == Kind::Dir)
-        .filter_map(|e| {
-            e.rel
-                .components()
-                .next()
-                .map(|c| PathBuf::from(c.as_os_str()))
-        })
-        .collect();
+    let mut tops: Vec<PathBuf> =
+        entries.iter().filter(|e| e.rel.components().count() > 1 || e.kind == Kind::Dir).filter_map(|e| e.rel.components().next().map(|c| PathBuf::from(c.as_os_str()))).collect();
     tops.sort();
     tops.dedup();
     for t in tops {
-        if roots
-            .iter()
-            .any(|r| r.starts_with(&t) || r.as_os_str().is_empty())
-        {
+        if roots.iter().any(|r| r.starts_with(&t) || r.as_os_str().is_empty()) {
             continue;
         }
         let name = t.display().to_string();
-        let size = entries
-            .iter()
-            .filter(|e| e.rel.starts_with(&t))
-            .map(|e| e.size)
-            .sum();
-        let files = entries
-            .iter()
-            .filter(|e| e.rel.starts_with(&t) && e.kind == Kind::File)
-            .count();
+        let size = entries.iter().filter(|e| e.rel.starts_with(&t)).map(|e| e.size).sum();
+        let files = entries.iter().filter(|e| e.rel.starts_with(&t) && e.kind == Kind::File).count();
         plan.problems.push(problem(
             ProblemKind::NoFxmanifest,
             Some(&name),
             roots.is_empty(),
-            format!(
-                "{name} has no fxmanifest.lua, so it is not a resource{}.",
-                if roots.is_empty() {
-                    ""
-                } else {
-                    " and will be skipped"
-                }
-            ),
+            format!("{name} has no fxmanifest.lua, so it is not a resource{}.", if roots.is_empty() { "" } else { " and will be skipped" }),
         ));
-        plan.resources.push(FoundResource {
-            name,
-            zip_path: zip_display(&t),
-            has_fxmanifest: false,
-            has_fxap: false,
-            escrowed: false,
-            size,
-            files,
-            version: None,
-            replaces: false,
-        });
+        plan.resources.push(FoundResource { name, zip_path: zip_display(&t), has_fxmanifest: false, has_fxap: false, escrowed: false, size, files, version: None, replaces: false });
     }
     if roots.is_empty() && !plan.problems.iter().any(|p| p.blocking) {
         plan.problems.push(problem(ProblemKind::NoResources, None, true, "No resource was found in the zip (no fxmanifest.lua). Make sure you downloaded the asset itself from the Cfx.re Portal."));
@@ -723,10 +568,7 @@ pub fn inspect(server_dir: &Path, zip: &Path) -> ImportPlan {
 /// `.kora/paid-assets.json` (servers added from an existing folder).
 pub enum Records {
     Server(Box<ServerFile>),
-    Side {
-        path: PathBuf,
-        list: Vec<ResourceRecord>,
-    },
+    Side { path: PathBuf, list: Vec<ResourceRecord> },
 }
 
 pub fn side_path(dir: &Path) -> PathBuf {
@@ -736,16 +578,13 @@ pub fn side_path(dir: &Path) -> PathBuf {
 /// Load the records of the server at `dir`.
 pub fn records(dir: &Path) -> Res<Records> {
     if server_file_path(dir).exists() {
-        return ServerFile::load(dir)
-            .map(|s| Records::Server(Box::new(s)))
-            .map_err(|e| format!("cannot read kora-server.json: {e}"));
+        return ServerFile::load(dir).map(|s| Records::Server(Box::new(s)));
     }
     let path = side_path(dir);
     let list = match fs::read(&path) {
-        Ok(b) => serde_json::from_slice(&b)
-            .map_err(|e| format!("cannot read {}: {e}", path.display()))?,
+        Ok(b) => serde_json::from_slice(&b).map_err(|e| crate::problem::Problem::from(e).lead(&format!("cannot read {}", path.display())))?,
         Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
-        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
+        Err(e) => return Err(crate::problem::Problem::from(e).lead(&format!("cannot read {}", path.display()))),
     };
     Ok(Records::Side { path, list })
 }
@@ -765,11 +604,7 @@ impl Records {
     }
     /// The paid-asset records.
     pub fn paid(&self) -> Vec<ResourceRecord> {
-        self.list()
-            .iter()
-            .filter(|r| r.is_portal())
-            .cloned()
-            .collect()
+        self.list().iter().filter(|r| r.is_portal()).cloned().collect()
     }
     fn upsert(&mut self, rec: ResourceRecord) {
         let l = self.list_mut();
@@ -786,19 +621,14 @@ impl Records {
     }
     fn save(&self) -> Res<()> {
         match self {
-            Records::Server(s) => s
-                .save()
-                .map_err(|e| format!("cannot write kora-server.json: {e}")),
+            Records::Server(s) => s.save(),
             Records::Side { path, list } => {
                 if let Some(p) = path.parent() {
-                    fs::create_dir_all(p)
-                        .map_err(|e| format!("cannot create {}: {e}", p.display()))?;
+                    fs::create_dir_all(p).map_err(|e| crate::problem::Problem::from(e).lead(&format!("cannot create {}", p.display())))?;
                 }
                 let tmp = path.with_extension("json.tmp");
-                let body = serde_json::to_vec_pretty(list).map_err(|e| e.to_string())?;
-                fs::write(&tmp, body)
-                    .and_then(|()| fs::rename(&tmp, path))
-                    .map_err(|e| format!("cannot write {}: {e}", path.display()))
+                let body = serde_json::to_vec_pretty(list)?;
+                fs::write(&tmp, body).and_then(|()| fs::rename(&tmp, path)).map_err(|e| crate::problem::Problem::from(e).lead(&format!("cannot write {}", path.display())))
             }
         }
     }
@@ -832,10 +662,7 @@ fn prune_backups(dir: &Path, name: &str) {
 }
 
 fn now_millis() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 /// A fresh backup path for `name`.
@@ -875,10 +702,7 @@ pub fn list(dir: &Path) -> Res<Vec<PaidAsset>> {
 
 /// A folder inside the zip as people read it: always `/`, whatever the computer uses.
 fn zip_display(p: &Path) -> String {
-    p.components()
-        .map(|c| c.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
+    p.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
 }
 
 // ------------------------------------------------------------------------------------------- import
@@ -906,46 +730,23 @@ impl Drop for Staging {
     }
 }
 
-fn extract_into(
-    z: &mut Zip,
-    entries: &[Entry],
-    root: &Path,
-    dest: &Path,
-    budget: &mut u64,
-) -> Res<()> {
+fn extract_into(z: &mut Zip, entries: &[Entry], root: &Path, dest: &Path, budget: &mut u64) -> Res<()> {
     fs::create_dir_all(dest).map_err(|e| format!("cannot create {}: {e}", dest.display()))?;
-    for e in entries
-        .iter()
-        .filter(|e| e.rel.starts_with(root) && e.rel != root)
-    {
-        let rel = e
-            .rel
-            .strip_prefix(root)
-            .map_err(|_| "bad path".to_string())?;
+    for e in entries.iter().filter(|e| e.rel.starts_with(root) && e.rel != root) {
+        let rel = e.rel.strip_prefix(root).map_err(|_| "bad path".to_string())?;
         let target = dest.join(rel);
         if e.kind == Kind::Dir {
-            fs::create_dir_all(&target)
-                .map_err(|x| format!("cannot create {}: {x}", target.display()))?;
+            fs::create_dir_all(&target).map_err(|x| format!("cannot create {}: {x}", target.display()))?;
             continue;
         }
         if let Some(p) = target.parent() {
             fs::create_dir_all(p).map_err(|x| format!("cannot create {}: {x}", p.display()))?;
         }
-        let f = z
-            .by_index(e.idx)
-            .map_err(|x| format!("cannot read {} from the zip: {x}", e.rel.display()))?;
-        let mut out = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&target)
-            .map_err(|x| format!("cannot write {}: {x}", target.display()))?;
-        let n = io::copy(&mut f.take(*budget + 1), &mut out)
-            .map_err(|x| format!("cannot unpack {}: {x}", e.rel.display()))?;
+        let f = z.by_index(e.idx).map_err(|x| format!("cannot read {} from the zip: {x}", e.rel.display()))?;
+        let mut out = fs::OpenOptions::new().write(true).create_new(true).open(&target).map_err(|x| format!("cannot write {}: {x}", target.display()))?;
+        let n = io::copy(&mut f.take(*budget + 1), &mut out).map_err(|x| format!("cannot unpack {}: {x}", e.rel.display()))?;
         if n > *budget {
-            return Err(format!(
-                "The zip unpacks to more than {}; it was refused.",
-                human(MAX_TOTAL)
-            ));
+            return Err(format!("The zip unpacks to more than {}; it was refused.", human(MAX_TOTAL)).into());
         }
         *budget -= n;
     }
@@ -967,39 +768,19 @@ fn undo(swaps: &[Swap]) {
 }
 
 /// Import `zip` into the server at `dir`. `say` receives progress lines.
-pub fn import(
-    dir: &Path,
-    zip: &Path,
-    opts: &ImportOpts,
-    say: &mut dyn FnMut(&str),
-) -> Res<ImportReport> {
+pub fn import(dir: &Path, zip: &Path, opts: &ImportOpts, say: &mut dyn FnMut(&str)) -> Res<ImportReport> {
     let plan = inspect(dir, zip);
     if !plan.can_import {
         let why = plan.blocking_text();
-        return Err(if why.is_empty() {
-            format!("Nothing to import from {}.", plan.zip_name)
-        } else {
-            why
-        });
+        return Err(if why.is_empty() { format!("Nothing to import from {}.", plan.zip_name).into() } else { why.into() });
     }
     if !opts.replace {
         if let Some(r) = plan.importable().find(|r| r.replaces) {
-            return Err(format!(
-                "{} is already imported. Choose to replace it to import this zip.",
-                r.name
-            ));
+            return Err(format!("{} is already imported. Choose to replace it to import this zip.", r.name).into());
         }
     }
-    let mut report = ImportReport {
-        zip_name: plan.zip_name.clone(),
-        ..Default::default()
-    };
-    report.notes.extend(
-        plan.problems
-            .iter()
-            .filter(|p| !p.blocking)
-            .map(|p| p.message.clone()),
-    );
+    let mut report = ImportReport { zip_name: plan.zip_name.clone(), ..Default::default() };
+    report.notes.extend(plan.problems.iter().filter(|p| !p.blocking).map(|p| p.message.clone()));
 
     let mut z = open_zip(zip)?;
     let s = scan(&mut z);
@@ -1010,27 +791,22 @@ pub fn import(
     let kora = dir.join(".kora");
     let staging = Staging(kora.join(format!("asset-import-{}", now_millis())));
     let _ = fs::remove_dir_all(&staging.0);
-    fs::create_dir_all(&staging.0)
-        .map_err(|e| format!("cannot create {}: {e}", staging.0.display()))?;
+    fs::create_dir_all(&staging.0).map_err(|e| format!("cannot create {}: {e}", staging.0.display()))?;
     let mut budget = MAX_TOTAL;
     let mut staged: Vec<(&FoundResource, PathBuf)> = Vec::new();
     for r in plan.importable() {
-        let root = roots
-            .iter()
-            .find(|p| zip_display(p) == r.zip_path)
-            .ok_or("The zip changed while it was being imported. Try again.")?;
+        let root = roots.iter().find(|p| zip_display(p) == r.zip_path).ok_or("The zip changed while it was being imported. Try again.")?;
         say(&format!("Unpacking {}", r.name));
         let to = staging.0.join(&r.name);
         extract_into(&mut z, &s.entries, root, &to, &mut budget)?;
         if !(to.join("fxmanifest.lua").is_file() || to.join("__resource.lua").is_file()) {
-            return Err(format!("{} has no fxmanifest.lua after unpacking.", r.name));
+            return Err(format!("{} has no fxmanifest.lua after unpacking.", r.name).into());
         }
         staged.push((r, to));
     }
 
     let category = dir.join("resources").join(CATEGORY);
-    fs::create_dir_all(&category)
-        .map_err(|e| format!("cannot create {}: {e}", category.display()))?;
+    fs::create_dir_all(&category).map_err(|e| format!("cannot create {}: {e}", category.display()))?;
     let mut swaps: Vec<Swap> = Vec::new();
     let result = (|| -> Res<()> {
         for (r, from) in &staged {
@@ -1039,17 +815,15 @@ pub fn import(
             let mut backup = None;
             if dest.exists() {
                 let b = new_backup_path(dir, &r.name);
-                fs::create_dir_all(backups_dir(dir))
-                    .map_err(|e| format!("cannot create the backups folder: {e}"))?;
-                fs::rename(&dest, &b)
-                    .map_err(|e| format!("cannot move the old {} aside: {e}", r.name))?;
+                fs::create_dir_all(backups_dir(dir)).map_err(|e| format!("cannot create the backups folder: {e}"))?;
+                fs::rename(&dest, &b).map_err(|e| format!("cannot move the old {} aside: {e}", r.name))?;
                 backup = Some(b);
             }
             if let Err(e) = fs::rename(from, &dest) {
                 if let Some(b) = &backup {
                     let _ = fs::rename(b, &dest);
                 }
-                return Err(format!("cannot move {} into place: {e}", r.name));
+                return Err(format!("cannot move {} into place: {e}", r.name).into());
             }
             say(&format!("Placed {} in resources/{CATEGORY}", r.name));
             swaps.push(Swap { dest, backup });
@@ -1071,9 +845,7 @@ pub fn import(
     })();
     if let Err(e) = result {
         undo(&swaps);
-        return Err(format!(
-            "{e}. Nothing was changed: any replaced asset was put back."
-        ));
+        return Err(e.and_say("Nothing was changed: any replaced asset was put back."));
     }
 
     for ((r, _), s) in staged.iter().zip(&swaps) {
@@ -1081,21 +853,16 @@ pub fn import(
             name: r.name.clone(),
             version: r.version.clone(),
             replaced: s.backup.is_some(),
-            backup: s
-                .backup
-                .as_ref()
-                .map(|b| b.strip_prefix(dir).unwrap_or(b).display().to_string()),
+            backup: s.backup.as_ref().map(|b| b.strip_prefix(dir).unwrap_or(b).display().to_string()),
         });
         prune_backups(dir, &r.name);
     }
     let names: Vec<String> = staged.iter().map(|(r, _)| r.name.clone()).collect();
     match crate::addresources::append_ensures_to_cfg(&dir.join("server.cfg"), &names) {
         Ok(added) => report.ensured = added,
-        Err(e) => report.notes.push(e),
+        Err(e) => report.notes.push(e.one_line()),
     }
-    report
-        .notes
-        .push("Restart the server to load the new files.".into());
+    report.notes.push("Restart the server to load the new files.".into());
     Ok(report)
 }
 
@@ -1103,18 +870,12 @@ pub fn import(
 pub fn without_ensure(cfg: &str, name: &str) -> Option<String> {
     let is_it = |l: &str| {
         let mut w = l.split_whitespace();
-        w.next() == Some("ensure")
-            && w.next() == Some(name)
-            && w.next().is_none_or(|x| x.starts_with('#'))
+        w.next() == Some("ensure") && w.next() == Some(name) && w.next().is_none_or(|x| x.starts_with('#'))
     };
     if !cfg.lines().any(is_it) {
         return None;
     }
-    let mut out: String = cfg
-        .lines()
-        .filter(|l| !is_it(l))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let mut out: String = cfg.lines().filter(|l| !is_it(l)).collect::<Vec<_>>().join("\n");
     if cfg.ends_with('\n') && !out.is_empty() {
         out.push('\n');
     }
@@ -1125,21 +886,18 @@ pub fn without_ensure(cfg: &str, name: &str) -> Option<String> {
 /// record are removed. Returns notes to show.
 pub fn remove(dir: &Path, name: &str) -> Res<Vec<String>> {
     if !valid_asset_name(name) {
-        return Err(format!("'{name}' is not a resource name."));
+        return Err(format!("'{name}' is not a resource name.").into());
     }
     let mut recs = records(dir)?;
     let Some(rec) = recs.paid().into_iter().find(|r| r.id == name) else {
-        return Err(format!(
-            "There is no paid asset called {name} on this server (not found)."
-        ));
+        return Err(format!("There is no paid asset called {name} on this server (not found).").into());
     };
     let mut notes = Vec::new();
     let folder = dir.join("resources").join(&rec.path);
     let mut backup = None;
     if folder.exists() {
         let b = new_backup_path(dir, name);
-        fs::create_dir_all(backups_dir(dir))
-            .map_err(|e| format!("cannot create the backups folder: {e}"))?;
+        fs::create_dir_all(backups_dir(dir)).map_err(|e| format!("cannot create the backups folder: {e}"))?;
         fs::rename(&folder, &b).map_err(|e| format!("cannot move {name} away: {e}"))?;
         backup = Some(b);
     }
@@ -1151,10 +909,7 @@ pub fn remove(dir: &Path, name: &str) -> Res<Vec<String>> {
         return Err(e);
     }
     if let Some(b) = &backup {
-        notes.push(format!(
-            "{name} was moved to {} (kept as a backup).",
-            b.strip_prefix(dir).unwrap_or(b).display()
-        ));
+        notes.push(format!("{name} was moved to {} (kept as a backup).", b.strip_prefix(dir).unwrap_or(b).display()));
         prune_backups(dir, name);
     }
     let cfg_path = dir.join("server.cfg");
@@ -1163,15 +918,11 @@ pub fn remove(dir: &Path, name: &str) -> Res<Vec<String>> {
             if let Some(new) = without_ensure(&cfg, name) {
                 match fs::write(&cfg_path, new) {
                     Ok(()) => notes.push(format!("Removed 'ensure {name}' from server.cfg.")),
-                    Err(e) => notes.push(format!(
-                        "Could not write server.cfg ({e}); remove 'ensure {name}' yourself."
-                    )),
+                    Err(e) => notes.push(format!("Could not write server.cfg ({e}); remove 'ensure {name}' yourself.")),
                 }
             }
         }
-        Err(e) => notes.push(format!(
-            "Could not read server.cfg ({e}); remove 'ensure {name}' yourself if it is there."
-        )),
+        Err(e) => notes.push(format!("Could not read server.cfg ({e}); remove 'ensure {name}' yourself if it is there.")),
     }
     notes.push("Restart the server for this to take effect.".into());
     Ok(notes)
@@ -1202,45 +953,20 @@ pub fn recent_zips(dir: &Path, now: u64, max_age_secs: u64) -> Vec<DownloadZip> 
             if !m.is_file() {
                 return None;
             }
-            let modified = m
-                .modified()
-                .ok()?
-                .duration_since(std::time::UNIX_EPOCH)
-                .ok()?
-                .as_secs();
-            (now.saturating_sub(modified) <= max_age_secs).then_some(DownloadZip {
-                name,
-                size: m.len(),
-                modified_unix: modified,
-            })
+            let modified = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+            (now.saturating_sub(modified) <= max_age_secs).then_some(DownloadZip { name, size: m.len(), modified_unix: modified })
         })
         .collect();
-    v.sort_by(|a, b| {
-        b.modified_unix
-            .cmp(&a.modified_unix)
-            .then_with(|| a.name.cmp(&b.name))
-    });
+    v.sort_by(|a, b| b.modified_unix.cmp(&a.modified_unix).then_with(|| a.name.cmp(&b.name)));
     v.truncate(50);
     v
 }
 
 /// `name` as a file directly inside `dir` (no folders, no `..`), if it is one of the recent zips.
 pub fn resolve_download(dir: &Path, name: &str, now: u64, max_age_secs: u64) -> Res<PathBuf> {
-    let plain = !name.is_empty()
-        && Path::new(name).components().count() == 1
-        && matches!(
-            Path::new(name).components().next(),
-            Some(Component::Normal(_))
-        )
-        && !name.contains(['/', '\\']);
-    if !plain
-        || !recent_zips(dir, now, max_age_secs)
-            .iter()
-            .any(|z| z.name == name)
-    {
-        return Err(format!(
-            "{name} is not one of the recent zips in your Downloads folder."
-        ));
+    let plain = !name.is_empty() && Path::new(name).components().count() == 1 && matches!(Path::new(name).components().next(), Some(Component::Normal(_))) && !name.contains(['/', '\\']);
+    if !plain || !recent_zips(dir, now, max_age_secs).iter().any(|z| z.name == name) {
+        return Err(format!("{name} is not one of the recent zips in your Downloads folder.").into());
     }
     Ok(dir.join(name))
 }

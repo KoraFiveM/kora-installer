@@ -1,25 +1,28 @@
 import { Link } from 'react-router-dom'
-import type { Badge as BadgeT, Mode, ServerStatus } from '@/api/types'
+import type { Badge as BadgeT, Mode, RunMode, ServerStatus, Source, Versions } from '@/api/types'
+import { styleOfMode } from '@/lib/style'
 import { Badge } from '@/components/ui/badge'
+import { t } from '@/i18n'
+import '@/i18n/en/core/status'
 
 export function StatusChip({ status, pending }: { status: ServerStatus; pending?: string }) {
   if (pending) return <Badge tone="amber" dot>{pending}</Badge>
-  if (status === 'running') return <Badge tone="success" dot>Running</Badge>
-  if (status === 'stopped') return <Badge tone="danger" dot>Stopped</Badge>
-  return <Badge tone="neutral" dot>Folder missing</Badge>
+  if (status === 'running') return <Badge tone="success" dot>{t('core.status.running')}</Badge>
+  if (status === 'stopped') return <Badge tone="danger" dot>{t('core.status.stopped')}</Badge>
+  return <Badge tone="neutral" dot>{t('core.status.folderMissing')}</Badge>
 }
 
 function updateBadge(badge: BadgeT | null) {
-  if (!badge) return <Badge tone="plain">Not checked</Badge>
+  if (!badge) return <Badge tone="plain">{t('core.status.notChecked')}</Badge>
   switch (badge.kind) {
     case 'up_to_date':
-      return <Badge tone="plain">Up to date</Badge>
+      return <Badge tone="plain">{t('core.status.upDate')}</Badge>
     case 'updates':
-      return <Badge tone="info">{badge.count === 1 ? '1 update' : `${badge.count ?? 0} updates`}</Badge>
+      return <Badge tone="info">{t('core.status.updates', { count: badge.count ?? 0 })}</Badge>
     case 'needs_attention':
-      return <Badge tone="orange">Needs attention</Badge>
+      return <Badge tone="orange">{t('core.status.needsAttention')}</Badge>
     case 'new_release':
-      return <Badge tone="info">New release</Badge>
+      return <Badge tone="info">{t('core.status.newRelease')}</Badge>
   }
 }
 
@@ -29,6 +32,23 @@ export function UpdateChip({ badge, to }: { badge: BadgeT | null; to?: string })
   return to && badge && badge.kind !== 'up_to_date' ? <Link to={to} className="hover:underline">{chip}</Link> : chip
 }
 
+/** Where a server's resources come from and which versions it follows, in plain words ("Plain copies, released versions"). */
+export function StyleChip({ source, versions }: { source: Source; versions: Versions }) {
+  return (
+    <Badge tone="plain" title={`${source === 'clone' ? t('core.status.plainCopiesOriginalRepositorie') : t('core.status.ownCopiesForksGithub')}; ${versions === 'released' ? 'pinned to released versions' : 'following the latest changes'}.`}>
+      {source === 'clone' ? t('core.status.plainCopies') : t('core.status.ownCopies')}, {versions === 'released' ? t('core.status.releasedVersions') : t('core.status.latestChanges')}
+    </Badge>
+  )
+}
+
+/** The same chip from the old `mode` word (answers from the folder scan, which only knows that). */
 export function ModeChip({ mode }: { mode: Mode }) {
-  return <Badge tone="plain">{mode === 'production' ? 'Production' : 'Development'}</Badge>
+  const { source, versions } = styleOfMode(mode)
+  return <StyleChip source={source} versions={versions} />
+}
+
+/** "In a container (podman, rootless)": only for a server that runs in a container; nothing for the others. */
+export function RunChip({ mode, label }: { mode?: RunMode; label?: string | null }) {
+  if (mode !== 'container') return null
+  return <Badge tone="plain" title={t('core.status.serverRunsContainerIts')}>{label ? label.charAt(0).toUpperCase() + label.slice(1) : t('core.status.inAContainer')}</Badge>
 }

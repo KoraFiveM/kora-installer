@@ -28,8 +28,7 @@ fn make_zip(dir: &Path, name: &str, entries: &[E]) -> PathBuf {
     p
 }
 
-const MANIFEST: &[u8] =
-    b"fx_version 'cerulean'\ngame 'gta5'\nversion '1.4.2'\nescrow_ignore { 'config.lua' }\n";
+const MANIFEST: &[u8] = b"fx_version 'cerulean'\ngame 'gta5'\nversion '1.4.2'\nescrow_ignore { 'config.lua' }\n";
 
 fn asset(prefix: &str) -> Vec<(String, &[u8])> {
     vec![
@@ -50,19 +49,14 @@ fn server() -> (tempfile::TempDir, PathBuf) {
     let t = tempfile::tempdir().unwrap();
     let dir = t.path().join("srv");
     fs::create_dir_all(dir.join("resources/[kora]/kora_core")).unwrap();
-    fs::write(
-        dir.join("server.cfg"),
-        "endpoint_add_tcp \"0.0.0.0:30120\"\nensure [kora]\n",
-    )
-    .unwrap();
+    fs::write(dir.join("server.cfg"), "endpoint_add_tcp \"0.0.0.0:30120\"\nensure [kora]\n").unwrap();
     ServerFile {
+        source: None,
+        versions: None,
         name: "srv".into(),
         mode: Mode::Production,
         dir: dir.clone(),
-        ports: PortsRecord {
-            game: 30120,
-            txadmin: 40120,
-        },
+        ports: PortsRecord { game: 30120, txadmin: 40120 },
         game_build: 1,
         artifact_build: 1,
         database: None,
@@ -98,16 +92,7 @@ fn single_resource_is_found_and_imported() {
     assert!(p.can_import, "{:?}", p.problems);
     assert_eq!(p.resources.len(), 1);
     let r = &p.resources[0];
-    assert_eq!(
-        (
-            r.name.as_str(),
-            r.has_fxmanifest,
-            r.has_fxap,
-            r.escrowed,
-            r.files
-        ),
-        ("qs-housing", true, true, true, 4)
-    );
+    assert_eq!((r.name.as_str(), r.has_fxmanifest, r.has_fxap, r.escrowed, r.files), ("qs-housing", true, true, true, 4));
     assert_eq!(r.version.as_deref(), Some("1.4.2"));
     assert!(!r.replaces);
     assert!(p.problems.is_empty());
@@ -117,10 +102,7 @@ fn single_resource_is_found_and_imported() {
     assert!(!rep.imported[0].replaced);
     let dest = dir.join("resources/[paid]/qs-housing");
     assert!(dest.join(".fxap").is_file(), "the hidden .fxap is kept");
-    assert_eq!(
-        fs::read(dest.join("client/main.lua")).unwrap(),
-        b"FXAP\x00\x01encrypted"
-    );
+    assert_eq!(fs::read(dest.join("client/main.lua")).unwrap(), b"FXAP\x00\x01encrypted");
     assert_eq!(rep.ensured, vec!["qs-housing"]);
     let sf = ServerFile::load(&dir).unwrap();
     let rec = sf.resources.iter().find(|r| r.id == "qs-housing").unwrap();
@@ -128,29 +110,15 @@ fn single_resource_is_found_and_imported() {
     assert_eq!(rec.path, "[paid]/qs-housing");
     assert_eq!(rec.version.as_deref(), Some("1.4.2"));
     assert!(rec.imported_unix.is_some());
-    assert!(
-        !dir.join(".kora")
-            .read_dir()
-            .unwrap()
-            .flatten()
-            .any(|e| e.file_name().to_string_lossy().starts_with("asset-import-")),
-        "staging removed"
-    );
+    assert!(!dir.join(".kora").read_dir().unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("asset-import-")), "staging removed");
     let l = list(&dir).unwrap();
-    assert_eq!(
-        (l.len(), l[0].present, l[0].has_fxap, l[0].backups),
-        (1, true, true, 0)
-    );
+    assert_eq!((l.len(), l[0].present, l[0].has_fxap, l[0].backups), (1, true, true, 0));
 }
 
 #[test]
 fn double_nested_zip_is_flattened_keeping_the_name() {
     let (t, dir) = server();
-    let z = zip_of(
-        t.path(),
-        "download (1).zip",
-        &asset("jim-mechanic/jim-mechanic/"),
-    );
+    let z = zip_of(t.path(), "download (1).zip", &asset("jim-mechanic/jim-mechanic/"));
     let p = inspect(&dir, &z);
     assert!(p.can_import, "{:?}", p.problems);
     assert_eq!(p.resources.len(), 1);
@@ -160,10 +128,7 @@ fn double_nested_zip_is_flattened_keeping_the_name() {
     let dest = dir.join("resources/[paid]/jim-mechanic");
     assert!(dest.join("fxmanifest.lua").is_file());
     assert!(dest.join(".fxap").is_file());
-    assert!(
-        !dest.join("jim-mechanic").exists(),
-        "no double nesting left"
-    );
+    assert!(!dest.join("jim-mechanic").exists(), "no double nesting left");
 }
 
 #[test]
@@ -189,10 +154,7 @@ fn several_resources_in_one_zip() {
 #[test]
 fn missing_fxap_is_a_warning() {
     let (t, dir) = server();
-    let files: Vec<_> = asset("qs-x/")
-        .into_iter()
-        .filter(|(n, _)| !n.ends_with(".fxap"))
-        .collect();
+    let files: Vec<_> = asset("qs-x/").into_iter().filter(|(n, _)| !n.ends_with(".fxap")).collect();
     let z = zip_of(t.path(), "qs-x.zip", &files);
     let p = inspect(&dir, &z);
     assert!(p.resources[0].escrowed && !p.resources[0].has_fxap);
@@ -206,14 +168,7 @@ fn missing_fxap_is_a_warning() {
 #[test]
 fn an_open_resource_is_not_called_escrowed() {
     let (t, dir) = server();
-    let z = zip_of(
-        t.path(),
-        "free.zip",
-        &[
-            ("free/fxmanifest.lua".into(), b"fx_version 'cerulean'\n"),
-            ("free/server.lua".into(), b"print('hi')"),
-        ],
-    );
+    let z = zip_of(t.path(), "free.zip", &[("free/fxmanifest.lua".into(), b"fx_version 'cerulean'\n"), ("free/server.lua".into(), b"print('hi')")]);
     let p = inspect(&dir, &z);
     assert!(!p.resources[0].escrowed && p.problems.is_empty());
 }
@@ -226,19 +181,14 @@ fn no_fxmanifest_is_refused_and_extra_folders_are_skipped() {
     assert!(!p.can_import);
     assert_eq!(kinds(&p), vec![ProblemKind::NoFxmanifest]);
     assert!(p.problems[0].blocking);
-    assert!(import(&dir, &z, &ImportOpts::default(), &mut quiet())
-        .unwrap_err()
-        .contains("fxmanifest"));
+    assert!(import(&dir, &z, &ImportOpts::default(), &mut quiet()).unwrap_err().to_string().contains("fxmanifest"));
 
     let mut files = asset("good/");
     files.push(("docs/manual.pdf".into(), b"pdf"));
     let z = zip_of(t.path(), "y.zip", &files);
     let p = inspect(&dir, &z);
     assert!(p.can_import);
-    assert!(p
-        .problems
-        .iter()
-        .any(|x| x.kind == ProblemKind::NoFxmanifest && !x.blocking));
+    assert!(p.problems.iter().any(|x| x.kind == ProblemKind::NoFxmanifest && !x.blocking));
     assert_eq!(p.importable().count(), 1);
 }
 
@@ -255,26 +205,13 @@ fn a_manifest_at_the_zip_root_uses_the_zip_name() {
 #[test]
 fn zip_slip_and_absolute_paths_are_refused() {
     let (t, dir) = server();
-    for (i, bad) in [
-        "../evil.lua",
-        "res/../../evil.lua",
-        "/etc/evil",
-        "C:\\evil",
-        "res\\..\\..\\evil",
-    ]
-    .iter()
-    .enumerate()
-    {
+    for (i, bad) in ["../evil.lua", "res/../../evil.lua", "/etc/evil", "C:\\evil", "res\\..\\..\\evil"].iter().enumerate() {
         let mut files = asset("res/");
         files.push((bad.to_string(), b"x"));
         let z = zip_of(t.path(), &format!("bad{i}.zip"), &files);
         let p = inspect(&dir, &z);
         assert!(!p.can_import, "{bad}");
-        assert!(
-            kinds(&p).contains(&ProblemKind::UnsafePath),
-            "{bad}: {:?}",
-            p.problems
-        );
+        assert!(kinds(&p).contains(&ProblemKind::UnsafePath), "{bad}: {:?}", p.problems);
         assert!(import(&dir, &z, &ImportOpts::default(), &mut quiet()).is_err());
         assert!(!t.path().join("evil.lua").exists() && !dir.join("evil.lua").exists());
     }
@@ -296,23 +233,12 @@ fn symlink_entries_are_skipped_never_created() {
     let z = make_zip(t.path(), "linky.zip", &es);
     let p = inspect(&dir, &z);
     assert!(p.can_import, "{:?}", p.problems);
-    let skip = p
-        .problems
-        .iter()
-        .find(|x| x.kind == ProblemKind::SkippedEntry)
-        .unwrap();
-    assert!(
-        !skip.blocking && skip.message.starts_with("3 link"),
-        "{}",
-        skip.message
-    );
+    let skip = p.problems.iter().find(|x| x.kind == ProblemKind::SkippedEntry).unwrap();
+    assert!(!skip.blocking && skip.message.starts_with("3 link"), "{}", skip.message);
     import(&dir, &z, &ImportOpts::default(), &mut quiet()).unwrap();
     let dest = dir.join("resources/[paid]/linky");
     for l in ["d/l1", "l2", "passwd"] {
-        assert!(
-            fs::symlink_metadata(dest.join(l)).is_err(),
-            "{l} was not created"
-        );
+        assert!(fs::symlink_metadata(dest.join(l)).is_err(), "{l} was not created");
     }
     assert!(dest.join("d").is_dir());
 }
@@ -324,17 +250,10 @@ fn zip_bomb_ratio_is_refused() {
     let mut files = asset("bomb/");
     files.push(("bomb/stream/big.ytd".into(), &zeros));
     let z = zip_of(t.path(), "bomb.zip", &files);
-    assert!(
-        fs::metadata(&z).unwrap().len() < 1 << 20,
-        "it compresses very well"
-    );
+    assert!(fs::metadata(&z).unwrap().len() < 1 << 20, "it compresses very well");
     let p = inspect(&dir, &z);
     assert!(!p.can_import);
-    assert!(
-        kinds(&p).contains(&ProblemKind::ZipBomb),
-        "{:?}",
-        p.problems
-    );
+    assert!(kinds(&p).contains(&ProblemKind::ZipBomb), "{:?}", p.problems);
     assert!(import(&dir, &z, &ImportOpts::default(), &mut quiet()).is_err());
     assert!(!dir.join("resources/[paid]/bomb").exists());
 }
@@ -356,11 +275,7 @@ fn name_taken_by_another_resource_is_refused() {
     let z = zip_of(t.path(), "q.zip", &asset("qs-housing/"));
     let p = inspect(&dir, &z);
     assert!(!p.can_import);
-    let pr = p
-        .problems
-        .iter()
-        .find(|x| x.kind == ProblemKind::NameTaken)
-        .unwrap();
+    let pr = p.problems.iter().find(|x| x.kind == ProblemKind::NameTaken).unwrap();
     assert!(pr.message.contains("[standalone]"), "{}", pr.message);
 }
 
@@ -379,11 +294,7 @@ fn replace_setup() -> (tempfile::TempDir, PathBuf, PathBuf) {
     let (t, dir) = server();
     let z1 = zip_of(t.path(), "v1.zip", &asset("qs-housing/"));
     import(&dir, &z1, &ImportOpts::default(), &mut quiet()).unwrap();
-    fs::write(
-        dir.join("resources/[paid]/qs-housing/config.lua"),
-        "Config = { mine = true }\n",
-    )
-    .unwrap();
+    fs::write(dir.join("resources/[paid]/qs-housing/config.lua"), "Config = { mine = true }\n").unwrap();
     let mut v2 = asset("qs-housing/");
     v2[0].1 = b"fx_version 'cerulean'\nversion '2.0.0'\n";
     let z2 = zip_of(t.path(), "v2.zip", &v2);
@@ -395,36 +306,18 @@ fn replacing_keeps_a_backup_and_records_the_new_version() {
     let (_t, dir, z2) = replace_setup();
     let p = inspect(&dir, &z2);
     assert!(p.can_import && p.resources[0].replaces, "{:?}", p.problems);
-    assert!(
-        import(&dir, &z2, &ImportOpts { replace: false }, &mut quiet())
-            .unwrap_err()
-            .contains("already imported")
-    );
+    assert!(import(&dir, &z2, &ImportOpts { replace: false }, &mut quiet()).unwrap_err().to_string().contains("already imported"));
     let rep = import(&dir, &z2, &ImportOpts::default(), &mut quiet()).unwrap();
     assert!(rep.imported[0].replaced);
     let backup = dir.join(rep.imported[0].backup.as_ref().unwrap());
-    assert_eq!(
-        fs::read_to_string(backup.join("config.lua")).unwrap(),
-        "Config = { mine = true }\n"
-    );
-    assert_eq!(
-        fs::read_to_string(dir.join("resources/[paid]/qs-housing/config.lua")).unwrap(),
-        "Config = {}\n"
-    );
+    assert_eq!(fs::read_to_string(backup.join("config.lua")).unwrap(), "Config = { mine = true }\n");
+    assert_eq!(fs::read_to_string(dir.join("resources/[paid]/qs-housing/config.lua")).unwrap(), "Config = {}\n");
     let sf = ServerFile::load(&dir).unwrap();
-    let recs: Vec<_> = sf
-        .resources
-        .iter()
-        .filter(|r| r.id == "qs-housing")
-        .collect();
+    let recs: Vec<_> = sf.resources.iter().filter(|r| r.id == "qs-housing").collect();
     assert_eq!(recs.len(), 1, "one record, updated");
     assert_eq!(recs[0].version.as_deref(), Some("2.0.0"));
     let cfg = fs::read_to_string(dir.join("server.cfg")).unwrap();
-    assert_eq!(
-        cfg.matches("ensure qs-housing").count(),
-        1,
-        "ensure line added once"
-    );
+    assert_eq!(cfg.matches("ensure qs-housing").count(), 1, "ensure line added once");
     assert!(rep.ensured.is_empty());
 }
 
@@ -444,21 +337,10 @@ fn a_failed_replace_restores_the_old_copy() {
     FAIL_AFTER.with(|f| f.set(Some(1)));
     let e = import(&dir, &z2, &ImportOpts::default(), &mut quiet()).unwrap_err();
     FAIL_AFTER.with(|f| f.set(None));
-    assert!(e.contains("put back"), "{e}");
-    assert_eq!(
-        fs::read_to_string(dir.join("resources/[paid]/qs-housing/config.lua")).unwrap(),
-        "Config = { mine = true }\n",
-        "the old copy is back"
-    );
-    assert!(
-        backups_of(&dir, "qs-housing").is_empty(),
-        "the backup was moved back, not left behind"
-    );
-    assert_eq!(
-        fs::read(server_file_path(&dir)).unwrap(),
-        before,
-        "record unchanged"
-    );
+    assert!(e.to_string().contains("put back"), "{e}");
+    assert_eq!(fs::read_to_string(dir.join("resources/[paid]/qs-housing/config.lua")).unwrap(), "Config = { mine = true }\n", "the old copy is back");
+    assert!(backups_of(&dir, "qs-housing").is_empty(), "the backup was moved back, not left behind");
+    assert_eq!(fs::read(server_file_path(&dir)).unwrap(), before, "record unchanged");
 }
 
 #[test]
@@ -471,9 +353,7 @@ fn a_failure_halfway_through_several_resources_undoes_the_first() {
     assert!(import(&dir, &z, &ImportOpts::default(), &mut quiet()).is_err());
     FAIL_AFTER.with(|f| f.set(None));
     assert!(!dir.join("resources/[paid]/a1").exists() && !dir.join("resources/[paid]/b2").exists());
-    assert!(!fs::read_to_string(dir.join("server.cfg"))
-        .unwrap()
-        .contains("ensure a1"));
+    assert!(!fs::read_to_string(dir.join("server.cfg")).unwrap().contains("ensure a1"));
 }
 
 #[test]
@@ -486,10 +366,7 @@ fn servers_without_a_kora_record_use_a_side_file() {
     import(&dir, &z, &ImportOpts::default(), &mut quiet()).unwrap();
     assert!(side_path(&dir).is_file());
     assert_eq!(list(&dir).unwrap()[0].name, "asset_a");
-    assert_eq!(
-        fs::read_to_string(dir.join("server.cfg")).unwrap(),
-        "ensure chat\nensure asset_a\n"
-    );
+    assert_eq!(fs::read_to_string(dir.join("server.cfg")).unwrap(), "ensure chat\nensure asset_a\n");
 }
 
 #[test]
@@ -501,42 +378,22 @@ fn remove_moves_the_folder_away_and_drops_ensure_and_record() {
     assert!(notes.iter().any(|n| n.contains("backup")));
     assert!(!dir.join("resources/[paid]/qs-housing").exists());
     assert_eq!(backups_of(&dir, "qs-housing").len(), 1);
-    assert!(!fs::read_to_string(dir.join("server.cfg"))
-        .unwrap()
-        .contains("qs-housing"));
+    assert!(!fs::read_to_string(dir.join("server.cfg")).unwrap().contains("qs-housing"));
     assert!(list(&dir).unwrap().is_empty());
-    assert!(
-        ServerFile::load(&dir)
-            .unwrap()
-            .resources
-            .iter()
-            .any(|r| r.id == "kora-core"),
-        "other records kept"
-    );
-    assert!(remove(&dir, "qs-housing")
-        .unwrap_err()
-        .contains("not found"));
-    assert!(
-        remove(&dir, "kora-core").is_err(),
-        "only paid assets can be removed here"
-    );
+    assert!(ServerFile::load(&dir).unwrap().resources.iter().any(|r| r.id == "kora-core"), "other records kept");
+    assert!(remove(&dir, "qs-housing").unwrap_err().to_string().contains("not found"));
+    assert!(remove(&dir, "kora-core").is_err(), "only paid assets can be removed here");
 }
 
 #[test]
 fn ensure_lines_are_removed_exactly() {
-    assert_eq!(
-        without_ensure("ensure a\nensure ab\nensure a # x\n", "a").as_deref(),
-        Some("ensure ab\n")
-    );
+    assert_eq!(without_ensure("ensure a\nensure ab\nensure a # x\n", "a").as_deref(), Some("ensure ab\n"));
     assert_eq!(without_ensure("ensure ab\n", "a"), None);
 }
 
 #[test]
 fn manifest_versions() {
-    assert_eq!(
-        manifest_version("fx_version 'cerulean'\nversion '1.0.3'\n").as_deref(),
-        Some("1.0.3")
-    );
+    assert_eq!(manifest_version("fx_version 'cerulean'\nversion '1.0.3'\n").as_deref(), Some("1.0.3"));
     assert_eq!(manifest_version("version \"2\"").as_deref(), Some("2"));
     assert_eq!(manifest_version("version('3.1')").as_deref(), Some("3.1"));
     assert_eq!(manifest_version("fx_version 'cerulean'"), None);
@@ -558,22 +415,9 @@ fn recent_downloads_are_listed_and_resolved_safely() {
     let names: Vec<_> = v.iter().map(|z| z.name.as_str()).collect();
     assert_eq!(names.len(), 2, "{names:?}");
     assert!(names.contains(&"a.zip") && names.contains(&"B.ZIP"));
-    assert!(
-        recent_zips(d, now + 2 * 86_400, 86_400).is_empty(),
-        "older than a day"
-    );
-    assert_eq!(
-        resolve_download(d, "a.zip", now, 86_400).unwrap(),
-        d.join("a.zip")
-    );
-    for bad in [
-        "../a.zip",
-        "notes.txt",
-        "link.zip",
-        "/etc/passwd",
-        "sub/a.zip",
-        "",
-    ] {
+    assert!(recent_zips(d, now + 2 * 86_400, 86_400).is_empty(), "older than a day");
+    assert_eq!(resolve_download(d, "a.zip", now, 86_400).unwrap(), d.join("a.zip"));
+    for bad in ["../a.zip", "notes.txt", "link.zip", "/etc/passwd", "sub/a.zip", ""] {
         assert!(resolve_download(d, bad, now, 86_400).is_err(), "{bad}");
     }
 }
@@ -602,18 +446,11 @@ fn entitlement_errors_get_plain_fixes() {
     let v = h.iter().find(|x| x.kind == HintKind::VerifyFailed).unwrap();
     assert_eq!(v.resource.as_deref(), Some("jim-mechanic"));
     assert!(v.fix.contains(".fxap"));
-    let d = h
-        .iter()
-        .find(|x| x.kind == HintKind::DownloadFailed)
-        .unwrap();
+    let d = h.iter().find(|x| x.kind == HintKind::DownloadFailed).unwrap();
     assert_eq!(d.resource.as_deref(), Some("cool_car"));
     assert!(entitlement_hints(&["all good"]).is_empty());
     let unnamed = entitlement_hints(&["You lack the required entitlement to use this resource"]);
-    assert!(
-        unnamed[0].fix.contains("bought this asset"),
-        "{}",
-        unnamed[0].fix
-    );
+    assert!(unnamed[0].fix.contains("bought this asset"), "{}", unnamed[0].fix);
 }
 
 #[test]
@@ -621,11 +458,7 @@ fn hints_are_read_from_the_server_console_log() {
     let (_t, dir) = server();
     assert!(hints_for_server(&dir).is_empty());
     fs::create_dir_all(dir.join(".kora")).unwrap();
-    fs::write(
-        dir.join(".kora/console.log"),
-        "boot\nFailed to verify protected resource qs-housing\n",
-    )
-    .unwrap();
+    fs::write(dir.join(".kora/console.log"), "boot\nFailed to verify protected resource qs-housing\n").unwrap();
     let h = hints_for_server(&dir);
     assert_eq!(h.len(), 1);
     assert_eq!(h[0].resource.as_deref(), Some("qs-housing"));

@@ -1,0 +1,46 @@
+import { register } from '../../index'
+import type en from '../../en/resources/prDetail'
+
+// German (beta): machine-assisted, to be checked by a native speaker before release.
+const messages = {
+  'resources.prDetail.loaderNodeAskingGithub': '{loader2, node}GitHub wird zu #{number} gefragt...',
+  'resources.prDetail.pullRequestNumber': 'Pull Request #{number}',
+  'resources.prDetail.merged': 'Gemergt',
+  'resources.prDetail.closed': 'Geschlossen',
+  'resources.prDetail.draft': 'Entwurf',
+  'resources.prDetail.open': 'Offen',
+  'resources.prDetail.hasAConflict': 'Hat einen Konflikt',
+  'resources.prDetail.headIntoBaseRepo': '{head} in {base} auf {repo}',
+  'resources.prDetail.itsNewestCommit': 'Du hast den neuesten Commit.',
+  'resources.prDetail.githubNewerCommitsThan': 'GitHub hat neuere Commits, als dieser Ordner heruntergeladen hat. Hole die neuesten Commits.',
+  'resources.prDetail.githubBehindNewerCommit': 'GitHub hat {behind, plural, one {# neueren Commit} other {# neuere Commits}} als dieser Ordner. Hole die neuesten Commits.',
+  'resources.prDetail.madeAheadOwnTop': ' Du hast {ahead} eigene darüber gemacht.',
+  'resources.prDetail.checksPassing': 'Checks, die nicht bestehen',
+  'resources.prDetail.details': 'Details',
+  'resources.prDetail.failing': 'fehlgeschlagen',
+  'resources.prDetail.stillRunning': 'läuft noch',
+  'resources.prDetail.filesPullRequestChanges': 'Dateien, die dieser Pull Request ändert',
+  'resources.prDetail.changesCountFileValue': 'Ändert {count, plural, one {# Datei} other {# Dateien}}',
+  'resources.prDetail.added': 'hinzugefügt ',
+  'resources.prDetail.removed': 'entfernt ',
+  'resources.prDetail.conversation': 'Unterhaltung',
+  'resources.prDetail.noCommentsYet': 'Noch keine Kommentare.',
+  'resources.prDetail.approved': ' hat genehmigt',
+  'resources.prDetail.askedChanges': ' hat Änderungen angefordert',
+  'resources.prDetail.reviewed': ' hat geprüft',
+  'resources.prDetail.yourReply': 'Deine Antwort',
+  'resources.prDetail.commentReview': 'Dein Kommentar oder deine Review',
+  'resources.prDetail.writeCommentReasonReview': 'Schreibe einen Kommentar oder den Grund für deine Review',
+  'resources.prDetail.comment': 'Kommentieren',
+  'resources.prDetail.approve': 'Genehmigen',
+  'resources.prDetail.writeReasonFirst': 'Schreibe zuerst den Grund',
+  'resources.prDetail.askChanges': 'Änderungen anfordern',
+  'resources.prDetail.githubAccountValueMay': 'Dein GitHub-Konto ({account}) darf hier nicht mergen',
+  'resources.prDetail.mergeValue': 'Mergen{value}',
+  'resources.prDetail.mergingNeedsWriteAccess': 'Zum Mergen ist Schreibzugriff auf {repo} nötig, und das GitHub-Konto, mit dem dieser Computer angemeldet ist ({account}), hat ihn nicht.',
+  'resources.prDetail.mergePullRequestNumber': 'Pull Request #{number} mergen?',
+  'resources.prDetail.mergesIntoBaseRepo': 'Das mergt ihn auf GitHub tatsächlich in {base} von {repo}, als {account}{value2}. Von hier aus lässt sich das nicht rückgängig machen.',
+  'resources.prDetail.mergeIt': 'Mergen',
+} satisfies Record<keyof typeof en, string>
+
+register('de', messages)

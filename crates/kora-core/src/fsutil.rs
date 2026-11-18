@@ -280,9 +280,7 @@ mod nofollow {
             let tmp_c = cstr(temp_name(name).as_bytes())?;
             // O_EXCL + O_NOFOLLOW: a file or link someone planted under that name is never opened.
             // SAFETY: valid fd and NUL-terminated name.
-            let fd = unsafe {
-                libc::openat(dir.as_raw_fd(), tmp_c.as_ptr(), libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC, mode as libc::c_uint)
-            };
+            let fd = unsafe { libc::openat(dir.as_raw_fd(), tmp_c.as_ptr(), libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC, mode as libc::c_uint) };
             if fd < 0 {
                 let e = io::Error::last_os_error();
                 tries += 1;
@@ -386,6 +384,47 @@ mod nofollow {
         Ok(true)
     }
 
+    /// `chown -R uid:gid` below the open folder `dir`, never through a link: every folder is opened
+    /// with `O_NOFOLLOW` relative to its parent and listed through its own descriptor, entries are
+    /// changed with `AT_SYMLINK_NOFOLLOW`, and a file with other hard links is left alone (it may
+    /// be one the person made to a file that is not theirs).
+    fn chown_tree(dir: &OwnedFd, uid: u32, gid: u32, depth: u32) -> io::Result<()> {
+        if depth > 64 {
+            return Err(refused("the folder is nested too deeply to hand over".to_string()));
+        }
+        let listing = PathBuf::from(format!("/proc/self/fd/{}", dir.as_raw_fd()));
+        let names: Vec<std::ffi::OsString> = std::fs::read_dir(&listing)?.filter_map(|e| e.ok().map(|e| e.file_name())).collect();
+        for name in names {
+            let c = cstr(name.as_bytes())?;
+            // SAFETY: zeroed stat is a valid out-buffer; valid fd and name.
+            let mut st: libc::stat = unsafe { std::mem::zeroed() };
+            if unsafe { libc::fstatat(dir.as_raw_fd(), c.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) } != 0 {
+                continue; // gone meanwhile
+            }
+            let kind = st.st_mode & libc::S_IFMT;
+            if kind == libc::S_IFDIR {
+                let child = open_child_dir(dir, &name)?;
+                chown_tree(&child, uid, gid, depth + 1)?;
+            } else if kind == libc::S_IFREG && st.st_nlink > 1 {
+                continue;
+            }
+            // SAFETY: valid fd and name; AT_SYMLINK_NOFOLLOW changes a link itself, never its target.
+            if unsafe { libc::fchownat(dir.as_raw_fd(), c.as_ptr(), uid, gid, libc::AT_SYMLINK_NOFOLLOW) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        // SAFETY: valid fd.
+        if unsafe { libc::fchown(dir.as_raw_fd(), uid, gid) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub fn chown_tree_path(path: &Path, uid: u32, gid: u32, trust: &dyn Fn(u32, u32) -> bool) -> io::Result<()> {
+        let Some(fd) = walk_dir(path, None, trust)? else { return Err(io::Error::new(io::ErrorKind::NotFound, format!("{} does not exist", path.display()))) };
+        chown_tree(&fd, uid, gid, 0)
+    }
+
     pub fn remove_empty_dir(base: &Path, rel: &Path) -> bool {
         let parts = normal_parts(rel);
         let Some((last, dirs)) = parts.split_last() else { return false };
@@ -468,9 +507,7 @@ mod nofollow {
             match std::fs::symlink_metadata(&p) {
                 Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
                 Err(e) => return Err(e),
-                Ok(m) if m.file_type().is_symlink() && i + 1 < parts.len() => {
-                    return Err(refused(format!("'{}' is a link, so Kora will not go through it", part.to_string_lossy())))
-                }
+                Ok(m) if m.file_type().is_symlink() && i + 1 < parts.len() => return Err(refused(format!("'{}' is a link, so Kora will not go through it", part.to_string_lossy()))),
                 Ok(_) => {}
             }
         }
@@ -494,6 +531,10 @@ mod nofollow {
             std::fs::remove_file(&p)?;
         }
         Ok(true)
+    }
+
+    pub fn chown_tree_path(_path: &Path, _uid: u32, _gid: u32, _trust: &dyn Fn(u32, u32) -> bool) -> io::Result<()> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "changing the owner of a folder is only done on Linux"))
     }
 
     pub fn remove_empty_dir(base: &Path, rel: &Path) -> bool {
@@ -549,6 +590,14 @@ pub(crate) fn check_links_default_trust(uid: u32, mode: u32) -> bool {
 /// [`check_links`] with the rule for which links may be followed given (tests: root's view).
 pub(crate) fn check_links_with(path: &Path, trust: &dyn Fn(u32, u32) -> bool) -> io::Result<()> {
     nofollow::walk_dir(path, None, trust).map(|_| ())
+}
+
+/// `chown -R uid:gid` of the folder `path` and everything in it, without following a link anywhere
+/// (see `chown_tree`): what root uses instead of `chown -R <path>`, which would follow a link
+/// swapped in after the check. Unix only.
+pub fn chown_tree_no_follow(path: &Path, uid: u32, gid: u32) -> io::Result<()> {
+    // Only a link inside a folder root owns and nobody else can write (`/home` -> `/var/home`) is followed.
+    nofollow::chown_tree_path(path, uid, gid, &|owner, mode| owner == 0 && mode & 0o022 == 0)
 }
 
 /// Delete `base/rel` (a file, link or whole folder) without ever leaving `base`: `rel` must pass
@@ -800,5 +849,29 @@ mod tests {
         std::fs::write(t.path().join("a"), "x").unwrap();
         rename_retrying(&t.path().join("a"), &t.path().join("b")).unwrap();
         assert!(t.path().join("b").is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn handing_over_a_tree_never_follows_links_or_touches_other_hard_links() {
+        use std::os::unix::fs::MetadataExt;
+        let d = tempfile::tempdir().unwrap();
+        let (me, my_gid) = {
+            let m = std::fs::metadata(d.path()).unwrap();
+            (m.uid(), m.gid())
+        };
+        let tree = d.path().join("srv");
+        std::fs::create_dir_all(tree.join("a/b")).unwrap();
+        std::fs::write(tree.join("a/b/f"), "x").unwrap();
+        let outside = d.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, tree.join("a/link")).unwrap();
+        std::fs::hard_link(tree.join("a/b/f"), d.path().join("other-name")).unwrap();
+        chown_tree_no_follow(&tree, me, my_gid).unwrap();
+        assert!(std::fs::symlink_metadata(tree.join("a/link")).unwrap().file_type().is_symlink());
+        assert!(chown_tree_no_follow(&d.path().join("missing"), me, my_gid).is_err());
+        // a link as the folder itself is refused
+        std::os::unix::fs::symlink(&tree, d.path().join("alias")).unwrap();
+        assert!(chown_tree_no_follow(&d.path().join("alias"), me, my_gid).is_err());
     }
 }

@@ -5,14 +5,13 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::registry::{now_unix, Registry, ServerFile};
-use super::types::Mode;
-use super::{slug, InstallError, Result};
+use super::types::Versions;
+use super::{slug, Problem, Result};
 use crate::firewall;
 use crate::git::{self, CommandRunner, SystemRunner};
 use crate::service::{self, ManagedServer, ServiceManager};
 use crate::update::{
-    self, FetchMode, GitOps, GitResult, HealthCheck, HealthOutcome, HealthRequest, NoMigrations, QuietConfig, RestartDecision, ResourceClass,
-    RunOptions, UpdateError, UpdateReport, UpdateTarget,
+    self, FetchMode, GitOps, GitResult, HealthCheck, HealthOutcome, HealthRequest, NoMigrations, QuietConfig, ResourceClass, RestartDecision, RunOptions, UpdateError, UpdateReport, UpdateTarget,
 };
 
 /// `GitOps` implemented by shelling out to `git` through the git module's runner.
@@ -102,21 +101,11 @@ impl<R: CommandRunner> GitOps for GitCli<R> {
         self.count(repo, &format!("HEAD..{upstream}"))
     }
     fn is_ancestor(&self, repo: &Path, ancestor: &str, descendant: &str) -> GitResult<bool> {
-        let o = self
-            .0
-            .run(
-                "git",
-                &["merge-base", "--is-ancestor", ancestor, descendant],
-                Some(repo),
-            )
-            .map_err(gerr)?;
+        let o = self.0.run("git", &["merge-base", "--is-ancestor", ancestor, descendant], Some(repo)).map_err(gerr)?;
         match o.code {
             0 => Ok(true),
             1 => Ok(false),
-            _ => Err(UpdateError::Git(format!(
-                "could not compare {ancestor} with {descendant}: {}",
-                o.stderr.trim()
-            ))),
+            _ => Err(UpdateError::Git(format!("could not compare {ancestor} with {descendant}: {}", o.stderr.trim()))),
         }
     }
     fn fetch_origin(&self, repo: &Path) -> GitResult<()> {
@@ -175,11 +164,7 @@ impl<R: CommandRunner> GitOps for GitCli<R> {
     fn move_pinned(&self, repo: &Path, commit: &str) -> GitResult<()> {
         git::move_pinned(&self.0, repo, commit).map(|_| ()).map_err(gerr)
     }
-    fn sync_forks(
-        &self,
-        targets: &[UpdateTarget],
-        progress: &mut dyn FnMut(usize, usize),
-    ) -> Vec<(String, git::SyncOutcome)> {
+    fn sync_forks(&self, targets: &[UpdateTarget], progress: &mut dyn FnMut(usize, usize)) -> Vec<(String, git::SyncOutcome)> {
         // Needs gh and a signed-in user; otherwise the forks are simply left as they are.
         let slug = |repo: &Path, remote: &str| self.git(repo, &["remote", "get-url", remote]).ok().and_then(|o| git::slug_of_url(o.stdout.trim()));
         let jobs: Vec<git::SyncJob> = targets
@@ -194,15 +179,7 @@ impl<R: CommandRunner> GitOps for GitCli<R> {
         if jobs.is_empty() || !git::is_signed_in(&self.0) {
             return Vec::new();
         }
-        git::sync_forks_paced(
-            &self.0,
-            &jobs,
-            &git::ForkConfig {
-                sync_existing: true,
-                ..git::ForkConfig::default()
-            },
-            progress,
-        )
+        git::sync_forks_paced(&self.0, &jobs, &git::ForkConfig { sync_existing: true, ..git::ForkConfig::default() }, progress)
     }
     fn log_subjects(&self, repo: &Path, from: &str, to: &str, max: usize) -> Vec<String> {
         let range = format!("{from}..{to}");
@@ -329,6 +306,8 @@ impl HealthCheck for FaultInjecting<'_> {
 /// a service cannot be restarted by Kora: it is left alone and reported healthy.
 pub struct ServiceHealth {
     pub managed: ManagedServer,
+    /// A container-mode server: restarted through its engine, not systemd.
+    pub container: Option<crate::container::lifecycle::Target>,
     pub game_port: u16,
     pub wait: Duration,
 }
@@ -338,6 +317,9 @@ impl ServiceHealth {
         matches!(firewall::check_port(self.game_port, false), firewall::PortStatus::InUse { .. })
     }
     fn has_service(&self) -> bool {
+        if self.container.is_some() {
+            return true;
+        }
         if cfg!(windows) {
             return self.has_service_via(&service::SystemRunner, service::Platform::Windows);
         }
@@ -349,6 +331,9 @@ impl ServiceHealth {
         !matches!(ServiceManager::new(platform, rn).status(&self.managed), Ok(service::ServiceState::NotInstalled))
     }
     fn restart(&self) -> std::result::Result<(), String> {
+        if let Some(t) = &self.container {
+            return crate::container::lifecycle::control(t, service::ControlAction::Restart, &crate::container::lifecycle::system()).map_err(|p| p.message);
+        }
         let rn = service::SystemRunner;
         ServiceManager::new(service::Platform::current(), &rn).restart(&self.managed).map_err(|e| e.to_string())
     }
@@ -387,40 +372,47 @@ impl HealthCheck for ServiceHealth {
 pub fn auto_update(server: &str) -> Result<UpdateReport> {
     let as_dir = Path::new(server);
     let (name, dir) = if as_dir.is_absolute() && as_dir.join("kora-server.json").is_file() {
-        let sf = ServerFile::load(as_dir).map_err(|e| InstallError(format!("cannot read {}: {e}", as_dir.join("kora-server.json").display())))?;
+        let sf = ServerFile::load(as_dir)?;
         (sf.name, as_dir.to_path_buf())
     } else {
-        let reg = Registry::load().map_err(|e| InstallError(format!("cannot read the server registry: {e}")))?;
-        let entry = reg.find(server).ok_or_else(|| InstallError(format!("no registered server named '{server}' (see `kora status`)")))?;
+        let reg = Registry::load().map_err(|e| e.lead("cannot read the server registry"))?;
+        let entry = reg.find(server).ok_or_else(|| Problem::generic(format!("no registered server named '{server}' (see `kora status`)")))?;
         (entry.name.clone(), entry.dir.clone())
     };
+    // A server on released versions moves between releases (the catalogue decides), through the same engine as the
+    // manual update; it takes the update lock itself.
+    if let Some(sf) = ServerFile::load(&dir).ok().filter(|sf| sf.versions() == Versions::Released) {
+        let res = auto_update_released(&sf, &|sf| update::manual::apply(sf, update::manual::Scope::All, update::manual::ApplyOpts::new(update::manual::RestartPolicy::WhenQuiet), &mut |_| {}));
+        if let Ok(report) = &res {
+            let record = super::registry::ServerEntry { source: sf.source, versions: sf.versions, name: name.clone(), dir: dir.clone(), mode: sf.mode, ports: sf.ports, created_unix: sf.created_unix };
+            crate::notify::after_update(&record, report);
+        }
+        return res;
+    }
     let res = with_git(&dir, |git| {
         // Read the server file under the lock, so a concurrent manual update is never overwritten.
-        auto_update_in(
-            &name,
-            &dir,
-            git,
-            &|sf| service_health(&name, &dir, sf),
-            &|sf, h| {
-                if h.running() {
-                    online_players(sf.ports.game)
-                } else {
-                    Some(0)
-                }
-            },
-        )
+        auto_update_in(&name, &dir, git, &|sf| service_health(&name, &dir, sf), &|sf, h| {
+            if h.running() {
+                online_players(sf.ports.game)
+            } else {
+                Some(0)
+            }
+        })
     });
     if let Ok((report, sf)) = &res {
-        let record = super::registry::ServerEntry {
-            name: name.clone(),
-            dir: dir.clone(),
-            mode: sf.mode,
-            ports: sf.ports,
-            created_unix: sf.created_unix,
-        };
+        let record = super::registry::ServerEntry { source: sf.source, versions: sf.versions, name: name.clone(), dir: dir.clone(), mode: sf.mode, ports: sf.ports, created_unix: sf.created_unix };
         crate::notify::after_update(&record, report);
     }
     res.map(|(r, _)| r)
+}
+
+/// The scheduled update of a server on released versions: `run` is the release engine (the same one as a manual update, which
+/// takes the update lock itself); this writes `update.log` the way the branch-following update does. A resource that was
+/// put on a branch or a pull request is left alone by the engine and reported, never a failure.
+pub(crate) fn auto_update_released(sf: &ServerFile, run: &dyn Fn(&ServerFile) -> Result<UpdateReport>) -> Result<UpdateReport> {
+    let res = run(sf);
+    append_log(&sf.dir, &res.as_ref().map(UpdateReport::summary).unwrap_or_else(|e| format!("update failed: {}", e.one_line())));
+    res
 }
 
 /// The locked part of [`auto_update`], with injectable git, health and player count: takes the
@@ -437,35 +429,22 @@ pub fn auto_update_in<H: HealthCheck>(
         Ok(l) => l,
         Err(e) => {
             append_log(dir, &format!("skipped: {e}"));
-            return Err(InstallError(e.to_string()));
+            return Err(Problem::from(e));
         }
     };
-    let res = ServerFile::load(dir)
-        .map_err(|e| {
-            InstallError(format!(
-                "cannot read {}: {e}",
-                dir.join("kora-server.json").display()
-            ))
-        })
-        .and_then(|sf| {
-            let h = health(&sf);
-            // Running server: ask it for its player count (restart-needing updates wait for 0 players);
-            // a server that is not running has none. Asked after the fork sync, which can take minutes.
-            update_server(name, dir, &sf, git, &FaultInjecting(&h), &|| {
-                players(&sf, &h)
-            })
-            .map(|r| (r, sf))
-        });
+    let res = ServerFile::load(dir).and_then(|sf| {
+        let h = health(&sf);
+        // Running server: ask it for its player count (restart-needing updates wait for 0 players);
+        // a server that is not running has none. Asked after the fork sync, which can take minutes.
+        update_server(name, dir, &sf, git, &FaultInjecting(&h), &|| players(&sf, &h)).map(|r| (r, sf))
+    });
     let line = match &res {
         Ok((r, _)) => r.summary(),
-        Err(e) => format!("update failed: {e}"),
+        Err(e) => format!("update failed: {}", e.one_line()),
     };
     append_log(dir, &line);
     if let Ok((report, _)) = &res {
-        crate::update::status::record(
-            dir,
-            &crate::update::manual::apply_status(report, now_unix(), &None),
-        );
+        crate::update::status::record(dir, &crate::update::manual::apply_status(report, now_unix(), &None));
     }
     res
 }
@@ -481,7 +460,8 @@ pub(crate) fn service_health(name: &str, dir: &Path, sf: &ServerFile) -> Service
         kora_exe: "kora".into(),
         windows_run_as: None,
     };
-    ServiceHealth { managed, game_port: sf.ports.game, wait: Duration::from_secs(90) }
+    let container = crate::container::lifecycle::target_of(name, dir).ok().flatten();
+    ServiceHealth { managed, container, game_port: sf.ports.game, wait: Duration::from_secs(90) }
 }
 
 /// Run `f` with the command runner appropriate for who owns `dir` (the same choice as [`with_git`]): for work that needs
@@ -514,27 +494,15 @@ fn append_log(dir: &Path, text: &str) {
 
 /// The engine wiring, with injectable git and health (used by tests). Does not take the update lock:
 /// [`auto_update_in`] does. `players` is asked after the forks were synced.
-pub fn update_server(
-    name: &str,
-    dir: &Path,
-    sf: &ServerFile,
-    git: &dyn GitOps,
-    health: &dyn HealthCheck,
-    players: &dyn Fn() -> Option<u32>,
-) -> Result<UpdateReport> {
-    if sf.mode != Mode::Development {
-        return err_msg("auto-update only supports development servers; production servers move to newer releases manually");
+pub fn update_server(name: &str, dir: &Path, sf: &ServerFile, git: &dyn GitOps, health: &dyn HealthCheck, players: &dyn Fn() -> Option<u32>) -> Result<UpdateReport> {
+    if sf.versions() != Versions::Latest {
+        return err_msg("this server follows released versions: its automatic update moves between releases (see `kora_core::update::manual::apply`), not along a branch");
     }
     let targets: Vec<UpdateTarget> = sf
         .resources
         .iter()
         .filter(|r| !r.third_party && !super::pinned::is_subpath_copy(&dir.join("resources").join(&r.path)))
-        .map(|r| UpdateTarget {
-            id: r.id.clone(),
-            path: dir.join("resources").join(&r.path),
-            upstream_ref: format!("upstream/{}", r.branch),
-            class: ResourceClass::from_id(&r.id),
-        })
+        .map(|r| UpdateTarget { id: r.id.clone(), path: dir.join("resources").join(&r.path), upstream_ref: format!("upstream/{}", r.branch), class: ResourceClass::from_id(&r.id) })
         .collect();
     // Bring the user's forks on GitHub up to date first (fast-forward only), then the local checkouts.
     let fork_sync = git.sync_forks(&targets, &mut |_, _| {});
@@ -545,39 +513,25 @@ pub fn update_server(
     let now = now_unix();
     let snap_dir = update::snapshot_dir(dir);
     let snapshot = snap_dir.join(format!("{}.json", update::new_snapshot_id(&snap_dir, now)));
-    let restart: RestartDecision = update::decide_restart(
-        players(),
-        0,
-        &QuietConfig {
-            window: None,
-            max_players: 0,
-        },
-    );
-    let opts = RunOptions {
-        server: name,
-        snapshot_file: &snapshot,
-        now_unix: now,
-        restart,
-    };
-    let mut report = update::run_update(git, health, &NoMigrations, &plan, &opts)
-        .map_err(|e| InstallError(e.to_string()))?;
+    let restart: RestartDecision = update::decide_restart(players(), 0, &QuietConfig { window: None, max_players: 0 });
+    let opts = RunOptions { server: name, snapshot_file: &snapshot, now_unix: now, restart };
+    let mut report = update::run_update(git, health, &NoMigrations, &plan, &opts).map_err(|e| Problem::generic(e.to_string()))?;
     update::add_fork_sync(&mut report, fork_sync);
-    report.held = held
-        .iter()
-        .map(|(id, c)| (id.clone(), update::held_text(c)))
-        .collect();
+    report.held = held.iter().map(|(id, c)| (id.clone(), update::held_text(c))).collect();
     update::record_holds(dir, &plan, &report);
     update::prune_snapshots(dir, update::KEEP_SNAPSHOTS);
     Ok(report)
 }
 
 fn err_msg<T>(m: &str) -> Result<T> {
-    Err(InstallError(m.into()))
+    Err(Problem::generic(m))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(unused_imports)]
+    use crate::installer::Mode;
 
     /// The update timer runs as root; `update.log` is in a folder the service account owns.
     #[cfg(unix)]
@@ -599,7 +553,15 @@ mod tests {
     use std::process::Command;
 
     fn sh(dir: &Path, args: &[&str]) {
-        let o = Command::new("git").args(args).current_dir(dir).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").output().unwrap();
+        let o = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .unwrap();
         assert!(o.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&o.stderr));
     }
 
@@ -615,7 +577,7 @@ mod tests {
             kora_exe: "kora".into(),
             windows_run_as: None,
         };
-        let h = ServiceHealth { managed, game_port: 30120, wait: Duration::from_secs(1) };
+        let h = ServiceHealth { managed, container: None, game_port: 30120, wait: Duration::from_secs(1) };
         let r = FakeRunner::default();
         r.respond("sc.exe query", 1060, "[SC] EnumQueryServicesStatus:OpenService FAILED 1060");
         assert!(!h.has_service_via(&r, service::Platform::Windows));
@@ -652,37 +614,18 @@ mod tests {
             }
             fn sleep(&self, _: Duration) {}
         }
-        let t = |id: &str| UpdateTarget {
-            id: id.into(),
-            path: PathBuf::from("/x"),
-            upstream_ref: "upstream/dev".into(),
-            class: ResourceClass::Other,
-        };
-        let g = GitCli(Gh {
-            calls: RefCell::new(vec![]),
-            signed_in: true,
-        });
+        let t = |id: &str| UpdateTarget { id: id.into(), path: PathBuf::from("/x"), upstream_ref: "upstream/dev".into(), class: ResourceClass::Other };
+        let g = GitCli(Gh { calls: RefCell::new(vec![]), signed_in: true });
         let out = g.sync_forks(&[t("res")], &mut |_, _| {});
-        assert_eq!(
-            out,
-            vec![("res".to_string(), git::SyncOutcome::Synced { commits: 3 })]
-        );
+        assert_eq!(out, vec![("res".to_string(), git::SyncOutcome::Synced { commits: 3 })]);
         let calls = g.0.calls.borrow();
         assert!(calls.contains(&"gh repo sync me/res --branch dev".to_string()), "{calls:?}");
         assert!(calls.iter().all(|c| !c.contains("--force")));
         drop(calls);
         // signed out: no GitHub call beyond the auth check
-        let g = GitCli(Gh {
-            calls: RefCell::new(vec![]),
-            signed_in: false,
-        });
+        let g = GitCli(Gh { calls: RefCell::new(vec![]), signed_in: false });
         assert!(g.sync_forks(&[t("res")], &mut |_, _| {}).is_empty());
-        assert!(g
-            .0
-            .calls
-            .borrow()
-            .iter()
-            .all(|c| !c.contains("/compare/") && !c.contains("repo sync")));
+        assert!(g.0.calls.borrow().iter().all(|c| !c.contains("/compare/") && !c.contains("repo sync")));
     }
 
     #[test]
@@ -758,11 +701,21 @@ mod tests {
             sh(&fork, &["remote", "add", "upstream", up.to_str().unwrap()]);
             std::fs::write(up.join("a"), "2").unwrap();
             sh(&up, &["commit", "-qam", "two"]);
-            records.push(ResourceRecord { id: id.into(), path: path.into(), repository: "https://github.com/x/y.git".into(), branch: "dev".into(), commit: None, third_party: false, ..Default::default() });
+            records.push(ResourceRecord {
+                id: id.into(),
+                path: path.into(),
+                repository: "https://github.com/x/y.git".into(),
+                branch: "dev".into(),
+                commit: None,
+                third_party: false,
+                ..Default::default()
+            });
         }
         // make the second fork dirty
         std::fs::write(t.path().join("srv/resources/[kora]/kora_hud/a"), "local edit").unwrap();
         let sf = ServerFile {
+            source: None,
+            versions: None,
             name: "t".into(),
             mode: Mode::Development,
             dir: t.path().join("srv"),
@@ -775,39 +728,14 @@ mod tests {
             kora_version: "0".into(),
             resources: records,
         };
-        let rep = update_server(
-            "t",
-            &t.path().join("srv"),
-            &sf,
-            &GitCli::default(),
-            &Healthy,
-            &|| Some(0),
-        )
-        .unwrap();
+        let rep = update_server("t", &t.path().join("srv"), &sf, &GitCli::default(), &Healthy, &|| Some(0)).unwrap();
         assert_eq!(rep.updated.len(), 1, "{}", rep.summary());
         assert_eq!(rep.updated[0].id, "kora-chat");
         assert!(rep.needs_attention.iter().any(|(id, _)| id == "kora-hud"));
-        assert_eq!(
-            std::fs::read_to_string(t.path().join("srv/resources/[kora]/kora_chat/a")).unwrap(),
-            "2"
-        );
-        assert_eq!(
-            std::fs::read_to_string(t.path().join("srv/resources/[kora]/kora_hud/a")).unwrap(),
-            "local edit"
-        );
-        let prod = ServerFile {
-            mode: Mode::Production,
-            ..sf
-        };
-        assert!(update_server(
-            "t",
-            &t.path().join("srv"),
-            &prod,
-            &GitCli::default(),
-            &Healthy,
-            &|| Some(0)
-        )
-        .is_err());
+        assert_eq!(std::fs::read_to_string(t.path().join("srv/resources/[kora]/kora_chat/a")).unwrap(), "2");
+        assert_eq!(std::fs::read_to_string(t.path().join("srv/resources/[kora]/kora_hud/a")).unwrap(), "local edit");
+        let prod = ServerFile { mode: Mode::Production, ..sf };
+        assert!(update_server("t", &t.path().join("srv"), &prod, &GitCli::default(), &Healthy, &|| Some(0)).is_err());
         // The automatic run saves its snapshot where `kora update --rollback` and the panel look.
         let snaps = update::list_snapshots(&t.path().join("srv"));
         assert_eq!(snaps.len(), 1);
@@ -822,13 +750,12 @@ mod tests {
         let dir = t.path().join("srv");
         std::fs::create_dir_all(&dir).unwrap();
         let sf = ServerFile {
+            source: None,
+            versions: None,
             name: "t".into(),
             mode: Mode::Development,
             dir: dir.clone(),
-            ports: PortsRecord {
-                game: 1,
-                txadmin: 2,
-            },
+            ports: PortsRecord { game: 1, txadmin: 2 },
             game_build: 1,
             artifact_build: 1,
             database: None,
@@ -845,16 +772,12 @@ mod tests {
             Some(0)
         })
         .unwrap_err();
-        assert!(update::lock::is_busy_message(&e.to_string()), "{e}");
+        assert_eq!(e.code, crate::git::branches::codes::BUSY, "{e}");
         assert!(!asked.get(), "nothing was looked at");
         let log = std::fs::read_to_string(dir.join("update.log")).unwrap();
-        assert!(
-            log.contains("skipped: Another update is running for this server"),
-            "{log}"
-        );
+        assert!(log.contains("skipped: Another update is running for this server"), "{log}");
         drop(held);
-        let (r, _) =
-            auto_update_in("t", &dir, &GitCli::default(), &|_| Healthy, &|_, _| Some(0)).unwrap();
+        let (r, _) = auto_update_in("t", &dir, &GitCli::default(), &|_| Healthy, &|_, _| Some(0)).unwrap();
         assert!(!r.has_problems());
         assert!(crate::update::status::read(&dir).is_some());
     }

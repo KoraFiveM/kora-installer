@@ -38,7 +38,7 @@ const installButton = () => screen.getByRole('button', { name: 'Install the serv
 async function defaultBody(): Promise<InstallRequest> {
   const d = await api.installs.defaults()
   return {
-    mode: 'production', name: d.name, dir: d.dir, hostname: d.hostname, license_key: KEY, ports: d.ports, txadmin_public: false,
+    source: 'clone', versions: 'released', name: d.name, dir: d.dir, hostname: d.hostname, license_key: KEY, ports: d.ports, txadmin_public: false,
     artifact_url: null, game_build: null, resources: 'all', db: 'install_if_missing', service: true, firewall: true, github_owner: null,
     dry_run: false, db_admin: null, start: true, cfx_identifier: null,
     // A pasted key is saved by default (under "Main" when nothing is saved yet).
@@ -98,15 +98,15 @@ describe('Install wizard: the short path', () => {
     expect(screen.getByLabelText('Server name')).toHaveValue(want.name)
     expect(screen.getByText(want.dir)).toBeInTheDocument()
     expect(screen.queryByLabelText('Server folder')).not.toBeInTheDocument()
-    expect(screen.getByText(/This will be a server for players\./)).toBeInTheDocument()
+    expect(screen.getByText(/plain copies of the originals, at released versions/)).toBeInTheDocument()
     await next(user)
 
     // 3. Check and install: every suggested answer, in plain words, each with Change.
     expect(await heading('Check and install')).toBeInTheDocument()
-    for (const text of [/Provided \(hidden\)/, 'Production (a server for players)', want.name, want.dir, `Game ${want.ports.game}, txAdmin ${want.ports.txadmin}`, 'Recommended', 'Everything', 'Set up for me', 'Automatic', 'Open the game port', 'Yes', 'Not set. Kora makes a local admin with a generated password.']) {
+    for (const text of [/Provided \(hidden\)/, "Kora's resources as they are (plain copies)", 'Released versions (stable)', want.name, want.dir, `Game ${want.ports.game}, txAdmin ${want.ports.txadmin}`, 'Recommended', 'Everything', 'Set up for me', 'Automatic', 'Open the game port', 'Yes', 'Not set. Kora makes a local admin with a generated password.']) {
       expect(screen.getByText(text)).toBeInTheDocument()
     }
-    for (const row of ['Licence key', 'Kind of server', 'Name', 'Folder', 'Ports', 'FiveM server build', 'Resources', 'Database', 'Firewall', 'Background service', 'Sign in to txAdmin with your Cfx.re account']) {
+    for (const row of ['Licence key', 'Resources come from', 'Versions', 'Name', 'Folder', 'Ports', 'FiveM server build', 'Resources', 'Database', 'Firewall', 'Background service', 'Sign in to txAdmin with your Cfx.re account']) {
       expect(screen.getByRole('button', { name: `Change ${row}` })).toBeInTheDocument()
     }
     expect(screen.queryByText(/cfxk_abcdefghij/)).not.toBeInTheDocument()
@@ -199,9 +199,12 @@ describe('Install wizard: the short path', () => {
     renderApp(<InstallWizard />, '/install')
     await user.type(await screen.findByLabelText('Licence key'), KEY)
     await next(user)
-    await user.click(await screen.findByRole('button', { name: 'Make a development server instead' }))
-    expect(screen.getByLabelText(/Production/)).toBeChecked()
-    await user.click(screen.getByLabelText(/Development/))
+    await user.click(await screen.findByRole('button', { name: 'Choose where they come from' }))
+    expect(screen.getByLabelText(/Kora's resources as they are/)).toBeChecked()
+    expect(screen.getByLabelText(/Released versions/)).toBeChecked()
+    await user.click(screen.getByLabelText(/Make my own copies on GitHub/))
+    // Choosing your own copies moves the versions to the usual answer for them, until the person picks versions.
+    expect(screen.getByLabelText(/Latest changes/)).toBeChecked()
     expect(screen.getByText('3. GitHub')).toBeInTheDocument()
     expect(screen.getByText('4. Check and install')).toBeInTheDocument()
     await next(user)
@@ -216,7 +219,7 @@ describe('Install wizard: the short path', () => {
     const d = await api.installs.defaults()
     vi.spyOn(api.installs, 'defaults').mockResolvedValue({
       ...d,
-      saved: { mode: 'production', name: 'old-one', dir: '/srv/games/old-one', hostname: 'Old One', ports: { game: 30555, txadmin: 40555 }, db: 'skip', resources: { only: ['kora_core', 'chat'] }, service: false, firewall: false, cfx_identifier: 'fivem:99' },
+      saved: { mode: 'production', source: 'clone', versions: 'released', name: 'old-one', dir: '/srv/games/old-one', hostname: 'Old One', ports: { game: 30555, txadmin: 40555 }, db: 'skip', resources: { only: ['kora_core', 'chat'] }, service: false, firewall: false, cfx_identifier: 'fivem:99', txadmin_public: false, artifact_url: null, game_build: null, github_owner: null, start: false, license_key_name: null },
     })
     renderApp(<InstallWizard />, '/install')
     await user.click(await screen.findByRole('button', { name: 'Continue where I left off' }))
@@ -247,8 +250,11 @@ describe('Install wizard: every step', () => {
 
     const seen: string[] = []
     const see = async (title: string) => { seen.push((await heading(title)).textContent ?? '') }
-    await see('Kind of server')
-    expect(screen.getByLabelText(/Production/)).toBeChecked()
+    await see('Where the resources come from')
+    expect(screen.getByLabelText(/Kora's resources as they are/)).toBeChecked()
+    await next(user)
+    await see('Which versions')
+    expect(screen.getByLabelText(/Released versions/)).toBeChecked()
     await next(user)
     await see('Name your server')
     expect(screen.getByLabelText('Server folder')).toHaveValue(want.dir)
@@ -277,8 +283,8 @@ describe('Install wizard: every step', () => {
     await see('Your Cfx.re account')
     await next(user)
     await see('Check and install')
-    expect(seen).toHaveLength(10)
-    expect(within(screen.getByRole('list', { name: 'Steps' })).getAllByRole('listitem')).toHaveLength(10)
+    expect(seen).toHaveLength(11)
+    expect(within(screen.getByRole('list', { name: 'Steps' })).getAllByRole('listitem')).toHaveLength(11)
     await waitFor(() => expect(installButton()).toBeEnabled(), { timeout: 3000 })
     await user.click(installButton())
     expect(start.mock.calls[0][0]).toEqual(want)
@@ -289,7 +295,8 @@ describe('Install wizard: every step', () => {
     renderApp(<InstallWizard />, '/install')
     await screen.findByLabelText('Licence key')
     await user.click(screen.getByRole('button', { name: 'Choose everything myself' }))
-    await screen.findByLabelText(/Production/)
+    await screen.findByLabelText(/Kora's resources as they are/)
+    await next(user)
     await next(user)
     const name = await screen.findByLabelText('Server name')
     await user.clear(name)

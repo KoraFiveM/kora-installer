@@ -23,14 +23,7 @@ const ADDR: &str = "127.0.0.1:47120";
 const ALLOWED_501: &[Op] = &[];
 
 fn uri_for(op: Op) -> String {
-    let path = op
-        .route()
-        .1
-        .replace("{s}", "prod")
-        .replace("{id}", "fakeid")
-        .replace("{file}", "server.log")
-        .replace("{job}", "fakejob")
-        .replace("{name}", "nobody");
+    let path = op.route().1.replace("{s}", "prod").replace("{id}", "fakeid").replace("{file}", "server.log").replace("{job}", "fakejob").replace("{name}", "nobody");
     format!("/api/v1{path}")
 }
 
@@ -40,8 +33,8 @@ async fn every_op_has_a_real_route() {
     maintenance::set_override(Some(FakeMaintenance::new(false)));
     offline::install();
     let fake = FakeBackend::sample();
-    let st = AppState::system(TOKEN.into(), ADDR.parse().unwrap())
-        .with_backend(Arc::new(move || Box::new(fake.clone())));
+    kora_core::installer::registry::use_test_home(); // tests never touch the real Kora folder
+    let st = AppState::system(TOKEN.into(), ADDR.parse().unwrap()).with_backend(Arc::new(move || Box::new(fake.clone())));
     let app = router(st);
     let mut bad = Vec::new();
     for op in Op::ALL {
@@ -57,11 +50,7 @@ async fn every_op_has_a_real_route() {
             .header(header::HOST, ADDR)
             .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
             .header(header::CONTENT_TYPE, "application/json")
-            .body(if method == "GET" || method == "DELETE" {
-                Body::empty()
-            } else {
-                Body::from("{}")
-            })
+            .body(if method == "GET" || method == "DELETE" { Body::empty() } else { Body::from("{}") })
             .unwrap();
         let t0 = std::time::Instant::now();
         let r = app.clone().oneshot(req).await.unwrap();
@@ -71,66 +60,37 @@ async fn every_op_has_a_real_route() {
         }
         let status = r.status().as_u16();
         // Streams (console, events) never finish: look at the head only.
-        let is_stream = r
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .is_some_and(|v| v.to_str().unwrap_or("").starts_with("text/event-stream"));
+        let is_stream = r.headers().get(header::CONTENT_TYPE).is_some_and(|v| v.to_str().unwrap_or("").starts_with("text/event-stream"));
         let (code, message) = if is_stream {
             (String::new(), String::new())
         } else {
             let bytes = axum::body::to_bytes(r.into_body(), 1 << 22).await.unwrap();
             let j: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-            (
-                j["error"]["code"].as_str().unwrap_or("").to_string(),
-                j["error"]["message"].as_str().unwrap_or("").to_string(),
-            )
+            (j["error"]["code"].as_str().unwrap_or("").to_string(), j["error"]["message"].as_str().unwrap_or("").to_string())
         };
         let allowed = ALLOWED_501.contains(op);
         let stub = status == 501 || code == "not_implemented";
         let missing = status == 405 || (status == 404 && message == "unknown API route");
         if missing || (stub && !allowed) {
-            bad.push(format!(
-                "{} {} {} -> {status} {code} {message}",
-                op.name(),
-                method,
-                uri_for(*op)
-            ));
+            bad.push(format!("{} {} {} -> {status} {code} {message}", op.name(), method, uri_for(*op)));
         }
     }
     maintenance::set_override(None);
     offline::remove();
-    assert!(
-        bad.is_empty(),
-        "operations without a working route:\n{}",
-        bad.join("\n")
-    );
+    assert!(bad.is_empty(), "operations without a working route:\n{}", bad.join("\n"));
 }
 
 #[test]
 fn maintenance_ops_are_never_allowed_to_be_stubs() {
-    for op in [
-        Op::SelfUpdateCheck,
-        Op::SelfUpdateApply,
-        Op::AppStatus,
-        Op::AppInstall,
-        Op::AppUninstall,
-        Op::UninstallPlan,
-        Op::UninstallRun,
-        Op::Meta,
-        Op::SessionCreate,
-        Op::JobsGet,
-        Op::JobEvents,
-    ] {
+    for op in [Op::SelfUpdateCheck, Op::SelfUpdateApply, Op::AppStatus, Op::AppInstall, Op::AppUninstall, Op::UninstallPlan, Op::UninstallRun, Op::Meta, Op::SessionCreate, Op::JobsGet, Op::JobEvents]
+    {
         assert!(!ALLOWED_501.contains(&op), "{op:?}");
     }
 }
 
 #[test]
 fn allowed_501_is_empty_at_merge() {
-    assert!(
-        ALLOWED_501.is_empty(),
-        "ALLOWED_501 must be empty at merge: {ALLOWED_501:?}"
-    );
+    assert!(ALLOWED_501.is_empty(), "ALLOWED_501 must be empty at merge: {ALLOWED_501:?}");
 }
 
 /// Offline stand-ins for every seam that would otherwise reach the machine, the network or `gh`.
@@ -171,10 +131,10 @@ mod offline {
         fn disk(&self) -> &dyn DiskInfo {
             self
         }
-        fn db_login(&self, _: Option<&DbAdmin>) -> Result<(), String> {
+        fn db_login(&self, _: Option<&DbAdmin>) -> Result<(), kora_core::problem::Problem> {
             Ok(())
         }
-        fn artifacts(&self) -> Result<ArtifactList, String> {
+        fn artifacts(&self) -> Result<ArtifactList, kora_core::problem::Problem> {
             Err("offline".into())
         }
         fn is_elevated(&self) -> bool {
@@ -190,7 +150,7 @@ mod offline {
             true
         }
         fn saved_clear(&self) {}
-        fn run(&self, _: &InstallRequest, _: &mut dyn ProgressSink) -> Result<InstallOutcome, String> {
+        fn run(&self, _: &InstallRequest, _: &mut dyn ProgressSink) -> Result<InstallOutcome, kora_core::problem::Problem> {
             Err("offline".into())
         }
     }
@@ -198,13 +158,13 @@ mod offline {
         fn auth(&self) -> GithubUser {
             GithubUser::signed_out()
         }
-        fn owners(&self) -> Result<Vec<OwnerChoice>, String> {
+        fn owners(&self) -> Result<Vec<OwnerChoice>, kora_core::problem::Problem> {
             Ok(vec![])
         }
-        fn begin_login(&self) -> Result<LoginFlow, String> {
+        fn begin_login(&self) -> Result<LoginFlow, kora_core::problem::Problem> {
             Err("offline".into())
         }
-        fn resolve_owner(&self, _: Option<&str>) -> Result<String, String> {
+        fn resolve_owner(&self, _: Option<&str>) -> Result<String, kora_core::problem::Problem> {
             Err("offline".into())
         }
     }
@@ -213,13 +173,13 @@ mod offline {
         fn tools(&self) -> Vec<kora_core::tools::ToolStatus> {
             vec![]
         }
-        fn install(&self, _: kora_core::problem::Tool, _: &mut dyn FnMut(&str, f32)) -> Result<kora_core::tools::ToolStatus, String> {
+        fn install(&self, _: kora_core::problem::Tool, _: &mut dyn FnMut(&str, f32)) -> Result<kora_core::tools::ToolStatus, kora_core::problem::Problem> {
             Err("offline".into())
         }
         fn database(&self) -> kora_core::api::toolchain::DbState {
             Default::default()
         }
-        fn start_database(&self, _: &mut dyn FnMut(&str)) -> Result<String, String> {
+        fn start_database(&self, _: &mut dyn FnMut(&str)) -> Result<String, kora_core::problem::Problem> {
             Err("offline".into())
         }
         fn admin(&self) -> kora_core::api::toolchain::AdminState {

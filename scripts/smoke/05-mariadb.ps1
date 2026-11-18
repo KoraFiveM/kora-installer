@@ -28,12 +28,20 @@ if (-not $mysqlSvc) {
     $pin = 'd62986d433eeebfde218560b276103831604a61e929e87f1a17f5aebd80257e2'
     $zip = Join-Path $env:RUNNER_TEMP 'stock-mariadb.zip'
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    try {
-        Invoke-WebRequest "https://downloads.mariadb.org/rest-api/mariadb/$ver/mariadb-$ver-winx64.zip" -OutFile $zip -TimeoutSec 600
-    } catch {
-        Write-Host "mirror download failed ($_); falling back to archive.mariadb.org"
-        Invoke-WebRequest "https://archive.mariadb.org/mariadb-$ver/winx64-packages/mariadb-$ver-winx64.zip" -OutFile $zip
+    # The mirror-routed endpoint has been seen taking 20 minutes, and twice in a row nothing at all for the whole 25-minute step
+    # (Invoke-WebRequest -TimeoutSec only limits a quiet connection, not the whole download). curl.exe --max-time limits the
+    # whole transfer: a slow mirror costs a few minutes, then the archive is tried (twice).
+    $sources = @(@{ Url = "https://downloads.mariadb.org/rest-api/mariadb/$ver/mariadb-$ver-winx64.zip"; Limit = 240 },
+                 @{ Url = "https://archive.mariadb.org/mariadb-$ver/winx64-packages/mariadb-$ver-winx64.zip"; Limit = 420 },
+                 @{ Url = "https://archive.mariadb.org/mariadb-$ver/winx64-packages/mariadb-$ver-winx64.zip"; Limit = 420 })
+    $got = $false
+    foreach ($src in $sources) {
+        Remove-Item $zip -ErrorAction SilentlyContinue
+        & curl.exe --location --fail --silent --show-error --connect-timeout 30 --max-time $src.Limit --output $zip $src.Url
+        if ($LASTEXITCODE -eq 0 -and (Test-Path $zip)) { $got = $true; break }
+        Write-Host "download from $($src.Url) did not finish in $($src.Limit) s (curl exit $LASTEXITCODE); trying the next source"
     }
+    if (-not $got) { throw 'the stock MariaDB zip could not be downloaded from any source' }
     Write-Host ("stock MariaDB zip downloaded in {0:n0} s" -f $sw.Elapsed.TotalSeconds)
     Assert-That ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -eq $pin) 'the stock MariaDB zip matches the pinned SHA-256'
     Expand-Archive $zip -DestinationPath 'C:\stock-extract' -Force
@@ -68,8 +76,47 @@ Assert-That ($x.Code -eq 0) 'the generated login works'
 $acl = Get-Acl-Text "$d\database.json"
 Assert-That ($acl -notmatch '(?i)BUILTIN\\Users|Everyone|Authenticated Users') 'database.json ACL is restricted'
 Assert-That ((Get-Content "$d\secrets.cfg" -Raw) -match 'mysql_connection_string') 'secrets.cfg has the connection string'
-$r = Invoke-Native $kora @('delete', 'dbx', '-y'); Show 'kora delete dbx' $r
+# --- backup, wipe a table, restore (a real MariaDB), then a password-protected export
+# `--folder` is a one-off copy kept elsewhere: `latest`, verify and restore look in Kora's own backups folder.
+$koraHome = if ($env:KORA_HOME) { $env:KORA_HOME } else { Join-Path $env:LOCALAPPDATA 'Kora' }
+$bk = Join-Path $koraHome 'server-backups'
+$null = Invoke-Sql $client.FullName $stockPort 'root' $pw 'CREATE TABLE players (id INT PRIMARY KEY, name VARCHAR(40))' $c.database
+$null = Invoke-Sql $client.FullName $stockPort 'root' $pw "INSERT INTO players VALUES (1,'alice'),(2,'bob')" $c.database
+$r = Invoke-Native $kora @('backup', 'create', 'dbx'); Show 'kora backup create dbx' $r
+Assert-That ($r.Code -eq 0) 'kora backup create exits 0'
+Assert-That ($r.Output -notmatch [regex]::Escape($c.password)) 'the database password is not printed'
+$arch = Get-ChildItem $bk -Recurse -Filter '*.tar.gz' | Select-Object -First 1
+Assert-That ($null -ne $arch) 'the backup archive exists'
+$acl = Get-Acl-Text $arch.FullName
+Assert-That ($acl -notmatch '(?i)BUILTIN\\Users|Everyone|Authenticated Users') 'the archive is not readable by other accounts'
+$r = Invoke-Native $kora @('backup', 'verify', 'dbx', 'latest'); Show 'kora backup verify' $r
+Assert-That ($r.Code -eq 0) 'kora backup verify exits 0'
+$null = Invoke-Sql $client.FullName $stockPort 'root' $pw 'DELETE FROM players' $c.database
+$x = Invoke-Sql $client.FullName $stockPort 'root' $pw 'SELECT COUNT(*) FROM players' $c.database
+Assert-That ($x.Output -eq '0') 'the table is wiped'
+$r = Invoke-Native $kora @('backup', 'restore', 'dbx', 'latest', '--yes'); Show 'kora backup restore' $r
+Assert-That ($r.Code -eq 0) 'kora backup restore exits 0'
+$x = Invoke-Sql $client.FullName $stockPort 'root' $pw 'SELECT COUNT(*) FROM players' $c.database
+Assert-That ($x.Output -eq '2') "both rows are back after the restore (got '$($x.Output)')"
+$mv = $bk
+$r = Invoke-Native $kora @('backup', 'create', 'dbx', '--for-move') @{ KORA_BACKUP_PASSWORD = 'a smoke test passphrase' }; Show 'kora backup create --for-move' $r
+Assert-That ($r.Code -eq 0) 'the password-protected export is made'
+$mvf = Get-ChildItem $mv -Recurse -Filter '*.tar.gz.age' | Select-Object -First 1
+Assert-That ($null -ne $mvf) 'the export is an age file'
+$r = Invoke-Native $kora @('delete', 'dbx', '-y'); Show 'kora delete dbx (before the import)' $r
 Assert-That ($r.Code -eq 0) 'kora delete exits 0'
+$d2 = 'C:\kora-smoke\dbx-moved'
+$r = Invoke-Native $kora @('backup', 'import', $mvf.FullName, '--name', 'dbx-moved', '--dir', $d2, '--game-port', '32121', '--txadmin-port', '42121', '--yes') @{ KORA_BACKUP_PASSWORD = 'a smoke test passphrase' }; Show 'kora backup import' $r
+Assert-That ($r.Code -eq 0) 'kora backup import exits 0'
+$c2 = Read-DbName $d2
+Assert-That ($c2.database -like 'kora_*' -and $c2.database -ne $c.database) 'the import made a NEW database'
+$x = Invoke-Sql $client.FullName $stockPort 'root' $pw 'SELECT COUNT(*) FROM players' $c2.database
+Assert-That ($x.Output -eq '2') "the rows are in the new database (got '$($x.Output)')"
+Assert-That ((Get-Content "$d2\secrets.cfg" -Raw) -match 'cfxk_FAKE') 'the licence key moved with the server'
+$r = Invoke-Native $kora @('delete', 'dbx-moved', '-y'); Show 'kora delete dbx-moved' $r
+Assert-That ($r.Code -eq 0) 'the imported server is deleted'
+$c = $c2; $d = $d2
+# ($c and $d now describe the imported server, which was deleted above: the checks below look at its database and folder)
 $x = Invoke-Sql $client.FullName $stockPort 'root' $pw "SELECT (SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='$($c.database)') + (SELECT COUNT(*) FROM mysql.user WHERE user='$($c.user)')"
 Assert-That ($x.Output -eq '0') "the database AND its user are gone after kora delete (got '$($x.Output)')"
 Assert-That (-not (Test-Path $d)) 'server folder gone'

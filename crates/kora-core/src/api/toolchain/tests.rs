@@ -7,17 +7,7 @@ use crate::db::{DbError, DbResult};
 use crate::problem::Action;
 
 fn tool(t: Tool, installed: bool, source: Option<Source>, broken: bool) -> ToolStatus {
-    ToolStatus {
-        tool: t,
-        name: tools::program_name(t),
-        label: t.label(),
-        installed,
-        version: installed.then(|| "2.0.0".to_string()),
-        source,
-        path: None,
-        broken,
-        can_install: true,
-    }
+    ToolStatus { tool: t, name: tools::program_name(t), label: t.label(), installed, version: installed.then(|| "2.0.0".to_string()), source, path: None, broken, can_install: true }
 }
 
 fn running_db() -> DbState {
@@ -173,7 +163,7 @@ fn without_administrator_rights_the_start_is_refused_with_the_elevation_problem_
     let r = Svc::new();
     let p = start_database_with(&r, &stopped(), false, true, Duration::from_secs(1), &mut |_| {}).unwrap_err();
     assert_eq!(p.code, codes::NEEDS_ELEVATION);
-    assert_eq!(p.actions[0], Action::RequestAdmin);
+    assert_eq!(p.actions[0], Action::InstallAdminService);
     assert_eq!(p.actions[1], Action::show_command(&["net", "start", "mariadb"], true));
     assert!(r.calls.borrow().is_empty(), "nothing was run: {:?}", r.calls.borrow());
     let l = start_database_with(&r, &stopped(), false, false, Duration::from_secs(1), &mut |_| {}).unwrap_err();
@@ -198,4 +188,34 @@ fn nothing_to_start_is_not_an_error_when_it_already_runs_and_is_a_plain_problem_
     assert!(start_database_with(&Svc::new(), &up, true, false, Duration::from_secs(1), &mut |_| {}).unwrap().contains("already running"));
     let p = start_database_with(&Svc::new(), &[], true, false, Duration::from_secs(1), &mut |_| {}).unwrap_err();
     assert_eq!(p.code, codes::INSTALL_DB_MISSING);
+}
+
+mod container_line {
+    use crate::api::toolchain::{container_item, CheckState};
+    use crate::container::detect::{ContainerCheck, EngineStatus};
+    use crate::container::EngineKind;
+    use crate::problem::Problem;
+
+    fn engine(can_run: bool, problem: Option<Problem>) -> EngineStatus {
+        EngineStatus { kind: EngineKind::Podman, version: "4.9.3".into(), rootless: true, can_run, summary: "Podman 4.9.3, rootless: x".into(), problem, notes: vec![], selinux: false }
+    }
+
+    #[test]
+    fn a_working_engine_is_ok_a_missing_one_is_information_and_a_broken_one_carries_its_fix() {
+        let ok = ContainerCheck { available: true, chosen: Some(EngineKind::Podman), engines: vec![engine(true, None)], summary: "Podman 4.9.3, rootless: ready to run servers".into() };
+        let i = container_item(&ok);
+        assert_eq!((i.id, i.state), ("container", CheckState::Ok));
+        assert!(i.summary.contains("Podman 4.9.3, rootless") && i.problem.is_none());
+
+        let none = ContainerCheck { available: false, chosen: None, engines: vec![], summary: String::new() };
+        let i = container_item(&none);
+        assert_eq!(i.state, CheckState::Info, "container mode is optional: never a failure of the System check");
+        assert!(i.summary.contains("system services"));
+
+        let p = Problem::new(crate::container::codes::NO_SUBUID, "needs subuid");
+        let broken = ContainerCheck { available: false, chosen: None, engines: vec![engine(false, Some(p))], summary: "Podman: needs subuid".into() };
+        let i = container_item(&broken);
+        assert_eq!(i.state, CheckState::Info);
+        assert!(i.problem.is_some_and(|p| p.has_code(crate::container::codes::NO_SUBUID)));
+    }
 }

@@ -375,9 +375,9 @@ pub fn check_game_build(requested: u32, minimum: u32) -> GameBuildCheck {
 pub fn game_build_warning(requested: u32, minimum: u32) -> Option<String> {
     match check_game_build(requested, minimum) {
         GameBuildCheck::Ok => None,
-        GameBuildCheck::BelowMinimum { requested, minimum } => Some(format!(
-            "Game build {requested} is older than {minimum}, the minimum Kora supports. Some Kora resources may not work; choose {minimum} or newer."
-        )),
+        GameBuildCheck::BelowMinimum { requested, minimum } => {
+            Some(format!("Game build {requested} is older than {minimum}, the minimum Kora supports. Some Kora resources may not work; choose {minimum} or newer."))
+        }
     }
 }
 

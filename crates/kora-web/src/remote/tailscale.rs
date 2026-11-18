@@ -45,13 +45,17 @@ impl TsSelf {
     }
     /// The address to tell people to open: the MagicDNS name when there is one, else the first IPv4.
     pub fn url(&self, port: u16) -> Option<String> {
+        self.url_with("http", port)
+    }
+    /// [`url`](Self::url) with the scheme the panel serves there (`https` once it has a certificate).
+    pub fn url_with(&self, scheme: &str, port: u16) -> Option<String> {
         if let Some(d) = &self.dns_name {
-            return Some(format!("http://{d}:{port}"));
+            return Some(format!("{scheme}://{d}:{port}"));
         }
         let ip = self.ips.iter().find(|i| i.is_ipv4()).or(self.ips.first())?;
         Some(match ip {
-            IpAddr::V4(v4) => format!("http://{v4}:{port}"),
-            IpAddr::V6(v6) => format!("http://[{v6}]:{port}"),
+            IpAddr::V4(v4) => format!("{scheme}://{v4}:{port}"),
+            IpAddr::V6(v6) => format!("{scheme}://[{v6}]:{port}"),
         })
     }
 }
@@ -82,6 +86,11 @@ pub trait Whois: Send + Sync {
     /// This machine's Tailscale state, or `None` when Tailscale is not installed or not answering. Blocking.
     fn status(&self) -> Option<TsSelf> {
         None
+    }
+    /// The certificate and key (PEM) `tailscale cert` issues for `name` (this machine's tailnet name). Blocking, can
+    /// take half a minute the first time. The `Err` text is for the person: why it is not available.
+    fn cert(&self, _name: &str) -> Result<(String, String), String> {
+        Err("Tailscale is not available on this computer.".into())
     }
 }
 
@@ -115,6 +124,35 @@ impl Whois for SystemWhois {
         };
         parse_status(&body)
     }
+    fn cert(&self, name: &str) -> Result<(String, String), String> {
+        issue_cert(name)
+    }
+}
+
+/// `tailscale cert` into a private temporary folder, read back and removed. The folder is made `0700` before
+/// anything is written, so the key is never readable by other accounts, not even for a moment.
+fn issue_cert(name: &str) -> Result<(String, String), String> {
+    // The name goes on a command line: only what a MagicDNS name can be.
+    if name.is_empty() || name.len() > 253 || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') {
+        return Err("This computer's Tailscale name is not one a certificate can be requested for.".into());
+    }
+    let dir = kora_core::installer::registry::kora_home().join("tmp-tailscale-cert");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("could not make a folder for the certificate ({e})"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+    }
+    let (c, k) = (dir.join("cert.pem"), dir.join("key.pem"));
+    let run = cli_timeout(&["cert", "--cert-file", &c.to_string_lossy(), "--key-file", &k.to_string_lossy(), name], 90, true);
+    let out = run.and_then(|_| {
+        let cert = std::fs::read_to_string(&c).map_err(|e| format!("Tailscale did not write the certificate ({e})"))?;
+        let key = std::fs::read_to_string(&k).map_err(|e| format!("Tailscale did not write the key ({e})"))?;
+        Ok((cert, key))
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+    out
 }
 
 /// Read `status --json` (the same shape as the localapi answer).
@@ -124,14 +162,8 @@ pub fn parse_status(json: &str) -> Option<TsSelf> {
     if !me.is_object() {
         return None;
     }
-    let ips = me["TailscaleIPs"]
-        .as_array()
-        .map(|a| a.iter().filter_map(|x| x.as_str()?.parse::<IpAddr>().ok()).collect())
-        .unwrap_or_default();
-    let dns_name = me["DNSName"]
-        .as_str()
-        .map(|d| d.trim().trim_end_matches('.').to_string())
-        .filter(|d| d.contains('.'));
+    let ips = me["TailscaleIPs"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()?.parse::<IpAddr>().ok()).collect()).unwrap_or_default();
+    let dns_name = me["DNSName"].as_str().map(|d| d.trim().trim_end_matches('.').to_string()).filter(|d| d.contains('.'));
     let host_name = me["HostName"].as_str().map(|h| h.trim().to_string()).filter(|h| !h.is_empty());
     let tagged = me["Tags"].as_array().is_some_and(|t| !t.is_empty());
     // `UserID` is a number; the `User` map is keyed by it as a string.
@@ -143,25 +175,15 @@ pub fn parse_status(json: &str) -> Option<TsSelf> {
             (!login.is_empty() && login != "tagged-devices").then(|| login.to_string())
         })
     };
-    Some(TsSelf {
-        running: v["BackendState"].as_str() == Some("Running"),
-        tun: v["TUN"].as_bool(),
-        ips,
-        dns_name,
-        host_name,
-        owner,
-    })
+    Some(TsSelf { running: v["BackendState"].as_str() == Some("Running"), tun: v["TUN"].as_bool(), ips, dns_name, host_name, owner })
 }
 
 /// The login name from a whois answer. Tagged machines have no person: they are refused here.
 pub fn parse_whois(json: &str) -> Result<String, String> {
-    let v: Value = serde_json::from_str(json)
-        .map_err(|_| "Tailscale gave an answer Kora could not read.".to_string())?;
+    let v: Value = serde_json::from_str(json).map_err(|_| "Tailscale gave an answer Kora could not read.".to_string())?;
     let login = v["UserProfile"]["LoginName"].as_str().unwrap_or("").trim();
     if login.is_empty() || login == "tagged-devices" {
-        return Err(
-            "Tailscale could not say which person this is (tagged devices have no login).".into(),
-        );
+        return Err("Tailscale could not say which person this is (tagged devices have no login).".into());
     }
     Ok(login.to_string())
 }
@@ -180,25 +202,16 @@ fn localapi(path: &str) -> Option<Result<String, String>> {
         s.set_read_timeout(Some(Duration::from_secs(3)))?;
         s.set_write_timeout(Some(Duration::from_secs(3)))?;
         // HTTP/1.0: the answer is not chunked and ends when the connection closes.
-        write!(
-            s,
-            "GET {path} HTTP/1.0\r\nHost: local-tailscaled.sock\r\nConnection: close\r\n\r\n"
-        )?;
+        write!(s, "GET {path} HTTP/1.0\r\nHost: local-tailscaled.sock\r\nConnection: close\r\n\r\n")?;
         let mut raw = Vec::new();
         s.take(1 << 20).read_to_end(&mut raw)?;
         let text = String::from_utf8_lossy(&raw).into_owned();
         let (head, body) = text.split_once("\r\n\r\n").unwrap_or((text.as_str(), ""));
-        let ok = head
-            .lines()
-            .next()
-            .is_some_and(|l| l.split_whitespace().nth(1) == Some("200"));
+        let ok = head.lines().next().is_some_and(|l| l.split_whitespace().nth(1) == Some("200"));
         if ok {
             Ok(body.to_string())
         } else {
-            Err(std::io::Error::other(format!(
-                "tailscaled said: {}",
-                head.lines().next().unwrap_or("nothing")
-            )))
+            Err(std::io::Error::other(format!("tailscaled said: {}", head.lines().next().unwrap_or("nothing"))))
         }
     };
     Some(run().map_err(|e| format!("Could not ask Tailscale who this is: {e}")))
@@ -211,25 +224,35 @@ fn localapi(_path: &str) -> Option<Result<String, String>> {
 
 /// Run `tailscale <args>` with a 5 second limit and return its output.
 fn cli(args: &[&str]) -> Result<String, String> {
+    cli_timeout(args, 5, false)
+}
+
+/// [`cli`] with a time limit in seconds. `explain`: on failure say what Tailscale itself said (its first
+/// line, cut short) instead of the generic text; used for `cert`, where the reason (HTTPS not enabled for the
+/// tailnet) is what the person needs.
+fn cli_timeout(args: &[&str], secs: u64, explain: bool) -> Result<String, String> {
     use std::io::Read;
     use std::process::Stdio;
     use std::time::{Duration, Instant};
     // Through `sysexe`: by name Windows looks next to kora.exe first, and what this program says decides who a
     // remote visitor is.
     let mut c = kora_core::sysexe::command("tailscale");
-    c.args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+    c.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(if explain { Stdio::piped() } else { Stdio::null() });
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let mut child = c
-        .spawn()
-        .map_err(|_| "Tailscale is not installed or not running on this computer.".to_string())?;
+    let mut child = c.spawn().map_err(|_| "Tailscale is not installed or not running on this computer.".to_string())?;
     let mut out = child.stdout.take().ok_or("no output")?;
+    let mut err = child.stderr.take();
+    let err_reader = std::thread::spawn(move || {
+        let mut s = String::new();
+        if let Some(e) = err.as_mut() {
+            let _ = e.by_ref().take(8192).read_to_string(&mut s);
+        }
+        s
+    });
     let reader = std::thread::spawn(move || {
         let mut s = String::new();
         let _ = out.by_ref().take(1 << 20).read_to_string(&mut s);
@@ -240,15 +263,17 @@ fn cli(args: &[&str]) -> Result<String, String> {
         match child.try_wait() {
             Ok(Some(st)) => {
                 let s = reader.join().unwrap_or_default();
+                let e = err_reader.join().unwrap_or_default();
                 return if st.success() {
                     Ok(s)
+                } else if explain {
+                    let first = e.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("it gave no reason");
+                    Err(format!("Tailscale could not issue a certificate: {}", first.chars().take(300).collect::<String>()))
                 } else {
                     Err("Tailscale does not know this address.".into())
                 };
             }
-            Ok(None) if t0.elapsed() < Duration::from_secs(5) => {
-                std::thread::sleep(Duration::from_millis(20))
-            }
+            Ok(None) if t0.elapsed() < Duration::from_secs(secs) => std::thread::sleep(Duration::from_millis(20)),
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -282,10 +307,7 @@ mod tests {
         assert_eq!(s.owner.as_deref(), Some("Alice@Example.com"));
         assert_eq!(s.ips.len(), 2);
         assert_eq!(s.url(47120).unwrap(), "http://box.tail1234.ts.net:47120");
-        assert_eq!(
-            s.host_names(),
-            vec!["box.tail1234.ts.net", "box", "100.101.102.103", "fd7a:115c:a1e0::1"]
-        );
+        assert_eq!(s.host_names(), vec!["box.tail1234.ts.net", "box", "100.101.102.103", "fd7a:115c:a1e0::1"]);
         assert!(!s.host_names().iter().any(|n| n == "Box-Desktop"), "the OS host name is never trusted");
         // Tagged machine (auth key + tags): nobody owns it.
         let j = r#"{"BackendState":"Running","Self":{"HostName":"srv","TailscaleIPs":["100.64.0.9"],
