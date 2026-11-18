@@ -110,7 +110,8 @@ pub(crate) fn panel_restart(home: &std::path::Path) -> i32 {
         return 1;
     }
     let port = svc::saved_port(home).unwrap_or(kora_web::DEFAULT_PORT);
-    if let Err(e) = svc::restart(&kora_core::service::SystemRunner, platform, windows_panel_pid(home, platform)) {
+    let exe = std::env::current_exe().unwrap_or_default();
+    if let Err(e) = svc::restart(&kora_core::service::SystemRunner, platform, windows_panel_pid(home, platform), &exe, port, svc::saved_tailscale(home)) {
         eprintln!("error: could not restart the background panel: {e}");
         return 1;
     }

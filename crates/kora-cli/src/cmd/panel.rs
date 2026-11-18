@@ -40,6 +40,9 @@ pub(crate) struct PanelArgs {
     /// Run the panel in this window and stop it when the window closes: do not offer or use the background panel.
     #[arg(long, conflicts_with_all = ["install_service", "remove_service", "print_link", "setup"])]
     pub(crate) foreground: bool,
+    /// Windows: start the panel hidden (no console window) and return at once. The start-up entry uses this; other systems ignore it.
+    #[arg(long, hide = true, requires = "foreground")]
+    pub(crate) background: bool,
     /// Make sure the background panel is set up and running, then open it in your browser and print the sign-in link (the install scripts run this). Never reads standard input; on a server with Tailscale it asks once on the terminal whether to use it (KORA_TAILSCALE=1 or 0 answers in advance).
     #[arg(long, conflicts_with_all = ["install_service", "remove_service", "print_link"])]
     pub(crate) setup: bool,
@@ -106,6 +109,34 @@ pub(crate) const ROOT_ONLY_HELP: &[&str] = &[
     "  kora panel --setup",
 ];
 
+/// `kora panel ... --background` (Windows): run the same command again with no console window, and
+/// return. This replaces the old VBScript launcher, which antivirus products flagged as a trojan.
+fn relaunch_hidden() -> i32 {
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: could not find kora.exe: {e}");
+            return 1;
+        }
+    };
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).filter(|x| x != "--background").collect();
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+        cmd.creation_flags(0x0800_0000 | 0x0000_0200);
+    }
+    match cmd.spawn() {
+        Ok(_) => 0,
+        Err(e) => {
+            eprintln!("error: could not start the panel: {e}");
+            1
+        }
+    }
+}
+
 pub(crate) fn panel(a: &PanelArgs) -> i32 {
     panel_with(a, None)
 }
@@ -113,6 +144,9 @@ pub(crate) fn panel(a: &PanelArgs) -> i32 {
 /// [`panel`], opening the browser on `landing` (`/install`) when it runs in this window.
 pub(crate) fn panel_with(a: &PanelArgs, landing: Option<&str>) -> i32 {
     use kora_core::monitor::panel_service as svc;
+    if a.background && cfg!(windows) {
+        return relaunch_hidden();
+    }
     // SECURITY.md: the panel runs as the installing user, never as administrator/root. A root panel
     // would keep its token and state in root's home and run every action with full rights.
     if kora_core::elevate::is_elevated() && std::env::var_os("KORA_ALLOW_ROOT_PANEL").is_none_or(|v| v != "1") {

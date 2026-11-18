@@ -54,8 +54,9 @@ does not, stop on that step, write down its number and collect the items under *
    *If not, copy back:* `kora app status` and a screenshot of the Properties dialog.
 4. [ ] **Nothing machine-wide was made.** `Test-Path "$env:ProgramFiles\Kora"` is `False`. In Settings > Apps > Installed
    apps there is no "Kora" entry. `[Environment]::GetEnvironmentVariable('Path','Machine')` does not mention Kora.
-5. [ ] **Start-up entry.** The file `$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Kora Panel.vbs` exists
-   (it keeps the panel running after sign-in).
+5. [ ] **Start-up entry.** The value `Kora Panel` exists under `HKCU:\Software\Microsoft\Windows\CurrentVersion\Run`
+   (`Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'Kora Panel'`) and points at `kora.exe`
+   with `--background` (it keeps the panel running after sign-in). No `.vbs` file is left in the Startup folder.
 6. [ ] **Open a new normal PowerShell window** and run `kora --version`: it prints `kora 0.7.0`. (The new `PATH` entry
    works.)
 
