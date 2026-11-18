@@ -626,8 +626,11 @@ function Wait-PanelJob($Panel, [string]$JobId, [int]$TimeoutSec = 120, [scriptbl
 # nothing can be piped back across a token boundary.
 function Invoke-AsAccount([ValidateSet('Self', 'Filtered', 'Account')][string]$Kind, [string]$Script, [string]$Dir, [pscredential]$Credential, [int]$TimeoutSec = 120) {
     $id = [guid]::NewGuid().ToString('N').Substring(0, 8)
-    $ps1 = Join-Path $Dir "run-$id.ps1"; $out = Join-Path $Dir "out-$id.txt"; $code = Join-Path $Dir "code-$id.txt"
-    $body = "`$ErrorActionPreference = 'Continue'`r`n& {`r`n$Script`r`n} *> $(ConvertTo-PsLiteral $out)`r`n`$LASTEXITCODE | Set-Content $(ConvertTo-PsLiteral $code)`r`n"
+    $ps1 = Join-Path $Dir "run-$id.ps1"; $inner = Join-Path $Dir "inner-$id.ps1"; $out = Join-Path $Dir "out-$id.txt"; $code = Join-Path $Dir "code-$id.txt"
+    # The script is a file of its own: an `exit N` in it ends only that file (inside a `& { }` block it would end the
+    # wrapper before the exit code is written, and the caller would wait for the whole time limit).
+    Set-Content -Path $inner -Value $Script -Encoding ASCII
+    $body = "`$ErrorActionPreference = 'Continue'`r`n& $(ConvertTo-PsLiteral $inner) *> $(ConvertTo-PsLiteral $out)`r`n`$LASTEXITCODE | Set-Content $(ConvertTo-PsLiteral $code)`r`n"
     Set-Content -Path $ps1 -Value $body -Encoding ASCII
     $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $argText = "-NoProfile -ExecutionPolicy Bypass -File `"$ps1`""
