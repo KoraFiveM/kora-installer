@@ -336,6 +336,63 @@ pub fn uninstall_user(dry_run: bool) -> Result<Vec<String>> {
     uninstall_user_with(&mut RealSys::new(), &ul, dry_run)
 }
 
+/// What removing the per-user COPY of the program (`%LOCALAPPDATA%\Kora\bin`, `~/.local/bin/kora`) changes:
+/// the program, its `.previous` backup, the desktop app next to it, and (Windows) its PATH entry. Servers,
+/// databases and Kora's own records are not part of this. Reads only.
+pub fn plan_program_removal(sys: &dyn Sys, ul: &UserLayout) -> Plan {
+    let mut plan = Plan::default();
+    let (bin, _) = split_last(&ul.program);
+    let mut prev = ul.program.clone().into_os_string();
+    prev.push(".previous");
+    let files = [ul.program.clone(), PathBuf::from(prev), shell_sibling(&ul.program, ul.windows)];
+    if ul.windows && !bin.as_os_str().is_empty() {
+        let dir = bin.to_string_lossy().into_owned();
+        if sys.user_path().ok().flatten().is_some_and(|p| super::pathlist::contains(&p, &dir)) {
+            plan.actions.push(Action::RemoveUserPath(dir));
+            plan.actions.push(Action::BroadcastEnv);
+        }
+    }
+    for f in files {
+        if sys.exists(&f) {
+            plan.actions.push(Action::RemoveFile(f));
+        }
+    }
+    if ul.windows {
+        // `...\Kora\bin`, then `...\Kora` (which also holds Kora's records: only removed when empty).
+        plan.actions.push(Action::RemoveDirIfEmpty(bin.clone()));
+    }
+    plan.actions.retain(|a| match a {
+        Action::RemoveDirIfEmpty(p) => sys.exists(p),
+        _ => true,
+    });
+    plan
+}
+
+/// Remove the per-user copy of the program through `sys` (see [`plan_program_removal`]).
+pub fn remove_program_with(sys: &mut dyn Sys, ul: &UserLayout, dry_run: bool) -> Result<Vec<String>> {
+    let plan = plan_program_removal(sys, ul);
+    let dummy = dummy_layout(ul);
+    let mut out = Vec::new();
+    for a in &plan.actions {
+        if !dry_run {
+            super::apply(sys, &dummy, a).map_err(|e| AppError(format!("{} failed: {e}", a.describe())))?;
+        }
+        out.push(a.describe());
+    }
+    Ok(out)
+}
+
+/// [`remove_program_with`] on the real system.
+pub fn remove_program(dry_run: bool) -> Result<Vec<String>> {
+    let ul = UserLayout::from_env()?;
+    remove_program_with(&mut RealSys::new(), &ul, dry_run)
+}
+
+/// Is there a per-user copy of the program (or a PATH entry for it) to remove?
+pub fn program_present() -> bool {
+    UserLayout::from_env().is_ok_and(|ul| !plan_program_removal(&RealSys::new(), &ul).actions.is_empty())
+}
+
 /// Per-user shortcuts that are in place (`None` = not applicable on this system).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct UserStatus {

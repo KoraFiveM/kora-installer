@@ -11,6 +11,7 @@ struct Fake {
     dirs: Vec<PathBuf>,
     links: BTreeMap<PathBuf, PathBuf>,
     path: Option<String>,
+    user_path: Option<String>,
     shortcuts: BTreeMap<PathBuf, ShortcutSpec>,
     key: Option<UninstallEntry>,
     log: RefCell<Vec<String>>,
@@ -67,6 +68,13 @@ impl Sys for Fake {
         if !busy {
             self.dirs.retain(|d| d != p);
         }
+        Ok(())
+    }
+    fn user_path(&self) -> Result<Option<String>> {
+        Ok(self.user_path.clone())
+    }
+    fn set_user_path(&mut self, v: &str) -> Result<()> {
+        self.user_path = Some(v.to_string());
         Ok(())
     }
     fn machine_path(&self) -> Result<Option<String>> {
@@ -514,6 +522,30 @@ mod per_user {
         let mut g = fake_with(EXE);
         install_user_with(&mut g, &ul, Path::new(EXE), None, &UserOptions::default()).unwrap();
         assert!(g.shortcuts.values().all(|s| s.target.as_path() == Path::new(EXE) && s.minimized));
+    }
+
+    #[test]
+    fn removing_the_program_takes_the_copy_its_backup_and_its_path_entry_and_nothing_else() {
+        let ul = win_user();
+        let bin = r"C:\Users\Sam\AppData\Local\Kora\bin";
+        let records = PathBuf::from(r"C:\Users\Sam\AppData\Local\Kora\kora.db");
+        let mut f = fake_with(EXE);
+        f.files.insert(PathBuf::from(format!("{EXE}.previous")), b"old".to_vec());
+        f.files.insert(records.clone(), b"records".to_vec());
+        f.dirs.push(PathBuf::from(bin));
+        f.user_path = Some(format!(r"C:\Tools;{bin};C:\Other"));
+
+        let dry = remove_program_with(&mut f, &ul, true).unwrap();
+        assert_eq!(dry.len(), 5, "{dry:?}");
+        assert!(f.files.contains_key(Path::new(EXE)), "a dry run changes nothing");
+
+        let out = remove_program_with(&mut f, &ul, false).unwrap();
+        assert!(out.iter().any(|l| l.contains("from your PATH")), "{out:?}");
+        assert!(!f.files.contains_key(Path::new(EXE)) && !f.files.contains_key(Path::new(&format!("{EXE}.previous"))));
+        assert_eq!(f.user_path.as_deref(), Some(r"C:\Tools;C:\Other"), "only our folder leaves the PATH");
+        assert_eq!(f.broadcasts, 1);
+        assert!(f.files.contains_key(&records), "Kora's records are not part of removing the program");
+        assert!(remove_program_with(&mut f, &ul, false).unwrap().is_empty(), "again: nothing to do");
     }
 
     #[test]

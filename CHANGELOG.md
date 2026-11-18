@@ -5,6 +5,9 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- `kora uninstall` (all servers) now also cleans up the per-user install instead of only the shortcuts: it stops the background panel and removes its start-up entry, removes `kora.exe` (and `.previous`) and its user PATH entry, and removes the Windows Firewall rules for `kora.exe` (needs Administrator; otherwise the command to run is printed). Kora's own records (server list, database, sign-in token) are asked about and kept by default (`--delete-files` deletes them). Whatever is left is listed.
+
 ## [0.8.1] - 2026-11-18
 
 A small Windows fix: the background panel no longer starts from a script file that antivirus products flagged.
