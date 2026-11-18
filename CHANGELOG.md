@@ -49,6 +49,12 @@ versions follow [SemVer](https://semver.org/).
 - Remote sessions: passkey/code sessions last 8 hours idle / 3 days; token sessions at most 1 day (was 7). Wording: the remote-actions switch is "for sign-ins that do not come through Tailscale".
 - A token user who has set up a passkey or one-time codes can no longer sign in to the page with the old token (it still works as a script header).
 
+### Fixed (found by running the Windows installer and the administrator service on a real machine)
+- The Windows installer no longer hangs: `kora service allow` (run by the MSI) waited for "Press Enter to close this window" in a console nobody can see. Commands that installers run never wait for Enter, and `ALLOWUSERS` may list several accounts (`;` between names that contain spaces).
+- An account allowed (or denied) with `kora service allow|deny` reaches the service's pipe at once: Windows keeps one access list per pipe name, which the service now sets on the pipe itself, so the first person the installer enrolled is no longer refused at the pipe.
+- Upgrading from a Windows installer without the desktop app to one with it keeps a Start Menu shortcut: the shortcuts that start a bare `kora` are called "Kora Panel"; the desktop app's is "Kora".
+- Files only their owner may open (the panel's sign-in record, saved settings) are locked to the account Windows says is running, not the `USERNAME` variable, and that account may delete them: a program started with another account's environment locked its real user out of its own files.
+
 ### Fixed
 - **The Resources tab of a server Kora did not install** no longer asks for a catalogue that does not exist (the panel answered 422 and the browser logged an error): it says in words that resources can only be added to servers Kora installed. The real-panel browser smoke no longer allows that error.
 - **An install run through the Linux helper** now finishes with the full outcome (connect address, whether it is running, the generated txAdmin account name and where its password is saved), read back from the server folder after the helper finishes (the password file is never read). The page shows the helper's status lines while it works.
