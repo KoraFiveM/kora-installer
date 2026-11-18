@@ -46,7 +46,13 @@ pub fn create_plan(name: &str) -> ServiceResult<Plan> {
 /// Delete an account the installer created.
 pub fn delete_plan(name: &str) -> ServiceResult<Plan> {
     check_name(name)?;
-    Ok(Plan::new(vec![SystemStep::run(format!("Delete the system account '{name}' that Kora created for the server"), "userdel", &[name])]))
+    // The service was stopped before this, but a program the server started on its own (txAdmin restarts the game server
+    // every second when it keeps failing) can still be shutting down, and `userdel` refuses an account that has a process
+    // ("user is currently used by process N", seen in CI). Whatever is left of an account Kora made itself goes first.
+    Ok(Plan::new(vec![
+        SystemStep::run(format!("Stop anything still running as '{name}'"), "pkill", &["-KILL", "-u", name]).tolerant(),
+        SystemStep::run(format!("Delete the system account '{name}' that Kora created for the server"), "userdel", &[name]),
+    ]))
 }
 
 /// First uid of ordinary (login) accounts: `UID_MIN` in `/etc/login.defs`, else 1000.
@@ -105,7 +111,9 @@ mod tests {
         let line = p.steps[0].command_line().unwrap();
         assert_eq!(line, "useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin kora-main");
         assert!(p.needs_admin());
-        assert_eq!(delete_plan("kora-main").unwrap().steps[0].command_line().unwrap(), "userdel kora-main");
+        let del = delete_plan("kora-main").unwrap();
+        assert_eq!(del.steps[0].command_line().unwrap(), "pkill -KILL -u kora-main");
+        assert_eq!(del.steps[1].command_line().unwrap(), "userdel kora-main");
     }
 
     #[test]

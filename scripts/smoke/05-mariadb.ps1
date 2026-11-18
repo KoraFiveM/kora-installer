@@ -28,12 +28,17 @@ if (-not $mysqlSvc) {
     $pin = 'd62986d433eeebfde218560b276103831604a61e929e87f1a17f5aebd80257e2'
     $zip = Join-Path $env:RUNNER_TEMP 'stock-mariadb.zip'
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    try {
-        Invoke-WebRequest "https://downloads.mariadb.org/rest-api/mariadb/$ver/mariadb-$ver-winx64.zip" -OutFile $zip -TimeoutSec 600
-    } catch {
-        Write-Host "mirror download failed ($_); falling back to archive.mariadb.org"
-        Invoke-WebRequest "https://archive.mariadb.org/mariadb-$ver/winx64-packages/mariadb-$ver-winx64.zip" -OutFile $zip
+    # The mirror-routed endpoint has been seen taking 20 minutes (and once nothing for the whole step): a short limit on it, then the
+    # archive with its own limit and one retry, so a slow mirror costs minutes, not the job.
+    $sources = @(@{ Url = "https://downloads.mariadb.org/rest-api/mariadb/$ver/mariadb-$ver-winx64.zip"; Limit = 180 },
+                 @{ Url = "https://archive.mariadb.org/mariadb-$ver/winx64-packages/mariadb-$ver-winx64.zip"; Limit = 600 },
+                 @{ Url = "https://archive.mariadb.org/mariadb-$ver/winx64-packages/mariadb-$ver-winx64.zip"; Limit = 600 })
+    $got = $false
+    foreach ($src in $sources) {
+        try { Invoke-WebRequest $src.Url -OutFile $zip -TimeoutSec $src.Limit; $got = $true; break }
+        catch { Write-Host "download from $($src.Url) failed after the $($src.Limit) s limit or earlier ($_); trying the next source" }
     }
+    if (-not $got) { throw 'the stock MariaDB zip could not be downloaded from any source' }
     Write-Host ("stock MariaDB zip downloaded in {0:n0} s" -f $sw.Elapsed.TotalSeconds)
     Assert-That ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -eq $pin) 'the stock MariaDB zip matches the pinned SHA-256'
     Expand-Archive $zip -DestinationPath 'C:\stock-extract' -Force
