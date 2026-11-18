@@ -6,6 +6,7 @@ versions follow [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Force restart** after an update when the panel runs in a terminal window (it cannot restart itself the usual way): the new version starts in the background with no window, and the page reconnects. `POST /panel/restart?force=true`, local admin only.
 - Install wizard: a **Browse...** button next to the server folder opens the system folder window (in the desktop app, or, when the browser is on the same computer as Kora, a window Kora opens itself: PowerShell's folder dialog on Windows, `zenity` or `kdialog` on Linux, `osascript` on macOS). New local-only API call `pick_folder`.
 - A troubleshooting page, "Players cannot join my server" (`/help/join?server=<name>`), with the steps in order: server running, try it here, try it on the home network, firewall, router port forwarding, providers that share one address (CGNAT), test from outside. Linked from the "Can players reach this server?" card; it shows the server's own game port.
 

@@ -400,6 +400,7 @@ export interface MessageParams {
   'settings.remoteAccess.signsHowsignsin': { howSignsIn: string | number }
   'settings.remoteAccess.tailscaleDevicesOpenPanel': { code: ReactNode; code2: Tag }
   'settings.remoteAccess.tokenName2': { name: string | number }
+  'settings.settingsPage.forceRestartNote': { code: Tag }
   'settings.settingsPage.installedStrongNode': { strong: ReactNode }
   'settings.settingsPage.koraPanelVersionManages': { version: string | number; os: string | number }
   'settings.settingsPage.koraPanelVersionManagesAdmin': { version: string | number; os: string | number }
@@ -534,6 +535,7 @@ export type RichIds =
   | 'settings.remoteAccess.scriptBackupJobPeople'
   | 'settings.remoteAccess.signedStrongNodeBadge'
   | 'settings.remoteAccess.tailscaleDevicesOpenPanel'
+  | 'settings.settingsPage.forceRestartNote'
   | 'settings.settingsPage.installedStrongNode'
   | 'settings.settingsPage.panelDidComeBack'
   | 'settings.settingsPage.sourceReleasesLinkGithub'

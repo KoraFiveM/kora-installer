@@ -2739,6 +2739,14 @@ export type PanelAlert = {
 };
 
 /**
+ * `?force=true` of `POST /panel/restart`: a panel that is not the background service (one running in a terminal
+ * window) cannot restart itself the usual way; this starts a fresh copy of the same command, hidden, and exits.
+ */
+export type PanelRestartQuery = {
+  force?: boolean,
+};
+
+/**
  * `POST /panel/restart`.
  */
 export type PanelRestarting = {

@@ -7,10 +7,10 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
  * different version, or at all after it has been down at least once.
  * Resolves true when it is back, false after `timeoutMs`.
  */
-export async function restartPanel(timeoutMs = 60_000, intervalMs = 1_000): Promise<boolean> {
+export async function restartPanel(timeoutMs = 60_000, intervalMs = 1_000, force = false): Promise<boolean> {
   let before: string | null = null
   try { before = (await api.meta()).version } catch { /* checked below */ }
-  await api.panel.restart()
+  await api.panel.restart(force)
   let wentDown = false
   for (let waited = 0; waited < timeoutMs; waited += intervalMs) {
     await sleep(intervalMs)

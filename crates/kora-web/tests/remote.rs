@@ -1057,6 +1057,12 @@ async fn panel_restart_is_local_and_only_for_the_service() {
     let r = req("POST", "/api/v1/panel/restart").peer(LOOPBACK_PEER).bearer(LAUNCH).send(&w.app).await;
     assert_eq!(r.status, 409, "{:?}", r.json);
     assert!(r.msg().contains("background service"), "{}", r.msg());
+    // A forced restart (the panel runs in a terminal window): 202 and a restart is asked for; still local only.
+    assert_eq!(status(&w, &adam, "POST", "/api/v1/panel/restart?force=true", None).await, 403);
+    let before = seam::restarts();
+    let r = req("POST", "/api/v1/panel/restart?force=true").peer(LOOPBACK_PEER).bearer(LAUNCH).send(&w.app).await;
+    assert_eq!(r.status, 202, "{:?}", r.json);
+    assert_eq!(seam::restarts(), before + 1);
     let r = req("GET", "/api/v1/system").peer(LOOPBACK_PEER).bearer(LAUNCH).send(&w.app).await;
     assert_eq!(r.json["can_restart"], json!(false));
     // The service: 202, and a restart is asked for.

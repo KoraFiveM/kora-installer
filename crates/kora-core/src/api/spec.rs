@@ -277,7 +277,7 @@ pub fn spec(op: Op) -> OpSpec {
         Op::UserRemove => OpSpec::nothing(),
         Op::SessionLogout => OpSpec::nothing(),
         Op::SessionLink => OpSpec::get::<w::SessionLink>(),
-        Op::PanelRestart => OpSpec::get::<w::PanelRestarting>(),
+        Op::PanelRestart => OpSpec::get::<w::PanelRestarting>().with_query::<w::PanelRestartQuery>(),
         Op::CheckCfx => OpSpec::call::<w::CfxRequest, w::CfxCheck>(),
         Op::AssetsList => OpSpec::get::<w::PaidAssets>(),
         Op::AssetInspect => OpSpec::call::<w::AssetInspectRequest, w::AssetInspectResult>().or_raw("application/zip"),
