@@ -514,6 +514,22 @@ function Initialize-ProtectedKora([string]$Source, [string]$Name = 'KoraUacTest'
 
 function ConvertTo-PsLiteral([string]$Text) { "'" + ($Text -replace "'", "''") + "'" }
 
+# This administrator without the administrator half: `runas /trustlevel:0x20000` (Safer "basic user") starts the command with a
+# copy of the caller's token whose Administrators group is deny-only and whose privileges are dropped: the shape the service
+# sees from a normal administrator's unelevated programs. (A token made by hand with CreateRestrictedToken gave a process that
+# died with 0xC0000142 or hung at start, on Windows 11 and on the hosted runner.) runas does not return the new process id:
+# it is found by its command line (the wrapper script's path). `$Marker` is a text that is in that command line.
+function Open-FilteredProcess([string]$Exe, [string]$ArgumentText, [string]$Marker) {
+    $cmd = "`"$Exe`" $ArgumentText"
+    $null = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\runas.exe') -ArgumentList @('/trustlevel:0x20000', ('"' + ($cmd -replace '"', '\"') + '"')) -WindowStyle Hidden -PassThru
+    for ($i = 0; $i -lt 40; $i++) {
+        $p = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($Marker) } | Select-Object -First 1
+        if ($p) { return [int]$p.ProcessId }
+        Start-Sleep -Milliseconds 250
+    }
+    return 0
+}
+
 # The script run under the other token. It starts `kora panel` there, copies the panel's sign-in record (owner-only
 # on disk, so this process could not read it) to a file the test can read, waits for a `stop` file and ends the panel.
 function Initialize-PanelWrapper([string]$Dir, [string]$Tag, [string]$Exe, [int]$Port, [hashtable]$ExtraEnv = @{}) {
@@ -543,7 +559,7 @@ if (-not `$p.HasExited) { Stop-Process -Id `$p.Id -Force }
 
 # Start `kora panel` and wait until it is signed in-able. Kind:
 #   Self     the current token
-#   Filtered this administrator, filtered (see KoraTok.LaunchFiltered)
+#   Filtered this administrator, filtered (see Open-FilteredProcess)
 #   Account  the account in -Credential (secondary logon; a split token if it is an administrator and UAC is on)
 # Returns an object for Invoke-PanelApi / Close-KoraPanel; WrapperProcessId is the process that runs the wrapper.
 function Open-KoraPanel([ValidateSet('Self', 'Filtered', 'Account')][string]$Kind, [string]$Exe, [string]$Dir, [string]$Tag, [int]$Port, [pscredential]$Credential, [hashtable]$ExtraEnv = @{}, [int]$TimeoutSec = 90) {
@@ -553,8 +569,7 @@ function Open-KoraPanel([ValidateSet('Self', 'Filtered', 'Account')][string]$Kin
     switch ($Kind) {
         'Self' { $proc = Start-Process -FilePath $ps -ArgumentList $argText -PassThru -WindowStyle Hidden; $wrapperPid = $proc.Id }
         'Filtered' {
-            try { $wrapperPid = [KoraTok]::LaunchFiltered($ps, "`"$ps`" $argText", $Dir) }
-            catch { throw "RUNNER-LIMIT: this runner does not let a job start a process with a filtered administrator token ($($_.Exception.Message))" }
+            $wrapperPid = Open-FilteredProcess $ps $argText $w.Script
         }
         'Account' {
             if (-not $Credential) { throw 'Kind Account needs -Credential' }
@@ -635,7 +650,7 @@ function Wait-PanelJob($Panel, [string]$JobId, [int]$TimeoutSec = 120, [scriptbl
 
 # Run `-Script` (PowerShell text) under another token and return Output and Code. Kind:
 #   Self     this process's token, in a child
-#   Filtered this administrator, unelevated (KoraTok.LaunchFiltered)
+#   Filtered this administrator, unelevated (Open-FilteredProcess)
 #   Account  the account in -Credential (secondary logon)
 # The script's output goes to a file in -Dir (a folder the account can write: Initialize-UacWorkDir), because
 # nothing can be piped back across a token boundary.
@@ -651,7 +666,7 @@ function Invoke-AsAccount([ValidateSet('Self', 'Filtered', 'Account')][string]$K
     $argText = "-NoProfile -ExecutionPolicy Bypass -File `"$ps1`""
     switch ($Kind) {
         'Self' { $procId = (Start-Process -FilePath $ps -ArgumentList $argText -PassThru -WindowStyle Hidden).Id }
-        'Filtered' { $procId = [KoraTok]::LaunchFiltered($ps, "`"$ps`" $argText", $Dir) }
+        'Filtered' { $procId = Open-FilteredProcess $ps $argText $ps1 }
         'Account' {
             if (-not $Credential) { throw 'Kind Account needs -Credential' }
             $svc = Get-Service seclogon -ErrorAction SilentlyContinue
@@ -662,7 +677,7 @@ function Invoke-AsAccount([ValidateSet('Self', 'Filtered', 'Account')][string]$K
     $sw = [Diagnostics.Stopwatch]::StartNew()
     while (-not (Test-Path $code) -and $sw.Elapsed.TotalSeconds -lt $TimeoutSec) { Start-Sleep -Milliseconds 300 }
     if (-not (Test-Path $code)) {
-        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+        if ($procId) { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue }
         throw "the script run as $Kind did not finish in $TimeoutSec s"
     }
     $text = if (Test-Path $out) { (Get-Content $out -Raw) } else { '' }
