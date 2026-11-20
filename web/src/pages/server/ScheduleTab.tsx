@@ -28,7 +28,7 @@ export function ScheduleTab({ server: s }: { server: ServerDetail }) {
   useEffect(() => {
     const c = q.data?.schedule
     if (c) {
-      setKind(c.preset === 'daily' ? 'daily' : 'weekly')
+      setKind(!c.enabled ? 'off' : c.preset === 'daily' ? 'daily' : 'weekly')
       setTime(c.time)
       setDay(c.weekday ?? 0)
       setRunAs(c.run_as)
@@ -52,7 +52,7 @@ export function ScheduleTab({ server: s }: { server: ServerDetail }) {
       <CardHeader><CardTitle>{t('servers.scheduleTab.automaticUpdates')}</CardTitle></CardHeader>
       <CardContent className="space-y-5">
         <p className="text-sm text-muted-foreground">{t('servers.scheduleTab.everyServerUpdateItself')}</p>
-        {q.data?.description && <Alert tone="info" title={t('servers.scheduleTab.currentSchedule')}>{q.data.description}</Alert>}
+        {q.data?.description && <Alert tone={q.data.schedule?.enabled && q.data.job_found === false ? 'warning' : 'info'} title={t('servers.scheduleTab.currentSchedule')}>{q.data.description}</Alert>}
         <fieldset className="space-y-2">
           <legend className="mb-1 text-sm font-semibold">{t('servers.scheduleTab.howOften')}</legend>
           <Radio name="kind" checked={kind === 'off'} onChange={() => setKind('off')} label={t('servers.scheduleTab.off')} hint={t('servers.scheduleTab.updatesOnlyHappenWhen')} />

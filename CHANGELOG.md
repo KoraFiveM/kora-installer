@@ -5,6 +5,18 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-11-20
+
+Fixes from the first testers: the schedule no longer says "Off" when it is on, and the Backup settings button works.
+
+### Added
+- Settings: a **Contribute to Kora** card with the steps to open a pull request on the Kora repository.
+- `GET /servers/{s}/schedule` and the `PUT` answer have a new `job_found` field.
+
+### Fixed
+- The update schedule no longer reads "Off" for a saved, switched-on schedule whose operating-system job cannot be seen from the panel. It shows the saved setting with a warning ("Saved and on, but Kora cannot see the scheduled job from here") and "Off" only when it is off. `kora schedule show` is unchanged.
+- **Backup settings** on the Backups tab did nothing (it linked to the page you were already on). It now scrolls to the settings card and focuses it.
+
 ## [0.8.2] - 2026-11-18
 
 Fixes for the Windows per-user install, plus a folder picker in the install wizard, a troubleshooting page, and a Force restart after updates.

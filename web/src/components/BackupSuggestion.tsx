@@ -36,7 +36,7 @@ export function BackupSuggestion({ server, compact }: { server: string; compact?
       <p>{t('backups.backupSuggestion.diskFailsUpdateGoes', { value: compact ? '' : t('backups.backupSuggestion.offUntilTurnChange') })}</p>
       <div className="mt-2 flex flex-wrap gap-2">
         {role.can('admin') && <Button size="sm" variant="default" disabled={on.isPending} onClick={() => on.mutate()}>{t('backups.backupSuggestion.turnDailyBackups')}</Button>}
-        <Button asChild size="sm"><Link to={`/servers/${encodeURIComponent(server)}?tab=backups`}>{t('backups.backupSuggestion.backupSettings')}</Link></Button>
+        <Button asChild size="sm"><Link to={`/servers/${encodeURIComponent(server)}?tab=backups#backup-settings`}>{t('backups.backupSuggestion.backupSettings')}</Link></Button>
       </div>
       <ErrorNotice error={on.error} />
     </Alert>

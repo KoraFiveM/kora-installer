@@ -294,6 +294,26 @@ fn an_older_system_schedule_reads_back_as_system() {
 }
 
 #[test]
+fn checked_read_keeps_the_saved_setting_and_says_whether_the_job_was_seen() {
+    let dir = std::env::temp_dir().join(format!("kora-sched-checked-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let cfg = ScheduleConfig { preset: Preset::Daily, time: "02:15".into(), weekday: None, run_as: RunAs::InstallingUser, enabled: true };
+    save_schedule(&dir, &cfg, "jamie").unwrap();
+    let s = server();
+    // job not seen: still "on" as saved, but flagged
+    let (c, found) = get_checked_with(&s, &dir, &FakeRunner::default(), Platform::Linux).unwrap();
+    assert!(c.enabled && !found);
+    // job seen
+    let r = FakeRunner::default();
+    r.respond("cat /etc/systemd/system/kora-update-main.timer", 0, &systemd_timer_unit(&s, &Schedule::default()).unwrap());
+    let (c, found) = get_checked_with(&s, &dir, &r, Platform::Linux).unwrap();
+    assert!(c.enabled && found);
+    // nothing saved, nothing seen
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(get_checked_with(&s, &dir, &FakeRunner::default(), Platform::Linux).is_none());
+}
+
+#[test]
 fn stored_config_is_the_source_of_truth_and_a_missing_job_reads_as_off() {
     let dir = std::env::temp_dir().join(format!("kora-sched-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

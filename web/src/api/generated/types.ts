@@ -3739,6 +3739,11 @@ export type ScheduleState = {
    */
   description: string | null,
   /**
+   * The operating-system job of a saved schedule could be seen from here. false with `schedule.enabled` true means
+   * "saved and on, but not visible" (not the same as off).
+   */
+  job_found: boolean,
+  /**
    * Plain-language trade-off text for the "run as" choice.
    */
   run_as_help: string,
