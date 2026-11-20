@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, Lock, ShieldCheck, Trash2, Undo2 } from 'lucide-react'
 import { api } from '@/api/client'
@@ -299,6 +300,9 @@ function Row({ server, b, canAdmin, remote, onVerify, onRestore, onChanged }: { 
 
 // ---- settings --------------------------------------------------------------------------------------------------
 
+/** The "Backup settings" buttons link here (`#backup-settings`). */
+export const SETTINGS_ID = 'backup-settings'
+
 function Settings({ server, view, canChange, why, onSaved }: { server: string; view: NonNullable<ReturnType<typeof useBackupsView>['data']>; canChange: boolean; why: string | null; onSaved: () => void }) {
   const [s, setS] = useState<BackupSettings>(view.settings)
   useEffect(() => setS(view.settings), [view.settings])
@@ -308,7 +312,7 @@ function Settings({ server, view, canChange, why, onSaved }: { server: string; v
   const setSch = (p: Partial<BackupSettings['schedule']>) => setS({ ...s, schedule: { ...sch, ...p } })
   const badTime = sch.enabled && !/^([01]\d|2[0-3]):[0-5]\d$/.test(sch.time)
   return (
-    <Card>
+    <Card id={SETTINGS_ID} tabIndex={-1} className="outline-none focus-visible:ring-2 focus-visible:ring-ring">
       <CardHeader><CardTitle>{t('backups.backupsTab.whereBackupsGoWhen')}</CardTitle></CardHeader>
       <CardContent className="space-y-5">
         {why && <Alert tone="info">{why}</Alert>}
@@ -416,6 +420,7 @@ export function BackupsTab({ server: s }: { server: ServerDetail }) {
   const noList = whyNot(role, 'operator')
   const whyAdmin = whyNot(role, 'admin', true)
   const view = useBackupsView(s.name, !noList)
+  const loc = useLocation()
   const [verify, setVerify] = useState<BackupInfo | null>(null)
   const [restore, setRestore] = useState<BackupInfo | null>(null)
   // The undo offer stays on screen after it has been used, so its result can be read (the list no longer has it).
@@ -425,6 +430,13 @@ export function BackupsTab({ server: s }: { server: ServerDetail }) {
     void qc.invalidateQueries({ queryKey: ['backups-overview'] })
   }
   const v = view.data
+  // "Backup settings" (also pressed while already on this tab, where a plain link goes nowhere): bring the card into view.
+  useEffect(() => {
+    if (!v || loc.hash !== `#${SETTINGS_ID}`) return
+    const el = document.getElementById(SETTINGS_ID)
+    el?.scrollIntoView({ block: 'start', behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    el?.focus({ preventScroll: true })
+  }, [v, loc.hash, loc.key])
   useEffect(() => {
     if (v?.undo) setUndo(v.undo)
   }, [v?.undo])

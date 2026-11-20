@@ -162,6 +162,10 @@ pub trait Backend {
     fn notify_test(&mut self, e: &ServerEntry, c: &NotifyConfig) -> Res<()>;
 
     fn schedule_get(&mut self, e: &ServerEntry) -> Option<ScheduleConfig>;
+    /// The schedule as saved plus whether its operating-system job could be seen (see `service::get_checked`).
+    fn schedule_checked(&mut self, e: &ServerEntry) -> Option<(ScheduleConfig, bool)> {
+        self.schedule_get(e).map(|c| (c, true))
+    }
     fn schedule_set(&mut self, e: &ServerEntry, c: &ScheduleConfig) -> Res<()>;
     fn schedule_remove(&mut self, e: &ServerEntry) -> Res<()>;
     /// When changing the schedule needs administrator rights this process does not have: the

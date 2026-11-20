@@ -335,16 +335,26 @@ pub fn get(server: &ServerRecord) -> Option<ScheduleConfig> {
 }
 
 pub fn get_with(s: &ManagedServer, dir: &Path, rn: &dyn CommandRunner, platform: Platform) -> Option<ScheduleConfig> {
+    get_checked_with(s, dir, rn, platform).map(|(mut c, found)| {
+        if c.enabled && !found {
+            c.enabled = false; // the job was deleted behind our back
+        }
+        c
+    })
+}
+
+/// What the panel shows: the setting as the person saved it (`enabled` untouched), and whether the OS job
+/// could be seen from here. A job that cannot be seen is told apart from a schedule that is off, so the page
+/// does not say "Off" for a schedule somebody turned on (the lookup can fail from another account or session).
+pub fn get_checked(server: &ServerRecord) -> Option<(ScheduleConfig, bool)> {
+    get_checked_with(&managed_for_lookup(server), &server.dir, &SystemRunner, Platform::current())
+}
+
+pub fn get_checked_with(s: &ManagedServer, dir: &Path, rn: &dyn CommandRunner, platform: Platform) -> Option<(ScheduleConfig, bool)> {
     let os = os_job(s, rn, platform);
     match load_stored(dir) {
-        Some(st) => {
-            let mut c = st.config;
-            if c.enabled && os.is_none() {
-                c.enabled = false; // the job was deleted behind our back
-            }
-            Some(c)
-        }
-        None => os,
+        Some(st) => Some((st.config, os.is_some())),
+        None => os.map(|c| (c, true)),
     }
 }
 

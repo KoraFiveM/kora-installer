@@ -375,6 +375,10 @@ impl Backend for SystemBackend {
         schedule::get(e)
     }
 
+    fn schedule_checked(&mut self, e: &ServerEntry) -> Option<(ScheduleConfig, bool)> {
+        schedule::get_checked(e)
+    }
+
     fn schedule_set(&mut self, e: &ServerEntry, c: &ScheduleConfig) -> Res<()> {
         schedule::set(e, c).map_err(Problem::from)
     }

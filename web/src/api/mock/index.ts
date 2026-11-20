@@ -787,7 +787,7 @@ type ScheduleCfg = T.ScheduleConfig
 route('GET', '/servers/{s}/schedule', (m) => {
   const s = find(dec(m[1]))
   const c = schedules[s.name] ?? null
-  return { schedule: c, description: c ? describeSchedule(c) : null, run_as_help: RUN_AS_HELP } satisfies T.ScheduleState
+  return { schedule: c, description: c ? describeSchedule(c) : null, job_found: true, run_as_help: RUN_AS_HELP } satisfies T.ScheduleState
 })
 route('PUT', '/servers/{s}/schedule', (m, b) => {
   const s = find(dec(m[1]))

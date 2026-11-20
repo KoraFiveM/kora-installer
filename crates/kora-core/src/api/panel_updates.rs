@@ -103,8 +103,13 @@ pub fn catalog_json(c: &Catalog, dev: Option<bool>) -> Value {
 }
 
 /// What the UI shows for a schedule: the config, a sentence about it, and the "run as" help.
-pub fn schedule_state_json(cfg: Option<&ScheduleConfig>) -> Value {
-    to_value(&wire::ScheduleState { schedule: cfg.cloned(), description: cfg.map(crate::service::describe), run_as_help: crate::service::RUN_AS_HELP.to_string() })
+pub fn schedule_state_json(cfg: Option<&ScheduleConfig>, job_found: bool) -> Value {
+    // "Off" only when it is off: a saved schedule whose job cannot be seen from here says so instead.
+    let description = cfg.map(|c| match (c.enabled, job_found) {
+        (true, false) => format!("{}. Saved and on, but Kora cannot see the scheduled job from here. Press Save schedule to set it up again.", crate::service::describe(c)),
+        _ => crate::service::describe(c),
+    });
+    to_value(&wire::ScheduleState { schedule: cfg.cloned(), description, job_found, run_as_help: crate::service::RUN_AS_HELP.to_string() })
 }
 
 #[cfg(test)]

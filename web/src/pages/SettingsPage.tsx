@@ -21,6 +21,7 @@ import { Input, Select } from '@/components/ui/input'
 import { ErrorNotice } from '@/components/ErrorNotice'
 import { Field } from '@/components/Field'
 import { GithubSignIn } from '@/components/GithubSignIn'
+import { ContributeCard } from '@/components/ContributeCard'
 import { ResourceProgress } from '@/components/JobProgress'
 import { restartPanel } from '@/lib/restart'
 import { t, infoOf } from '@/i18n'
@@ -178,6 +179,7 @@ export default function SettingsPage() {
           {role.can('admin') ? <SupportBundleLink label={t('settings.settingsPage.createSupportBundle')} /> : <p className="text-muted-foreground">{t('settings.settingsPage.askAdministratorMakeOne')}</p>}
         </CardContent>
       </Card>
+      <ContributeCard />
       <Uninstall />
       <Card>
         <CardHeader><CardTitle>{t('settings.settingsPage.about')}</CardTitle></CardHeader>

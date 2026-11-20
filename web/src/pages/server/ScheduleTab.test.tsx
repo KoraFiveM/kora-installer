@@ -30,6 +30,23 @@ describe('ScheduleTab', () => {
     expect(screen.getByText(/turned off for sign-ins that do not come through Tailscale.*kora panel remote-actions on/)).toBeInTheDocument()
   })
 
+  it('keeps a saved, switched-on schedule on when its job cannot be seen, and warns instead of saying Off', async () => {
+    const cfg = { preset: 'daily', time: '04:00', weekday: null, run_as: 'installing_user', enabled: true }
+    fetchMock.mockResolvedValue(jsonResponse(200, { schedule: cfg, description: 'Every day at 04:00. Saved and on, but Kora cannot see the scheduled job from here.', job_found: false }))
+    renderAs(<ScheduleTab server={server} />)
+    expect(await screen.findByText(/Saved and on, but Kora cannot see/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Every day')).toBeChecked()
+    expect(screen.getByRole('radio', { name: /^Off/ })).not.toBeChecked()
+  })
+
+  it('shows Off when the saved schedule is switched off', async () => {
+    const cfg = { preset: 'daily', time: '04:00', weekday: null, run_as: 'installing_user', enabled: false }
+    fetchMock.mockResolvedValue(jsonResponse(200, { schedule: cfg, description: 'Off: this server is not updated automatically', job_found: false }))
+    renderAs(<ScheduleTab server={server} />)
+    await screen.findByText(/Off: this server/)
+    await waitFor(() => expect(screen.getByRole('radio', { name: /^Off/ })).toBeChecked())
+  })
+
   it('says what was saved', async () => {
     const user = userEvent.setup()
     fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {

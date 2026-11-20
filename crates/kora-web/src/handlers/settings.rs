@@ -73,8 +73,8 @@ pub async fn webhook_test(State(st): State<AppState>, Path(s): Path<String>) -> 
 pub async fn schedule_get(State(st): State<AppState>, Path(s): Path<String>) -> Result<Json<Value>, ApiError> {
     blocking(move || {
         let e = st.entry(&s)?;
-        let cfg = st.backend().schedule_get(&e);
-        Ok(Json(schedule_state_json(cfg.as_ref())))
+        let cfg = st.backend().schedule_checked(&e);
+        Ok(Json(schedule_state_json(cfg.as_ref().map(|(c, _)| c), cfg.as_ref().is_none_or(|(_, f)| *f))))
     })
     .await
 }
@@ -111,8 +111,8 @@ pub async fn schedule_set(State(st): State<AppState>, Path(s): Path<String>, Jso
         } else {
             b.schedule_set(&e, &cfg).map_err(ApiError::core)?;
         }
-        let now = b.schedule_get(&e).unwrap_or(cfg);
-        Ok(Json(schedule_state_json(Some(&now))))
+        let (now, found) = b.schedule_checked(&e).unwrap_or((cfg, false));
+        Ok(Json(schedule_state_json(Some(&now), found)))
     })
     .await
 }

@@ -50,6 +50,17 @@ const answers = (v: BackupsView, extra: (url: string, init?: RequestInit) => Res
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => extra(url, init) ?? (String(url).endsWith('/backups') && (init?.method ?? 'GET') === 'GET' ? jsonResponse(200, v) : jsonResponse(200, {})))
 
 describe('BackupsTab', () => {
+  it('"Backup settings" works while already on this tab: it brings the settings card into view and focuses it', async () => {
+    const user = userEvent.setup()
+    Element.prototype.scrollIntoView = vi.fn()
+    answers(view())
+    renderAs(<BackupsTab server={server} />)
+    const button = await screen.findByRole('link', { name: 'Backup settings' })
+    await user.click(button)
+    await waitFor(() => expect(document.getElementById('backup-settings')).toHaveFocus())
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled()
+  })
+
   it('says plainly what a backup holds and starts with no backup', async () => {
     answers(view())
     renderAs(<BackupsTab server={server} />)

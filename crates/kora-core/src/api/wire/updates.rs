@@ -224,6 +224,9 @@ pub struct ScheduleState {
     pub schedule: Option<ScheduleConfig>,
     /// A sentence about the schedule.
     pub description: Option<String>,
+    /// The operating-system job of a saved schedule could be seen from here. false with `schedule.enabled` true means
+    /// "saved and on, but not visible" (not the same as off).
+    pub job_found: bool,
     /// Plain-language trade-off text for the "run as" choice.
     pub run_as_help: String,
 }
