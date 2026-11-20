@@ -1,3 +1,11 @@
+## Kora Installer v0.8.4
+
+### What is new
+- **Get set up.** Before installing a server, Kora now checks that your Cfx.re licence key is saved and GitHub is signed in. If not, the install wizard opens on a short checklist where you finish both, then carries on by itself. Only the wizard waits: every other page, and adding an existing server, work as before.
+
+### Install and update
+Run `kora self-update`, or use the install lines from the 0.8.0 notes below (MSI, `install.ps1`, .deb or `install.sh`). Your servers keep working.
+
 ## Kora Installer v0.8.3
 
 Fixes on top of 0.8.2, from the first testers.

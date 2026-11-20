@@ -5,6 +5,10 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-11-20
+
+The install wizard now makes sure a Cfx.re licence key and a GitHub sign-in are set up first.
+
 ### Added
 - **Get set up.** The install wizard now opens on a short checklist until a Cfx.re licence key is saved and GitHub is signed in; both are finished on that screen and the wizard follows by itself. It is only the wizard: every other page, and adding an existing server, stay open. An administrator sees it (others already cannot install), a check that is slow or cannot be read never blocks, and once the wizard is open it is not replaced if the GitHub sign-in lapses halfway (the install's own "Sign in to GitHub" step handles that).
 

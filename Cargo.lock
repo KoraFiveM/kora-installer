@@ -2245,7 +2245,7 @@ dependencies = [
 
 [[package]]
 name = "kora-cli"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "clap",
  "kora-core",
@@ -2257,7 +2257,7 @@ dependencies = [
 
 [[package]]
 name = "kora-core"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "age",
  "bcrypt",
@@ -2287,7 +2287,7 @@ dependencies = [
 
 [[package]]
 name = "kora-shell"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -2296,7 +2296,7 @@ dependencies = [
 
 [[package]]
 name = "kora-web"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "argon2",
  "axum",
