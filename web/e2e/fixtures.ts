@@ -2,7 +2,8 @@
 //  - `problems`: every browser console error, page error and unhandled rejection is collected; the test fails at
 //    the end if there was one (a journey that expects one removes it with `problems.expect(/text/)`).
 //  - `scan(label)`: runs axe on the page as it is now and fails on moderate, serious or critical violations (minor ones are only reported).
-//  - `open(path, opts)`: goes to a page in a chosen mock scenario / viewer.
+//  - `open(path, opts)`: goes to a page in a chosen mock scenario / viewer. The first-time setup (GitHub signed in, licence keys
+//    saved) is finished unless `setup: 'pending'` is asked for: the install wizard waits for it (the "Get set up" checklist).
 import { test as base, expect, type Locator, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 
@@ -29,13 +30,16 @@ class Problems {
 }
 
 interface Fixtures {
+  /** The first-time setup the mock starts with (default `done`). A spec about signed-out or key-less states uses `test.use({ setupState: 'pending' })`. */
+  setupState: 'done' | 'pending'
   problems: Problems
   /** `lang`: the panel's language for this visit (the mock build reads `?lang=`): `de`, or `en-XA` for the pseudo-language. */
-  open: (path: string, opts?: { scenario?: Scenario; as?: Viewer; lang?: string }) => Promise<void>
+  open: (path: string, opts?: { scenario?: Scenario; as?: Viewer; lang?: string; setup?: 'done' | 'pending' }) => Promise<void>
   scan: (label: string) => Promise<void>
 }
 
 export const test = base.extend<Fixtures>({
+  setupState: ['done', { option: true }],
   problems: async ({ page }, use) => {
     const p = new Problems()
     page.on('console', (m) => {
@@ -48,11 +52,12 @@ export const test = base.extend<Fixtures>({
     await use(p)
     expect(p.list, 'the browser console / page must stay free of errors').toEqual([])
   },
-  open: async ({ page, problems: _problems }, use) => {
+  open: async ({ page, problems: _problems, setupState }, use) => {
     await use(async (path, opts = {}) => {
       const u = new URL(path, 'http://x')
       u.searchParams.set('scenario', opts.scenario ?? 'default')
       u.searchParams.set('as', opts.as ?? 'local')
+      u.searchParams.set('setup', opts.setup ?? setupState)
       if (opts.lang) u.searchParams.set('lang', opts.lang)
       await page.goto(u.pathname + u.search + u.hash)
     })
@@ -78,13 +83,23 @@ export { expect }
 
 /** Short path of the wizard: key, name, then wait for the summary to settle. Returns once Install is enabled. */
 export async function toSummary(page: Page, name?: string) {
-  await page.getByLabel('Licence key', { exact: true }).fill(KEY)
+  // With the setup done a saved key is already picked; a pasted key only when none is saved.
+  const typed = page.getByLabel('Licence key', { exact: true })
+  await expect(page.getByRole('heading', { name: 'Your licence key' })).toBeVisible()
+  if (await typed.isVisible()) await typed.fill(KEY)
   await page.getByRole('button', { name: 'Next' }).click()
   const box = page.getByLabel('Server name')
   if (name) await box.fill(name)
   await page.getByRole('button', { name: 'Next' }).click()
   await expect(page.getByRole('heading', { name: 'Check and install' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Install the server' })).toBeEnabled()
+}
+
+/** The wizard's key step: a saved key is already picked once the setup is done; type one only when the field is there. */
+export async function typeKeyIfAsked(page: Page, key = KEY) {
+  const typed = page.getByLabel('Licence key', { exact: true })
+  await expect(page.getByRole('heading', { name: 'Your licence key' })).toBeVisible()
+  if (await typed.isVisible()) await typed.fill(key)
 }
 
 /** Settings > Licence keys: the "save a new key" form (Settings has other fields called "Name"). */

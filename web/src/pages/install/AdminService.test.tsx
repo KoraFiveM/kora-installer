@@ -5,6 +5,9 @@ import InstallWizard from '../InstallWizard'
 import { installMock } from '@/api/mock'
 import { renderApp } from '@/test/utils'
 
+// These tests are about the steps, not the setup checklist (SetupGate.test.tsx): treat Cfx and GitHub as set up.
+vi.mock('@/pages/install/setup', () => ({ useSetup: () => ({ cfxReady: true, githubReady: true, blocked: false, settled: true }) }))
+
 // Kora's administrator service: with it the administrator parts of an install just happen (no prompt);
 // without it (a per-user install) the choices are install it, continue without, or the command.
 

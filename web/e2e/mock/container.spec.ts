@@ -1,4 +1,4 @@
-import { test, expect, KEY } from '../fixtures'
+import { test, expect, typeKeyIfAsked } from '../fixtures'
 
 // Container mode (Linux, Podman or Docker): the install wizard asks how the server runs when the System check
 // found an engine that works, and a container server is labelled wherever servers are listed.
@@ -8,7 +8,7 @@ const next = (page: import('@playwright/test').Page) => page.getByRole('button',
 test.describe('container mode', () => {
   test('where no container engine works, the wizard does not ask and nothing says container', async ({ page, open }) => {
     await open('/install')
-    await page.getByLabel('Licence key', { exact: true }).fill(KEY)
+    await typeKeyIfAsked(page)
     await next(page).click()
     await next(page).click()
     await page.getByRole('button', { name: 'Choose everything myself' }).click()
@@ -20,7 +20,7 @@ test.describe('container mode', () => {
 
   test('choose a container: no service, a MariaDB container, install, and the list says "In a container"', async ({ page, open, scan }) => {
     await open('/install', { scenario: 'containers' })
-    await page.getByLabel('Licence key', { exact: true }).fill(KEY)
+    await typeKeyIfAsked(page)
     await next(page).click()
     await page.getByLabel('Server name').fill('box-night')
     await next(page).click()

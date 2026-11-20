@@ -21,6 +21,8 @@ import { StepProgress } from '@/components/JobProgress'
 import { Skeleton } from '@/components/Skeleton'
 import { formatBytes, validatePorts } from '@/lib/utils'
 import { useInstallBlock } from './install/access'
+import { useSetup } from './install/setup'
+import { SetupGate } from '@/components/SetupGate'
 import { allProblems, applySaved, buildRequest, initialForm, quickStepsFor, sectionStep, STEP_LABEL, stepProblem, stepsFor, withoutAdmin, type StepId, type WizardForm } from './install/form'
 import { usePortsCheck } from './install/ports'
 import { BuildStep, CfxStep, DatabaseStep, GithubStep, LicenceStep, NameStep, OptionsStep, PortsStep, ResourcesStep, RunModeStep, SourceStep, VersionsStep } from './install/Steps'
@@ -196,7 +198,13 @@ export default function InstallWizard() {
   // Same answer the app shell keeps fresh; asked here too so a direct visit waits for it.
   const meta = useQuery({ queryKey: ['meta'], queryFn: api.meta, staleTime: 15000 })
   const block = useInstallBlock()
-  if (meta.isPending) return <Skeleton className="h-64" />
+  const setup = useSetup()
+  // The checklist is only for opening the wizard. Once the wizard has been shown it stays: a GitHub sign-in that lapses halfway
+  // through an install is handled by the install's own "Sign in to GitHub" step, not by throwing the answers away.
+  const [open, setOpen] = useState(false)
+  const canOpen = setup.settled && !setup.blocked
+  useEffect(() => { if (canOpen) setOpen(true) }, [canOpen])
+  if (meta.isPending || (!block && !open && !setup.settled)) return <Skeleton className="h-64" />
   if (block) {
     return (
       <div className="mx-auto max-w-2xl space-y-5">
@@ -208,6 +216,9 @@ export default function InstallWizard() {
       </div>
     )
   }
+  // Installing needs a saved Cfx.re licence key and a GitHub sign-in: both are finished on this screen first. Only the install
+  // wizard waits for them; every other page (and adding an existing server) stays open, and a slow or failed check never blocks.
+  if (!open && setup.blocked) return <SetupGate cfxReady={setup.cfxReady} githubReady={setup.githubReady} />
   return <Wizard />
 }
 

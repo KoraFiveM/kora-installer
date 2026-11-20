@@ -1,14 +1,14 @@
 // The same journeys as in wizard.spec.ts, with the keyboard only: no mouse click, no `focus()` shortcut.
 // Tab to a control, then Enter or Space. If a step cannot be reached this way, the test says where focus got stuck.
-import { test, expect, KEY, tabTo } from '../fixtures'
+import { test, expect, tabTo, typeKeyIfAsked } from '../fixtures'
 
 test.describe('keyboard only', () => {
   test('the whole install wizard, from the licence key to "All done"', async ({ page, open, scan }) => {
     await open('/install')
-    const key = page.getByLabel('Licence key', { exact: true })
-    await expect(key).toBeVisible()
-    await tabTo(page, key)
-    await page.keyboard.type(KEY)
+    // The setup is done, so a saved licence key is already picked: reach the saved keys with Tab, then Next.
+    const saved = page.getByRole('radio', { name: /Main/ })
+    await expect(saved).toBeChecked()
+    await tabTo(page, saved)
 
     const next = page.getByRole('button', { name: 'Next' })
     await tabTo(page, next)
@@ -50,7 +50,7 @@ test.describe('keyboard only', () => {
 
   test('resolving a failed step: reach "Try this step again" and carry on', async ({ page, open, scan }) => {
     await open('/install')
-    await page.getByLabel('Licence key', { exact: true }).fill(KEY)
+    await typeKeyIfAsked(page)
     await page.getByRole('button', { name: 'Next' }).click()
     await page.getByLabel('Server name').fill('fail-keys')
     await page.getByRole('button', { name: 'Next' }).click()
@@ -69,7 +69,7 @@ test.describe('keyboard only', () => {
 
   test('a failed step that can be skipped: Skip reached and used with the keyboard', async ({ page, open }) => {
     await open('/install')
-    await page.getByLabel('Licence key', { exact: true }).fill(KEY)
+    await typeKeyIfAsked(page)
     await page.getByRole('button', { name: 'Next' }).click()
     await page.getByLabel('Server name').fill('skip-keys')
     await page.getByRole('button', { name: 'Next' }).click()

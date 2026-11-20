@@ -1155,7 +1155,7 @@ dependencies = [
 
 [[package]]
 name = "kora-desktop"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "kora-shell",
  "notify-rust",
@@ -1171,7 +1171,7 @@ dependencies = [
 
 [[package]]
 name = "kora-shell"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "serde",
  "serde_json",

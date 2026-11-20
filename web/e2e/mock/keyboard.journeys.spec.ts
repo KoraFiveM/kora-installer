@@ -4,6 +4,9 @@
 import type { Locator, Page } from '@playwright/test'
 import { test, expect, tabTo } from '../fixtures'
 
+// About signed-out and key-less states, not the setup checklist: start with the setup undone.
+test.use({ setupState: 'pending' })
+
 /** Tab to a field, select what is in it and type over it. */
 async function typeInto(page: Page, field: Locator, text: string) {
   await tabTo(page, field)

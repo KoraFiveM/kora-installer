@@ -7,6 +7,9 @@ import { stopMockDatabase } from '@/api/mock/toolchain'
 import { ToolchainActions } from '@/components/ToolchainActions'
 import { renderApp } from '@/test/utils'
 
+// These tests are about the steps, not the setup checklist (SetupGate.test.tsx): treat Cfx and GitHub as set up.
+vi.mock('@/pages/install/setup', () => ({ useSetup: () => ({ cfxReady: true, githubReady: true, blocked: false, settled: true }) }))
+
 beforeEach(() => {
   history.replaceState(null, '', '/')
   installMock({ scenario: 'default', speed: 0 })

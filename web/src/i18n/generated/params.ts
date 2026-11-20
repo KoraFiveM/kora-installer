@@ -72,6 +72,7 @@ export interface MessageParams {
   'core.serverLinks.opensTxadminThroughPanel': { gw: string | number; host: string | number }
   'core.serverLinks.opensTxadminThroughPanelOwn': { host: string | number }
   'core.serverLinks.reachedPanelThroughTunnel': { gw: string | number }
+  'core.setupGate.stepTitle': { n: string | number; title: string | number }
   'core.status.updates': { count: number }
   'core.store.nComputer': { n: string | number }
   'core.store.nKoraCommand': { n: string | number }

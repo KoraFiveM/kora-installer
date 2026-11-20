@@ -1,4 +1,4 @@
-import { test, expect, toSummary } from '../fixtures'
+import { test, expect, toSummary, typeKeyIfAsked } from '../fixtures'
 
 const installButton = (page: import('@playwright/test').Page) => page.getByRole('button', { name: 'Install the server' })
 const next = (page: import('@playwright/test').Page) => page.getByRole('button', { name: 'Next' })
@@ -7,7 +7,8 @@ test.describe('install wizard: the happy paths', () => {
   test('plain copies of released versions: licence key, name, summary, install, finished page', async ({ page, open, scan }) => {
     await open('/install')
     await expect(page.getByRole('heading', { name: 'Your licence key' })).toBeVisible()
-    await expect(next(page)).toBeDisabled()
+    // A saved key is picked already (the setup checklist needed one), so Next is ready.
+    await expect(next(page)).toBeEnabled()
     await scan('wizard: licence key')
     await toSummary(page, 'friday-night')
     await expect(page.getByText("Kora's resources as they are (plain copies)")).toBeVisible()
@@ -30,9 +31,9 @@ test.describe('install wizard: the happy paths', () => {
     await expect(page.getByRole('link', { name: 'friday-night' })).toBeVisible()
   })
 
-  test('your own copies add the GitHub step, which needs the sign-in first, then personal account or organisation', async ({ page, open, scan }) => {
+  test('your own copies add the GitHub step: personal account or organisation', async ({ page, open, scan }) => {
     await open('/install')
-    await page.getByLabel('Licence key', { exact: true }).fill('cfxk_abcdefghij_12345')
+    await typeKeyIfAsked(page, 'cfxk_abcdefghij_12345')
     await next(page).click()
     await page.getByRole('button', { name: 'Choose where they come from' }).click()
     await expect(page.getByLabel(/Kora's resources as they are/)).toBeChecked()
@@ -43,14 +44,8 @@ test.describe('install wizard: the happy paths', () => {
     await expect(page.getByText('3. GitHub')).toBeVisible()
     await next(page).click()
     await expect(page.getByRole('heading', { name: 'GitHub' })).toBeVisible()
-    await expect(next(page)).toBeDisabled()
-    await expect(page.getByText('Sign in to GitHub to continue.')).toBeVisible()
-    await scan('wizard: GitHub step, signed out')
-
-    await page.getByRole('button', { name: 'Sign in to GitHub' }).click()
-    // The one-time code is shown, and the page notices the approval by itself.
-    await expect(page.getByText('Finish signing in on GitHub')).toBeVisible()
-    await expect(page.getByText('Signed in', { exact: true })).toBeVisible({ timeout: 30_000 })
+    // GitHub was signed in on the setup checklist, so the step goes straight to the account question (the sign-in itself: setup.spec.ts).
+    await expect(page.getByText('Signed in', { exact: true })).toBeVisible()
     // Two plain questions: personal account (with its login), or an organisation and which one.
     // The demo's only organisation does not let this account create repositories: it is explained, not offered.
     await expect(page.getByLabel(/An organisation I belong to/)).toBeDisabled()
@@ -77,7 +72,7 @@ test.describe('install wizard: the happy paths', () => {
       await scan(`wizard step: ${title}`)
       await next(page).click()
     }
-    await page.getByLabel('Licence key', { exact: true }).fill('cfxk_abcdefghij_12345')
+    await typeKeyIfAsked(page, 'cfxk_abcdefghij_12345')
     await next(page).click()
     await expect(page.getByRole('heading', { name: 'Your Cfx.re account' })).toBeVisible()
     await scan('wizard step: Cfx.re account')

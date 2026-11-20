@@ -1,5 +1,8 @@
 import { test, expect } from '../fixtures'
 
+// About signed-out and key-less states, not the setup checklist: start with the setup undone.
+test.use({ setupState: 'pending' })
+
 const line = (page: import('@playwright/test').Page, label: string) => page.getByRole('heading', { name: label, exact: true }).locator('xpath=ancestor::li[1]')
 
 test.describe('System check', () => {

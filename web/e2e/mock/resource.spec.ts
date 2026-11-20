@@ -1,6 +1,9 @@
 import { test, expect } from '../fixtures'
 import type { Page } from '@playwright/test'
 
+// About signed-out and key-less states, not the setup checklist: start with the setup undone.
+test.use({ setupState: 'pending' })
+
 // The page of one resource, in the mock layer. The mock lives in the page, so a reload forgets it: "the notice survives a
 // reload and shows for other users" is covered by the Rust tests (resourcestate) and the real-panel smoke; here the notice
 // is followed across navigation away and back, which also reads it from the (mock) server again.
