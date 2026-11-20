@@ -1,3 +1,16 @@
+## Kora Installer v0.8.3
+
+Fixes on top of 0.8.2, from the first testers.
+
+### What is new
+- **Get set up.** Until your Cfx.re licence key is saved and GitHub is signed in, Kora shows a short checklist (both can be done right there) instead of the pages, so a new install cannot get stuck half-way. Settings, System check and Help stay open.
+- **Schedule no longer says "Off" when it is on.** If Kora cannot see the scheduled job from the panel, it now says so with a warning instead of showing the schedule as off.
+- **Backup settings works** from the Backups tab: it takes you to the settings card.
+- **Contribute to Kora** in Settings: the three steps to open a pull request.
+
+### Install and update
+Run `kora self-update`, or use the install lines from the 0.8.0 notes below (MSI, `install.ps1`, .deb or `install.sh`). Your servers keep working.
+
 ## Kora Installer v0.8.2
 
 Fixes and small additions on top of 0.8.1.
