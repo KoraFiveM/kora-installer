@@ -11,14 +11,11 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { RouteLoading } from '@/components/RouteLoading'
 import { KoraLogo } from '@/components/KoraLogo'
 import { useInstallBlock } from '@/pages/install/access'
-import { useSetup, SETUP_OPEN } from '@/pages/install/setup'
-import { SetupGate } from '@/components/SetupGate'
 import { cn } from '@/lib/utils'
 import { useRouteAnnouncer } from '@/hooks/useRouteAnnouncer'
 import { t, msg } from '@/i18n'
 import { rich } from '@/i18n/react'
 import '@/i18n/en/core/appShell'
-import '@/i18n/en/core/setupGate'
 
 const nav = [
   { to: '/', label: msg('core.appShell.servers'), icon: Server, end: true },
@@ -34,10 +31,7 @@ export function AppShell() {
   const { alerts, dismiss } = useAlerts()
   const meta = useQuery({ queryKey: ['meta'], queryFn: api.meta, refetchInterval: 15000 })
   useServerEvents()
-  const setup = useSetup()
-  // Role first (the more basic reason), then unfinished setup.
-  const installBlock = useInstallBlock() ?? (setup.blocked ? { reason: t('core.setupGate.navReason'), short: t('core.setupGate.navShort') } : null)
-  const gated = setup.blocked && !SETUP_OPEN.some((p) => loc.pathname === p || loc.pathname.startsWith(p + '/'))
+  const installBlock = useInstallBlock()
   const unreachable = meta.isError
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
@@ -97,7 +91,7 @@ export function AppShell() {
           )}
           <ErrorBoundary resetKey={loc.pathname}>
             <Suspense fallback={<RouteLoading />}>
-              {gated ? <SetupGate cfxReady={setup.cfxReady} githubReady={setup.githubReady} /> : <Outlet />}
+              <Outlet />
             </Suspense>
           </ErrorBoundary>
         </main>

@@ -7,10 +7,9 @@ versions follow [SemVer](https://semver.org/).
 
 ## [0.8.3] - 2026-11-20
 
-Fixes from the first testers: a setup checklist before anything else, the schedule no longer says "Off" when it is on, and the Backup settings button works.
+Fixes from the first testers: the schedule no longer says "Off" when it is on, and the Backup settings button works.
 
 ### Added
-- **Get set up.** Until a Cfx.re licence key is saved and GitHub is signed in, an administrator sees a short checklist (with both set-ups on the same screen) instead of the pages. Settings, System check and Help stay open, and the Install link says why it is locked. A slow or failed answer never locks the panel.
 - Settings: a **Contribute to Kora** card with the steps to open a pull request on the Kora repository.
 - `GET /servers/{s}/schedule` and the `PUT` answer have a new `job_found` field.
 
