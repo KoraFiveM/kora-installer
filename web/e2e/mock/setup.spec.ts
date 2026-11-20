@@ -6,6 +6,8 @@ test.describe('Get set up (the install wizard)', () => {
     await open('/install', { setup: 'pending' })
     await expect(page.getByRole('heading', { name: 'Get set up' })).toBeVisible()
     await expect(page.getByText('Still to do')).toHaveCount(2)
+    // The way out for a server that already exists: it needs neither a licence key nor GitHub.
+    await expect(page.getByRole('link', { name: 'Add an existing server' })).toBeVisible()
     await scan('get set up: nothing done yet')
 
     await saveKey(page, 'Main', KEY)

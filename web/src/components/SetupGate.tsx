@@ -1,9 +1,12 @@
 import { CheckCircle2, Circle } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { Alert } from '@/components/ui/alert'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { LicenceKeysCard } from '@/components/LicenceKeys'
 import { GithubSignIn } from '@/components/GithubSignIn'
 import { t } from '@/i18n'
+import { rich } from '@/i18n/react'
+import '@/i18n/en/install/installWizard'
 import '@/i18n/en/core/setupGate'
 
 function Step({ n, done, title, hint }: { n: number; done: boolean | null; title: string; hint: string }) {
@@ -25,6 +28,8 @@ export function SetupGate({ cfxReady, githubReady }: { cfxReady: boolean | null;
     <div className="mx-auto max-w-3xl space-y-5">
       <h1 className="font-heading text-2xl font-bold">{t('core.setupGate.title')}</h1>
       <Alert tone="info">{t('core.setupGate.intro')}</Alert>
+      {/* A way out that needs neither: a server that already exists is added without a licence key or GitHub. */}
+      <p className="text-sm text-muted-foreground">{rich('install.installWizard.alreadyServerComputerLink', { link: (c) => <Link to="/?add=1" className="text-info underline underline-offset-4">{c}</Link> })}</p>
       <Card>
         <CardHeader><CardTitle>{t('core.setupGate.checklist')}</CardTitle></CardHeader>
         <CardContent>
