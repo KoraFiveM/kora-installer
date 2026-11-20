@@ -1,4 +1,4 @@
-import { test, expect } from '../fixtures'
+import { test, expect, typeKeyIfAsked } from '../fixtures'
 
 const WHY = 'Your account (operator) cannot do this. Ask an administrator for admin access.'
 
@@ -62,7 +62,7 @@ test.describe('a local operator', () => {
 test.describe('a remote administrator with a token', () => {
   test('can install (the wizard opens), but deleting waits for the remote-actions switch', async ({ page, open, scan }) => {
     await open('/install', { as: 'remote-admin' })
-    await expect(page.getByLabel('Licence key', { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Your licence key' })).toBeVisible()
     await scan('wizard as a token administrator')
     await page.goto('/servers/kora-dev?tab=danger')
     await expect(page.getByRole('tab', { name: 'Danger zone' })).toHaveAttribute('aria-selected', 'true')
@@ -79,7 +79,7 @@ test.describe('a remote administrator with a token', () => {
 
   test('can finish a whole install from another device', async ({ page, open }) => {
     await open('/install', { as: 'remote-admin' })
-    await page.getByLabel('Licence key', { exact: true }).fill('cfxk_abcdefghij_12345')
+    await typeKeyIfAsked(page, 'cfxk_abcdefghij_12345')
     await page.getByRole('button', { name: 'Next' }).click()
     await page.getByRole('button', { name: 'Next' }).click()
     await expect(page.getByRole('button', { name: 'Install the server' })).toBeEnabled()

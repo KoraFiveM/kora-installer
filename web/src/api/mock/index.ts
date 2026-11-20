@@ -327,6 +327,8 @@ async function runInstall(req: T.InstallRequest, emit: (e: unknown) => void, job
   const lower = req.name.toLowerCase()
   if (run.attempt === 0 && lower.startsWith('nogh')) setMockGhInstalled(false)
   if (run.attempt === 0 && lower.startsWith('nodb')) stopMockDatabase()
+  // The GitHub sign-in lapses during the install (the checklist needed it at the start): the step that needs it stops until signing in again.
+  if (run.attempt === 0 && lower.startsWith('github')) prefs.github = false
   const failAt = lower.startsWith('nogh') && !mockGhInstalled() ? 'prepare.git' : lower.startsWith('nodb') && mockDbStoppedProblem() ? 'build.db' : lower.startsWith('fail') && run.attempt === 0 ? 'build.db' : lower.startsWith('skip') ? 'launch' : lower.startsWith('github') && !prefs.github ? 'prepare.git' : null
   const skipped = new Set<string>()
   if (!req.firewall) skipped.add('build.firewall')
@@ -1224,6 +1226,7 @@ export function installMock(opts: MockOptions = {}): ScenarioName {
   const name = opts.scenario ?? resolveScenario(window.location.search, safeStorage())
   init(name)
   viewer = resolveViewer(window.location.search, safeStorage())
+  applySetup(window.location.search, safeStorage())
   if (opts.speed !== undefined) speed = opts.speed
   startTicker()
   const real = realFetch ?? (realFetch = window.fetch.bind(window))
@@ -1237,6 +1240,23 @@ export function installMock(opts: MockOptions = {}): ScenarioName {
 }
 
 let realFetch: typeof window.fetch | null = null
+
+/**
+ * `?setup=done` starts the world with the first-time setup finished (GitHub signed in, licence keys saved), so a journey can
+ * go straight to the install wizard; `?setup=pending` (and the default) leaves both undone, which is what the setup checklist
+ * of the install wizard shows. Remembered for the tab like the scenario.
+ */
+function applySetup(search: string, storage: Storage | null) {
+  const key = 'kora-mock-setup'
+  let mode: string | null = null
+  try {
+    const q = new URLSearchParams(search).get('setup')
+    if (q === 'done' || q === 'pending') { storage?.setItem(key, q); mode = q } else mode = storage?.getItem(key) ?? null
+  } catch { /* storage blocked: the default (pending) */ }
+  if (mode !== 'done') return
+  prefs.github = true
+  keysMock.reset({ trouble: beh.trouble, withKeys: true })
+}
 
 /**
  * Who is looking, for the browser tests of what other people see: `?as=operator` (this computer, an operator),

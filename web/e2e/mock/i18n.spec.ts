@@ -7,6 +7,9 @@ import type { Page } from '@playwright/test'
 import { test, expect } from '../fixtures'
 import { pseudo } from '../../src/i18n/pseudo'
 
+// About signed-out and key-less states, not the setup checklist: start with the setup undone.
+test.use({ setupState: 'pending' })
+
 /**
  * What the mock backend says in English: server names, descriptions, alert and system-check texts. That is the SERVER's text,
  * not the panel's (docs/translations.md, "text from the server"): it is not a hard-coded string of the page.
@@ -155,8 +158,8 @@ test.describe('the pseudo-language', () => {
   }
 
   test('a journey in the pseudo-language: the wizard to its second step, then a danger-zone dialog', async ({ page, open }) => {
-    await open('/install', { lang: 'en-XA' })
-    await page.locator('input#licence-key').fill('cfxk_abcdefghij_12345')
+    await open('/install', { lang: 'en-XA', setup: 'done' })
+    // The setup is done, so a saved key is already picked.
     await page.getByRole('button', { name: pseudo('Next') }).click()
     await expect(page.getByLabel(pseudo('Server name'))).toBeVisible()
     expect(await plainEnglish(page)).toEqual([])

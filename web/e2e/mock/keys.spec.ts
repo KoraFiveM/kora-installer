@@ -1,5 +1,8 @@
 import { test, expect, keyForm, saveKey } from '../fixtures'
 
+// About signed-out and key-less states, not the setup checklist: start with the setup undone.
+test.use({ setupState: 'pending' })
+
 const MAIN = 'cfxk_MAINKEYMAINKEY12345_1111'
 const TEST = 'cfxk_TESTKEYTESTKEY12345_2222'
 
@@ -49,7 +52,11 @@ test.describe('saved licence keys', () => {
     await saveKey(page, 'Main', MAIN)
     await expect(page.getByText(/key ending 1111/).first()).toBeVisible()
     await page.getByRole('link', { name: 'Install new server' }).click()
-    await expect(page.getByRole('heading', { name: 'Your licence key' })).toBeVisible()
+    // The key is saved; GitHub is the one thing left on the checklist. Signing in opens the wizard.
+    await expect(page.getByRole('heading', { name: 'Get set up' })).toBeVisible()
+    await expect(page.getByText('Still to do')).toHaveCount(1)
+    await page.getByRole('button', { name: 'Sign in to GitHub' }).click()
+    await expect(page.getByRole('heading', { name: 'Your licence key' })).toBeVisible({ timeout: 30_000 })
     await expect(page.getByRole('radio', { name: /Main/ })).toBeChecked()
     await scan('wizard: saved licence key picked')
     await page.getByRole('button', { name: 'Next' }).click()

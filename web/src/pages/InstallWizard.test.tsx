@@ -11,6 +11,9 @@ import { AlertsProvider } from '@/lib/app'
 import { renderApp } from '@/test/utils'
 import { ToolchainActions } from '@/components/ToolchainActions'
 
+// These tests are about the steps, not the setup checklist (SetupGate.test.tsx): treat Cfx and GitHub as set up.
+vi.mock('@/pages/install/setup', () => ({ useSetup: () => ({ cfxReady: true, githubReady: true, blocked: false, settled: true }) }))
+
 beforeAll(() => {
   history.replaceState(null, '', '/')
   installMock() // the wizard runs against the built-in mock backend

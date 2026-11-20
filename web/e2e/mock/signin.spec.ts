@@ -5,6 +5,9 @@
 import type { CDPSession, Page } from '@playwright/test'
 import { test, expect } from '../fixtures'
 
+// About signed-out and key-less states, not the setup checklist: start with the setup undone.
+test.use({ setupState: 'pending' })
+
 const PORT = Number(process.env.E2E_MOCK_PORT ?? 4173)
 /** `localhost` is a name (a passkey can be registered for it) and a secure context; 127.0.0.1 is neither a name nor accepted as an ID. */
 const NAMED = `http://localhost:${PORT}`

@@ -38,13 +38,14 @@ test.describe('sign-in', () => {
 
 test.describe('the main pages', () => {
   test('first visit goes to the install wizard, which has a way out; the other pages load', async ({ signedIn: page }) => {
-    await expect(page.getByRole('heading', { name: 'Your licence key' })).toBeVisible()
+    // A new install has no Cfx.re licence key saved and no GitHub sign-in, so the wizard opens on the "Get set up" checklist.
+    await expect(page.getByRole('heading', { name: 'Get set up', level: 1 })).toBeVisible()
     await expect(page.getByRole('link', { name: 'Add an existing server' })).toBeVisible()
     for (const [link, heading] of [
       ['System check', 'System check'],
       ['Settings', 'Settings'],
       ['Fleet', 'Fleet'],
-      ['Install new server', 'Install a new server'],
+      ['Install new server', 'Get set up'],
       ['Servers', 'Your servers'],
     ] as const) {
       await page.getByRole('link', { name: link, exact: true }).click()
@@ -116,17 +117,12 @@ test.describe('the real checks', () => {
     }
   })
 
-  test('the install wizard gets real suggestions, kept inside the throw-away home, and is not started', async ({ signedIn: page, panel }) => {
+  test('the install wizard waits for a licence key and a GitHub sign-in, and says what to do about each', async ({ signedIn: page }) => {
+    // Needs the real GitHub sign-in, which this layer does not have: the checklist is what a new install shows, and no other page is held back.
     await page.getByRole('link', { name: 'Install new server', exact: true }).click()
-    await page.getByLabel('Licence key', { exact: true }).fill('cfxk_abcdefghij_12345')
-    await page.getByRole('button', { name: 'Next' }).click()
-    await expect(page.getByLabel('Server name')).not.toHaveValue('')
-    await page.getByRole('button', { name: 'Next' }).click()
-    await expect(page.getByRole('heading', { name: 'Check and install' })).toBeVisible()
-    // The suggested folder is under the isolated HOME, so nothing of the machine's own is touched.
-    await expect(page.getByText(panel.root, { exact: false }).first()).toBeVisible()
-    await expect(page.getByText('Game 30120, txAdmin 40120').or(page.getByText(/Game \d+, txAdmin \d+/))).toBeVisible()
-    // Wait for the real checks (disk space, ports, rights) to answer. The Install button is not pressed in this layer.
-    await expect(page.getByText(/Disk space/)).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByRole('heading', { name: 'Get set up', level: 1 })).toBeVisible()
+    await expect(page.getByText('Still to do')).toHaveCount(2)
+    await expect(page.getByRole('button', { name: 'Save key' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Settings', exact: true })).toBeVisible()
   })
 })
