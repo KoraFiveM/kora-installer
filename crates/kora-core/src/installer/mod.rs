@@ -190,12 +190,8 @@ pub fn load_catalog(req: &InstallRequest, hooks: &Hooks) -> Result<(Catalog, Opt
             Ok((Catalog::parse_validated(&text).map_err(|e| Problem::generic(e.to_string()))?, None))
         }
         None => {
-            let (c, origin) = catalog::load(&hooks.http, catalog::CATALOG_URL).map_err(|e| Problem::generic(e.to_string()))?;
-            let note = match origin {
-                catalog::CatalogOrigin::Remote => None,
-                catalog::CatalogOrigin::Embedded(why) => Some(format!("Used the catalog bundled with this installer ({why}).")),
-            };
-            Ok((c, note))
+            let c = catalog::load(&hooks.http, catalog::CATALOG_URL).map_err(|e| Problem::generic(format!("could not read the Kora release list from GitHub: {e}")))?;
+            Ok((c, None))
         }
     }
 }

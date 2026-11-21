@@ -635,12 +635,11 @@ fn production_lists_resources_the_catalog_dropped_and_warns_about_the_built_in_c
         ..Default::default()
     });
     let cat = prod_cat(&env, &[("0.2.0", &c2), ("0.1.0", &c1)], "0.2.0");
-    let note = catalog_note(&catalog::CatalogOrigin::Embedded("offline".into()));
+    let note = Some("the release list is a test fixture".to_string());
     let p = preview_with_hints(&sf, Scope::All, &GitCli::default(), Some(&cat), note.as_deref(), None).unwrap();
-    assert!(p.notes.iter().any(|n| n.contains("built into this version of Kora")), "{:?}", p.notes);
+    assert!(p.notes.iter().any(|n| n.contains("test fixture")), "{:?}", p.notes);
     assert!(p.notes.iter().any(|n| n == "kora-gone: no longer in the catalog (left as is)"), "{:?}", p.notes);
     assert!(render_preview(&p).contains("Note: kora-gone"));
-    assert_eq!(catalog_note(&catalog::CatalogOrigin::Remote), None);
 }
 
 #[test]

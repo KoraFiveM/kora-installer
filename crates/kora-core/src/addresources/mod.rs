@@ -61,15 +61,10 @@ pub fn installed_ids(server: &ServerFile) -> Vec<String> {
     server.resources.iter().map(|r| r.id.clone()).collect()
 }
 
-/// Load the catalog (remote, with the embedded snapshot as fallback). The note says when the
-/// bundled copy was used.
+/// Load the live catalog from GitHub. It fails if it cannot be read: there is no bundled copy.
 pub fn load_catalog() -> Result<(Catalog, Option<String>)> {
-    let (c, origin) = catalog::load(&crate::installer::HttpClient::default(), catalog::CATALOG_URL).map_err(|e| Problem::generic(e.to_string()))?;
-    let note = match origin {
-        catalog::CatalogOrigin::Remote => None,
-        catalog::CatalogOrigin::Embedded(why) => Some(format!("Used the catalog bundled with this installer ({why}).")),
-    };
-    Ok((c, note))
+    let c = catalog::load(&crate::installer::HttpClient::default(), catalog::CATALOG_URL).map_err(|e| Problem::generic(format!("could not read the Kora release list from GitHub: {e}")))?;
+    Ok((c, None))
 }
 
 /// What to install for `ids` (plus dependencies) on `server`.

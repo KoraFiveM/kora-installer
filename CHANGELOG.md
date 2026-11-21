@@ -5,6 +5,9 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **The release list always comes from GitHub.** Installing, adding resources and updating production servers read the live catalog every time. If it cannot be read (no internet, GitHub unreachable, or an invalid catalog) the action stops with a clear message instead of falling back to a copy built into the installer, so a server is never installed or updated from an out-of-date list. The built-in copy is now used by the tests only.
+
 ## [0.8.4] - 2026-11-20
 
 The install wizard now makes sure a Cfx.re licence key and a GitHub sign-in are set up first.

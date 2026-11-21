@@ -524,23 +524,13 @@ fn record_hints(hints: Option<&mut OrgHints>, targets: &[UpdateTarget], slugs: &
     h.save();
 }
 
-/// The catalog a production server compares against, and a warning when it is the built-in copy.
+/// The live catalog a production server compares against (an error if it cannot be read: there is no built-in copy).
 fn load_catalog_if_needed(server: &ServerRecord) -> Result<(Option<Catalog>, Option<String>)> {
     if server.versions() != Versions::Released {
         return Ok((None, None));
     }
-    let (c, origin) = catalog::load(&HttpClient::default(), catalog::CATALOG_URL).map_err(|e| Problem::generic(e.to_string()))?;
-    Ok((Some(c), catalog_note(&origin)))
-}
-
-/// The warning for a catalog that did not come from the internet (None for the live one).
-pub fn catalog_note(origin: &catalog::CatalogOrigin) -> Option<String> {
-    match origin {
-        catalog::CatalogOrigin::Remote => None,
-        catalog::CatalogOrigin::Embedded(why) => {
-            Some(format!("the online release list could not be read ({why}), so the list built into this version of Kora was used: newer releases may be missing"))
-        }
-    }
+    let c = catalog::load(&HttpClient::default(), catalog::CATALOG_URL).map_err(|e| Problem::generic(format!("could not read the Kora release list from GitHub: {e}")))?;
+    Ok((Some(c), None))
 }
 
 /// [`preview`] with injected git and catalog.
