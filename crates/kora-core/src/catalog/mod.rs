@@ -13,7 +13,10 @@ pub use pick::{PickError, Picker, Section};
 /// GitHub, so a change is live as soon as it is merged, without waiting for the docs site to deploy).
 pub const CATALOG_URL: &str = "https://raw.githubusercontent.com/KoraFiveM/kora_docs_next/main/catalog/resources.json";
 
-/// Snapshot of the catalog embedded in the binary (refreshed by CI).
+/// A fixed copy of the catalog for tests. It is compiled in only for tests (and for other crates'
+/// tests through the `fake` feature), never into the installer: the installer always reads the
+/// live catalog from GitHub ([`CATALOG_URL`]) and does not fall back to an older copy.
+#[cfg(any(test, feature = "fake"))]
 pub const EMBEDDED_SNAPSHOT: &str = include_str!("../../assets/resources.json");
 
 #[derive(Debug, thiserror::Error)]
@@ -304,6 +307,8 @@ impl Catalog {
         Ok(c)
     }
 
+    /// The test fixture catalog (see [`EMBEDDED_SNAPSHOT`]).
+    #[cfg(any(test, feature = "fake"))]
     pub fn embedded() -> Result<Catalog, CatalogError> {
         Self::parse_validated(EMBEDDED_SNAPSHOT)
     }
@@ -447,20 +452,12 @@ pub trait CatalogSource {
     fn fetch(&self, url: &str) -> Result<String, String>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CatalogOrigin {
-    Remote,
-    /// Fell back to the embedded snapshot; carries the reason.
-    Embedded(String),
-}
-
-/// Load from `url`; on any fetch/parse/validation failure use the embedded snapshot.
-pub fn load(source: &dyn CatalogSource, url: &str) -> Result<(Catalog, CatalogOrigin), CatalogError> {
-    let remote = source.fetch(url).map_err(CatalogError::Fetch).and_then(|t| Catalog::parse_validated(&t));
-    match remote {
-        Ok(c) => Ok((c, CatalogOrigin::Remote)),
-        Err(e) => Ok((Catalog::embedded()?, CatalogOrigin::Embedded(e.to_string()))),
-    }
+/// Load the live catalog from `url`. There is deliberately no fallback to an older copy: a catalog
+/// that cannot be fetched, parsed or validated is an error, so a server is never installed or
+/// updated from stale release information.
+pub fn load(source: &dyn CatalogSource, url: &str) -> Result<Catalog, CatalogError> {
+    let text = source.fetch(url).map_err(CatalogError::Fetch)?;
+    Catalog::parse_validated(&text)
 }
 
 #[cfg(test)]
@@ -528,14 +525,11 @@ mod tests {
     }
 
     #[test]
-    fn remote_then_fallback() {
-        let (c, o) = load(&Fake(Ok(EMBEDDED_SNAPSHOT.into())), CATALOG_URL).unwrap();
-        assert_eq!(o, CatalogOrigin::Remote);
+    fn load_reads_the_live_catalog_and_never_falls_back() {
+        let c = load(&Fake(Ok(EMBEDDED_SNAPSHOT.into())), CATALOG_URL).unwrap();
         assert!(!c.resources.is_empty());
-        for bad in [Err("offline".to_string()), Ok("{nope".to_string())] {
-            let (_, o) = load(&Fake(bad), CATALOG_URL).unwrap();
-            assert!(matches!(o, CatalogOrigin::Embedded(_)));
-        }
+        assert!(matches!(load(&Fake(Err("offline".into())), CATALOG_URL), Err(CatalogError::Fetch(_))));
+        assert!(matches!(load(&Fake(Ok("{nope".into())), CATALOG_URL), Err(CatalogError::Parse(_))));
     }
 
     #[test]
