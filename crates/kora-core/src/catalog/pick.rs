@@ -358,15 +358,15 @@ mod tests {
     }
 
     #[test]
-    fn the_embedded_catalog_offers_fft_only_to_development_servers() {
+    fn the_embedded_catalog_keeps_fft_internal() {
         let c = Catalog::embedded().unwrap();
-        assert_eq!(ids(c.section(Section::Development, true)), ["fft"]);
+        assert!(c.section(Section::Development, true).is_empty());
         assert!(c.section(Section::Development, false).is_empty());
         assert_eq!(Section::for_mode(false), Section::ALL.to_vec());
         assert_eq!(Section::for_mode(true).last(), Some(&Section::Development));
         let mut dev = Picker::new(&c, [], true);
-        assert_eq!(dev.toggle("fft"), Ok(true));
+        assert!(dev.toggle("fft").is_err());
         let mut prod = Picker::new(&c, [], false);
-        assert!(matches!(prod.toggle("fft"), Err(PickError::DevOnly(_))));
+        assert!(prod.toggle("fft").is_err());
     }
 }
