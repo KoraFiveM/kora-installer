@@ -584,7 +584,7 @@ mod tests {
     fn version_resolution() {
         let c = Catalog::embedded().unwrap();
         let lib = c.find("kora-lib").unwrap();
-        assert_eq!(lib.resolve(Mode::Prod), ResolvedVersion::Pinned { version: "0.2.1".into(), tag: "v0.2.1".into(), commit: "6e5dd02ce6dab6cf7380336d7e6a91b1ed2fd126".into() });
+        assert_eq!(lib.resolve(Mode::Prod), ResolvedVersion::Pinned { version: "0.2.2".into(), tag: "v0.2.2".into(), commit: "c5c87fbd83198b9f55d40ca8feb8e8b13f3e3bca".into() });
         assert_eq!(lib.resolve(Mode::Dev), ResolvedVersion::BranchHead { branch: "dev".into() });
         let dep = c.resources.iter().find(|r| r.versions.is_empty()).unwrap();
         assert!(matches!(dep.resolve(Mode::Prod), ResolvedVersion::BranchHead { .. }));
