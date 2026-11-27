@@ -147,8 +147,8 @@ pub fn select_resources<'a>(cat: &'a Catalog, sel: &ResourceSelection, dev: bool
     let ordered = cat.install_order();
     let seeds: Vec<String> = match sel {
         // Compat / bridge / creator resources are never selected by default (only through dependencies),
-        // and development-only ones are never selected by default either.
-        ResourceSelection::All => ordered.iter().filter(|r| r.res_type.is_none() && !r.dev_only && matches!(r.kind, Kind::Kora | Kind::Dependency)).map(|r| r.id.clone()).collect(),
+        // development-only ones neither; optional ones only when the catalog flags them `defaultOn`.
+        ResourceSelection::All => ordered.iter().filter(|r| r.installs_by_default()).map(|r| r.id.clone()).collect(),
         ResourceSelection::Only(ids) => {
             for w in ids.iter().map(|i| norm_id(i)) {
                 match cat.find_normalized(&w) {
@@ -1076,6 +1076,18 @@ mod tests {
               {extra}]}}"#
         );
         Catalog::parse_validated(&json).unwrap()
+    }
+
+    #[test]
+    fn optional_default_on_is_in_everything_but_not_in_a_custom_pick() {
+        let cat = tiny_catalog(
+            r#",{"id":"kora-peds","repository":"https://github.com/o/peds.git","path":"[peds]/peds","group":"other","kind":"optional","defaultOn":true,"branch":"main","order":5,"latest":"1.0.0","versions":[{"version":"1.0.0","tag":"v1.0.0","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}"#,
+        );
+        let ids = |sel: &ResourceSelection| select_resources(&cat, sel, false).unwrap().into_iter().map(|r| r.id.clone()).collect::<Vec<_>>();
+        assert!(ids(&ResourceSelection::All).contains(&"kora-peds".to_string()), "default-on optional is part of everything");
+        assert!(!ids(&ResourceSelection::All).contains(&"kora-chat".to_string()), "plain optional still is not");
+        assert!(!ids(&ResourceSelection::Only(vec!["kora-chat".into()])).contains(&"kora-peds".to_string()), "a custom pick can opt out");
+        assert!(ids(&ResourceSelection::Only(vec!["kora-peds".into()])).contains(&"kora-peds".to_string()));
     }
 
     #[test]

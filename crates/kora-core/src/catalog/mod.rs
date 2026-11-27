@@ -145,6 +145,10 @@ pub struct Resource {
     /// Servers that already have it keep it (updates list it as no longer in the catalog).
     #[serde(default, skip_serializing_if = "is_false")]
     pub retired: bool,
+    /// Only meaningful for `kind: optional`: the resource is installed by default (included in
+    /// "everything", pre-ticked in the picker) but the user may opt out. Absent = false.
+    #[serde(default, rename = "defaultOn", skip_serializing_if = "is_false")]
+    pub default_on: bool,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -223,6 +227,13 @@ impl Resource {
             (Mode::Prod, Some(r)) => ResolvedVersion::Pinned { version: r.version.clone(), tag: r.tag.clone(), commit: r.commit.clone() },
             _ => ResolvedVersion::BranchHead { branch: self.branch.clone() },
         }
+    }
+
+    /// Part of the default ("everything") install: Kora and dependency resources, plus optional
+    /// ones flagged `defaultOn` (e.g. kora_peds). Compat, bridge, creator and development-only
+    /// resources are never installed by default.
+    pub fn installs_by_default(&self) -> bool {
+        self.res_type.is_none() && !self.dev_only && (matches!(self.kind, Kind::Kora | Kind::Dependency) || (self.kind == Kind::Optional && self.default_on))
     }
 
     pub fn is_internal(&self) -> bool {

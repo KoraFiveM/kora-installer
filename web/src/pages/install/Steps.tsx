@@ -153,13 +153,15 @@ export function ResourcesStep({ f, set }: StepProps) {
   const cat = useQuery({ queryKey: ['catalog'], queryFn: api.catalog })
   const [query, setQuery] = useState('')
   const groups = useMemo(() => groupResources((cat.data?.resources ?? []).filter((r) => r.group !== 'pre' && r.kind !== 'dependency' && (f.versions === 'latest' || !r.dev_only)), query), [cat.data, query, f.versions])
+  // Optional resources the catalog installs by default (e.g. kora_peds): ticked when the user starts picking, and still untickable.
+  const defaultOn = useMemo(() => (cat.data?.resources ?? []).filter((r) => r.default_on && (f.versions === 'latest' || !r.dev_only)).map((r) => r.id), [cat.data, f.versions])
   const toggle = (id: string) => set({ resourceIds: f.resourceIds.includes(id) ? f.resourceIds.filter((x) => x !== id) : [...f.resourceIds, id] })
   return (
     <div className="space-y-4">
       <fieldset className="space-y-3">
         <legend className="mb-2 text-sm text-muted-foreground">{t('install.steps.whichKoraResourcesShould')}</legend>
         <Radio name="res" checked={f.resourcesAll} onChange={() => set({ resourcesAll: true })} label={t('install.steps.everything')} hint={t('install.steps.allKoraResourcesThings')} />
-        <Radio name="res" checked={!f.resourcesAll} onChange={() => set({ resourcesAll: false })} label={t('install.steps.letMePick')} hint={t('install.steps.coreWhatDependsAlways')} />
+        <Radio name="res" checked={!f.resourcesAll} onChange={() => set({ resourcesAll: false, resourceIds: f.resourceIds.length ? f.resourceIds : defaultOn })} label={t('install.steps.letMePick')} hint={t('install.steps.coreWhatDependsAlways')} />
       </fieldset>
       {!f.resourcesAll && (
         <div className="space-y-3">

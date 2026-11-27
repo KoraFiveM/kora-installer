@@ -85,6 +85,7 @@ export function seedCatalog(): Catalog {
       res('oxmysql', 'pre', 'dependency', { title: 'oxmysql (database)', description: 'Connects resources to the database.', creator: undefined }),
       res('ox_lib', 'pre', 'dependency', { title: 'ox_lib (helpers)', description: 'Shared helper library used by many resources.' }),
       res('kora_core', 'kora', 'kora', { description: 'The Kora framework core.', depends_on: ['oxmysql', 'ox_lib'] }),
+      res('kora_peds', 'other', 'optional', { description: 'Kora android fox add-on peds. Optional, installed by default.', default_on: true }),
       res('kora_inventory', 'kora', 'kora', { description: 'Player inventory and items.', depends_on: ['kora_core'] }),
       res('kora_jobs', 'kora', 'kora', { description: 'Jobs, duty and payroll.', depends_on: ['kora_core'] }),
       res('kora_phone', 'kora', 'kora', { description: 'In-game phone.', depends_on: ['kora_core', 'kora_inventory'] }),

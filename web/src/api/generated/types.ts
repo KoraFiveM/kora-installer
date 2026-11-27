@@ -1083,6 +1083,10 @@ export type CatalogResource = {
   depends_on: Array<string>,
   creator?: string,
   dev_only?: boolean,
+  /**
+   * Optional resource that is installed by default (pre-ticked in the picker).
+   */
+  default_on?: boolean,
 };
 
 /**
