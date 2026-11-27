@@ -88,6 +88,7 @@ fn resource_json(r: &Resource) -> wire::CatalogResource {
         depends_on: r.depends_on.clone(),
         creator: r.creator.clone(),
         dev_only: r.dev_only.then_some(true),
+        default_on: r.default_on.then_some(true),
     }
 }
 

@@ -160,6 +160,10 @@ pub struct CatalogResource {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub dev_only: Option<bool>,
+    /// Optional resource that is installed by default (pre-ticked in the picker).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub default_on: Option<bool>,
 }
 
 /// `GET /catalog`.

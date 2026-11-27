@@ -29,7 +29,7 @@ pub enum DbChoice {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResourceSelection {
-    /// Every catalog entry with kind kora|dependency (never internal).
+    /// Every catalog entry with kind kora|dependency, plus optional ones flagged `defaultOn` (never internal).
     All,
     /// Dependencies + core (pre group) + these ids.
     Only(Vec<String>),
